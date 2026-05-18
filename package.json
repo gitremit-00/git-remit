@@ -1,0 +1,22 @@
+{
+  "name": "git-remit-contracts",
+  "version": "1.0.0",
+  "description": "GitRemit smart contracts for OFW Payment Pledge System",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:mockusdc": "hardhat run scripts/deployMockUSDC.js --network morphTestnet",
+    "deploy": "hardhat run scripts/deploy.js --network morphTestnet",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "node": "hardhat node",
+    "coverage": "hardhat coverage"
+  },
+  "devDependencies": {
+    "hardhat": "^2.22.0",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0",
+    "dotenv": "^16.4.0"
+  }
+}

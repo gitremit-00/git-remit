@@ -1,0 +1,20 @@
+# Environment — NEVER commit private keys
+.env
+.env.local
+.env.*.local
+
+# Hardhat
+cache/
+artifacts/
+node_modules/
+
+# Deployments with sensitive data
+# (keep deployments/ tracked so M2/M3 get the addresses)
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Next.js
+.next/
+out/
