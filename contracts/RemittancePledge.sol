@@ -18,7 +18,7 @@ contract RemittancePledge is ReentrancyGuard {
     // Weights in basis points (out of 10000)
     uint256 public constant WEIGHT_ON_TIME = 10000; // 100%
     uint256 public constant WEIGHT_LATE    = 7000;  // 70%
-    uint256 public constant WEIGHT_DEFAULT = 0;     // 0%
+    // defaults contribute 0 to weightedScore — only totalWeight is incremented
 
     // Minimum deposit tiers based on trust score (in basis points)
     // Score >= 8000 (80%) → 20% deposit
@@ -36,7 +36,7 @@ contract RemittancePledge is ReentrancyGuard {
     uint256 public constant DEPOSIT_TIER_RISK = 50; // 50% upfront
 
     // ── Types ──────────────────────────────────────────────────────────────────
-    enum PledgeStatus { PENDING, COMPLETED, DEFAULTED, DISPUTED }
+    enum PledgeStatus { PENDING, COMPLETED, DEFAULTED, CANCELLED }
 
     struct Pledge {
         uint256 id;
@@ -55,14 +55,29 @@ contract RemittancePledge is ReentrancyGuard {
         uint256 lateCount;
         uint256 defaultCount;
         uint256 totalCount;
+        uint256 weightedScore; // sum of (pledgeAmount * weight) across resolved pledges
+        uint256 totalWeight;   // sum of pledgeAmount across resolved pledges
     }
+
+    // Max concurrent active pledges per trust tier
+    uint256 public constant MAX_ACTIVE_NO_HISTORY = 2;
+    uint256 public constant MAX_ACTIVE_MID        = 3;
+    uint256 public constant MAX_ACTIVE_HIGH       = 5;
+
+    // Protocol fee: 1% of completed pledge amount (in basis points, out of 10000)
+    uint256 public constant FEE_BPS = 100; // 1%
+
+    // If merchant never claims after a default, sender can reclaim after this period
+    uint256 public constant UNCLAIMED_TIMEOUT = 180 days;
 
     // ── State ──────────────────────────────────────────────────────────────────
     IERC20 public immutable usdc;
+    address public immutable feeRecipient;
     uint256 public pledgeCounter;
 
     mapping(uint256 => Pledge) public pledges;
     mapping(address => Reputation) public reputations;
+    mapping(address => uint256) public activePledgeCount;
     mapping(address => uint256[]) private senderPledgeIds;
     mapping(address => uint256[]) private merchantPledgeIds;
 
@@ -77,14 +92,20 @@ contract RemittancePledge is ReentrancyGuard {
     );
     event PledgeCompleted(uint256 indexed pledgeId, address indexed merchant, uint256 amount);
     event PledgeDefaulted(uint256 indexed pledgeId, address indexed merchant, uint256 amount);
+    event FeeCollected(uint256 indexed pledgeId, address indexed feeRecipient, uint256 fee);
+    event DepositReclaimed(uint256 indexed pledgeId, address indexed sender, uint256 amount);
+    event PledgeCancelled(uint256 indexed pledgeId, address indexed sender, address indexed merchant, uint256 refund);
     event DeadlineExtended(uint256 indexed pledgeId, uint256 oldDate, uint256 newDate);
     event DepositMade(uint256 indexed pledgeId, address indexed sender, uint256 amount, uint256 totalDeposited);
 
     // ── Constructor ────────────────────────────────────────────────────────────
     /// @param _usdcToken Address of the USDC token contract (MockUSDC on testnet)
-    constructor(address _usdcToken) {
+    /// @param _feeRecipient Address that receives the 1% protocol fee on completed pledges
+    constructor(address _usdcToken, address _feeRecipient) {
         require(_usdcToken != address(0), "Invalid USDC address");
+        require(_feeRecipient != address(0), "Invalid fee recipient");
         usdc = IERC20(_usdcToken);
+        feeRecipient = _feeRecipient;
     }
 
     // ── Write Functions ────────────────────────────────────────────────────────
@@ -103,6 +124,9 @@ contract RemittancePledge is ReentrancyGuard {
         require(merchant != address(0), "Invalid merchant address");
         require(merchant != msg.sender, "Sender cannot be merchant");
         require(totalAmount > 0, "Total amount must be > 0");
+
+        uint256 maxActive = getMaxActivePledges(msg.sender);
+        require(activePledgeCount[msg.sender] < maxActive, "Active pledge limit reached for your trust tier");
 
         uint256 requiredPct = getRequiredDepositPct(msg.sender);
         require(
@@ -137,6 +161,7 @@ contract RemittancePledge is ReentrancyGuard {
         senderPledgeIds[msg.sender].push(pledgeId);
         merchantPledgeIds[merchant].push(pledgeId);
         reputations[msg.sender].totalCount++;
+        activePledgeCount[msg.sender]++;
 
         require(
             usdc.transferFrom(msg.sender, address(this), initialDeposit),
@@ -204,6 +229,8 @@ contract RemittancePledge is ReentrancyGuard {
 
         Reputation storage rep = reputations[pledge.sender];
         rep.defaultCount++;
+        rep.totalWeight += pledge.totalAmount;
+        activePledgeCount[pledge.sender]--;
 
         require(
             usdc.transfer(pledge.merchant, claimAmount),
@@ -213,6 +240,33 @@ contract RemittancePledge is ReentrancyGuard {
         emit PledgeDefaulted(pledgeId, pledge.merchant, claimAmount);
     }
 
+
+    /// @notice Reclaim deposit if merchant never claimed after 180 days past the grace period
+    /// @param pledgeId ID of the unclaimed defaulted pledge
+    function reclaimDeposit(uint256 pledgeId) external nonReentrant {
+        Pledge storage pledge = pledges[pledgeId];
+
+        require(pledge.id != 0, "Pledge does not exist");
+        require(msg.sender == pledge.sender, "Only sender can reclaim");
+        require(pledge.status == PledgeStatus.PENDING, "Pledge not pending");
+        require(
+            block.timestamp > pledge.commitmentDate + GRACE_PERIOD + UNCLAIMED_TIMEOUT,
+            "Reclaim period not reached yet"
+        );
+
+        uint256 amount = pledge.depositedAmount;
+        pledge.status = PledgeStatus.DEFAULTED;
+        pledge.depositedAmount = 0;
+
+        Reputation storage rep = reputations[pledge.sender];
+        rep.defaultCount++;
+        rep.totalWeight += pledge.totalAmount;
+        activePledgeCount[pledge.sender]--;
+
+        require(usdc.transfer(pledge.sender, amount), "USDC transfer failed");
+
+        emit DepositReclaimed(pledgeId, pledge.sender, amount);
+    }
 
     /// @notice Extend a pledge deadline with merchant's off-chain signature approval
     /// @param pledgeId ID of the pledge to extend
@@ -249,6 +303,34 @@ contract RemittancePledge is ReentrancyGuard {
         emit DeadlineExtended(pledgeId, oldDate, newDate);
     }
 
+    /// @notice Cancel a pledge by mutual agreement — sender calls with merchant's signature
+    /// @param pledgeId ID of the pledge to cancel
+    /// @param merchantSig Merchant's ECDSA signature approving the cancellation
+    function cancelPledge(uint256 pledgeId, bytes calldata merchantSig) external nonReentrant {
+        Pledge storage pledge = pledges[pledgeId];
+
+        require(pledge.id != 0, "Pledge does not exist");
+        require(msg.sender == pledge.sender, "Only sender can cancel");
+        require(pledge.status == PledgeStatus.PENDING, "Pledge not pending");
+        require(block.timestamp < pledge.commitmentDate, "Cannot cancel after deadline");
+
+        bytes32 msgHash = keccak256(
+            abi.encodePacked(pledgeId, "cancel", address(this))
+        );
+        bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(msgHash);
+        address recovered = ECDSA.recover(ethHash, merchantSig);
+        require(recovered == pledge.merchant, "Invalid merchant signature");
+
+        uint256 refund = pledge.depositedAmount;
+        pledge.status = PledgeStatus.CANCELLED;
+        pledge.depositedAmount = 0;
+        activePledgeCount[pledge.sender]--;
+
+        require(usdc.transfer(pledge.sender, refund), "USDC transfer failed");
+
+        emit PledgeCancelled(pledgeId, pledge.sender, pledge.merchant, refund);
+    }
+
     // ── Internal ───────────────────────────────────────────────────────────────
 
     function _releaseFunds(uint256 pledgeId) internal {
@@ -261,16 +343,22 @@ contract RemittancePledge is ReentrancyGuard {
         Reputation storage rep = reputations[pledge.sender];
         if (pledge.paidDuringGrace) {
             rep.lateCount++;
+            rep.weightedScore += pledge.totalAmount * WEIGHT_LATE;
         } else {
             rep.onTimeCount++;
+            rep.weightedScore += pledge.totalAmount * WEIGHT_ON_TIME;
         }
+        rep.totalWeight += pledge.totalAmount;
+        activePledgeCount[pledge.sender]--;
 
-        require(
-            usdc.transfer(pledge.merchant, amount),
-            "USDC transfer failed"
-        );
+        uint256 fee = (amount * FEE_BPS) / 10000;
+        uint256 merchantAmount = amount - fee;
 
-        emit PledgeCompleted(pledgeId, pledge.merchant, amount);
+        require(usdc.transfer(feeRecipient, fee), "Fee transfer failed");
+        require(usdc.transfer(pledge.merchant, merchantAmount), "USDC transfer failed");
+
+        emit FeeCollected(pledgeId, feeRecipient, fee);
+        emit PledgeCompleted(pledgeId, pledge.merchant, merchantAmount);
     }
 
     // ── View Functions ─────────────────────────────────────────────────────────
@@ -294,12 +382,8 @@ contract RemittancePledge is ReentrancyGuard {
     {
         Reputation storage rep = reputations[wallet];
         uint256 score = 0;
-        if (rep.totalCount > 0) {
-            score = (
-                (rep.onTimeCount * WEIGHT_ON_TIME) +
-                (rep.lateCount   * WEIGHT_LATE) +
-                (rep.defaultCount * WEIGHT_DEFAULT)
-            ) / rep.totalCount;
+        if (rep.totalWeight > 0) {
+            score = rep.weightedScore / rep.totalWeight;
         }
         return (score, rep.onTimeCount, rep.lateCount, rep.defaultCount, rep.totalCount);
     }
@@ -320,22 +404,29 @@ contract RemittancePledge is ReentrancyGuard {
         return merchantPledgeIds[merchant];
     }
 
+    /// @notice Get the maximum number of concurrent active pledges allowed for a sender
+    /// @return max Allowed active pledge count (2, 3, or 5)
+    function getMaxActivePledges(address sender) public view returns (uint256 max) {
+        Reputation storage rep = reputations[sender];
+
+        if (rep.totalWeight == 0) return MAX_ACTIVE_NO_HISTORY;
+
+        uint256 score = rep.weightedScore / rep.totalWeight;
+
+        if (score >= TIER_HIGH) return MAX_ACTIVE_HIGH;
+        if (score >= TIER_MID)  return MAX_ACTIVE_MID;
+        return MAX_ACTIVE_NO_HISTORY;
+    }
+
     /// @notice Get the required upfront deposit percentage for a sender based on their trust score
     /// @return pct Required deposit percentage (20, 30, 40, or 50)
     function getRequiredDepositPct(address sender) public view returns (uint256 pct) {
         Reputation storage rep = reputations[sender];
 
-        // Base score only on resolved pledges (completed + late + defaulted)
-        uint256 resolved = rep.onTimeCount + rep.lateCount + rep.defaultCount;
-
         // No resolved history yet — standard 20%
-        if (resolved == 0) return DEPOSIT_TIER_HIGH;
+        if (rep.totalWeight == 0) return DEPOSIT_TIER_HIGH;
 
-        uint256 score = (
-            (rep.onTimeCount * WEIGHT_ON_TIME) +
-            (rep.lateCount   * WEIGHT_LATE) +
-            (rep.defaultCount * WEIGHT_DEFAULT)
-        ) / resolved;
+        uint256 score = rep.weightedScore / rep.totalWeight;
 
         if (score >= TIER_HIGH) return DEPOSIT_TIER_HIGH; // 80%+ score → 20% deposit
         if (score >= TIER_MID)  return DEPOSIT_TIER_MID;  // 50%+ score → 30% deposit
