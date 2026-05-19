@@ -23,7 +23,7 @@ async function main() {
 
   console.log(">> Deploying RemittancePledge...");
   const RemittancePledge = await ethers.getContractFactory("RemittancePledge");
-  const contract = await RemittancePledge.deploy(await usdc.getAddress());
+  const contract = await RemittancePledge.deploy(await usdc.getAddress(), deployer.address);
   console.log("   RemittancePledge deployed to:", await contract.getAddress());
   console.log("");
 
@@ -100,15 +100,15 @@ async function main() {
 
   await usdc.connect(sender).approve(await contract.getAddress(), USDC(1000));
   const commitDate3 = (await time.latest()) + 5 * DAY;
-  console.log(">> Sender creates pledge: 100 USDC total, 30 USDC deposit, 5-day deadline");
-  await contract.connect(sender).createPledge(merchant.address, USDC(100), USDC(30), commitDate3);
+  console.log(">> Sender creates pledge: 100 USDC total, 40 USDC deposit (40% tier after default), 5-day deadline");
+  await contract.connect(sender).createPledge(merchant.address, USDC(100), USDC(40), commitDate3);
 
-  console.log(">> Fast-forwarding past deadline + grace period + claim window (33 days)...");
-  await time.increaseTo(commitDate3 + 3 * DAY + 30 * DAY + 1);
+  console.log(">> Fast-forwarding past deadline + grace period + 180-day unclaimed timeout...");
+  await time.increaseTo(commitDate3 + 3 * DAY + 180 * DAY + 1);
 
   const senderBefore3 = await usdc.balanceOf(sender.address);
-  console.log(">> Sender calls refundSender()...");
-  await contract.connect(sender).refundSender(3);
+  console.log(">> Sender calls reclaimDeposit()...");
+  await contract.connect(sender).reclaimDeposit(3);
 
   const pledge3 = await contract.getPledge(3);
   console.log("   Status:", statusLabel(pledge3.status));
@@ -124,15 +124,15 @@ async function main() {
 
   await usdc.connect(sender).approve(await contract.getAddress(), USDC(1000));
   const commitDate4 = (await time.latest()) + 7 * DAY;
-  console.log(">> Sender creates pledge: 100 USDC total, 20 USDC deposit, 7-day deadline");
-  await contract.connect(sender).createPledge(merchant.address, USDC(100), USDC(20), commitDate4);
+  console.log(">> Sender creates pledge: 100 USDC total, 40 USDC deposit (40% tier), 7-day deadline");
+  await contract.connect(sender).createPledge(merchant.address, USDC(100), USDC(40), commitDate4);
 
   console.log(">> Fast-forwarding past deadline but within grace period (1 day late)...");
   await time.increaseTo(commitDate4 + 1 * DAY);
 
-  console.log(">> Sender deposits remaining 80 USDC during grace period...");
+  console.log(">> Sender deposits remaining 60 USDC during grace period...");
   const merchantBefore4 = await usdc.balanceOf(merchant.address);
-  await contract.connect(sender).depositRemaining(4, USDC(80));
+  await contract.connect(sender).depositRemaining(4, USDC(60));
 
   const pledge4 = await contract.getPledge(4);
   console.log("   Status:", statusLabel(pledge4.status));
@@ -158,7 +158,7 @@ async function main() {
 }
 
 function statusLabel(status) {
-  return ["PENDING", "COMPLETED", "DEFAULTED", "DISPUTED"][Number(status)];
+  return ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"][Number(status)];
 }
 
 main().catch((err) => {

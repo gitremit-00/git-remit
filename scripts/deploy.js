@@ -16,8 +16,11 @@ async function main() {
   console.log("Using MockUSDC at:", deployments.mockUSDC);
   console.log("Deploying RemittancePledge...");
 
+  const feeRecipient = process.env.FEE_RECIPIENT || deployer.address;
+  console.log("Fee recipient:", feeRecipient);
+
   const RemittancePledge = await ethers.getContractFactory("RemittancePledge");
-  const contract = await RemittancePledge.deploy(deployments.mockUSDC);
+  const contract = await RemittancePledge.deploy(deployments.mockUSDC, feeRecipient);
   await contract.waitForDeployment();
 
   const address = await contract.getAddress();

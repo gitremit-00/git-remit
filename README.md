@@ -34,10 +34,10 @@ Juan has 50 USDC. Tuition = 150 USDC. Payday = June 5.
 
 1. Juan locks 50 USDC into escrow → sets commitment date: June 5
 2. School sees pledge on-chain → enrolls Juan's child immediately
-3. June 5: Juan deposits 100 USDC → contract auto-releases 150 USDC to school
+3. June 5: Juan deposits 100 USDC → contract auto-releases 148.5 USDC to school (1% protocol fee deducted)
 4. If Juan misses deadline → 3-day grace period begins
-5. After grace period → merchant calls claimPartial() → receives 50 USDC
-6. If merchant never claims (30 days) → Juan calls refundSender() → 50 USDC returned
+5. After grace period → merchant calls claimPartial() → receives full deposit (no fee on default)
+6. If merchant never claims (180 days) → Juan calls reclaimDeposit() → deposit returned, default recorded on reputation
 ```
 
 ---
@@ -64,12 +64,17 @@ Juan has 50 USDC. Tuition = 150 USDC. Payday = June 5.
 | Function | Description |
 |---|---|
 | `createPledge()` | Lock partial USDC, set merchant wallet, total amount, and commitment deadline |
-| `depositRemaining(pledgeId)` | Deposit remaining balance — auto-triggers release when full amount is reached |
-| `claimPartial(pledgeId)` | Merchant claims locked funds after grace period ends (within 30-day claim window) |
-| `refundSender(pledgeId)` | Sender recovers funds after claim window expires if merchant never claimed |
-| `extendDeadline(pledgeId, newDate)` | One-time deadline extension with merchant approval signature |
-| `getReputation(wallet)` | Returns sender's on-chain reputation score, pledge count, and default count |
+| `depositRemaining(pledgeId, amount)` | Deposit remaining balance — auto-triggers release when full amount is reached |
+| `claimPartial(pledgeId)` | Merchant claims locked deposit after grace period ends (no expiry) |
+| `reclaimDeposit(pledgeId)` | Sender recovers deposit if merchant never claimed after 180 days — records a default |
+| `extendDeadline(pledgeId, newDate, merchantSig)` | Extend deadline up to 30 days with merchant's off-chain signature approval |
+| `cancelPledge(pledgeId, merchantSig)` | Cancel pledge by mutual agreement — sender gets full deposit back, no reputation impact |
+| `getReputation(wallet)` | Returns sender's weighted trust score (0–10000 basis points), counts, and history |
+| `getRequiredDepositPct(wallet)` | Returns the minimum upfront deposit % required based on sender's trust score |
+| `getMaxActivePledges(wallet)` | Returns how many concurrent active pledges this sender is allowed |
 | `getPledge(pledgeId)` | Returns full pledge details — status, amounts, dates, parties |
+| `getSenderPledges(wallet)` | Returns all pledge IDs created by a sender |
+| `getMerchantPledges(wallet)` | Returns all pledge IDs for a merchant |
 
 ### Pledge States
 
@@ -77,27 +82,53 @@ Juan has 50 USDC. Tuition = 150 USDC. Payday = June 5.
 |---|---|
 | `PENDING` | Partial funds locked, awaiting remaining deposit |
 | `COMPLETED` | Full amount deposited and released to merchant |
-| `DEFAULTED` | Sender missed deadline — partial funds claimable by merchant |
-| `DISPUTED` | Merchant raised a dispute during grace period |
+| `DEFAULTED` | Sender missed deadline — deposit claimed by merchant or reclaimed by sender after 180 days |
+| `CANCELLED` | Pledge cancelled by mutual agreement — deposit returned to sender |
 
 ### On-Chain Constants
 
 ```solidity
-uint256 public constant GRACE_PERIOD = 3 days;
-uint256 public constant CLAIM_WINDOW = 30 days;
+uint256 public constant GRACE_PERIOD      = 3 days;    // window after deadline for late payment
+uint256 public constant MAX_PLEDGE_DAYS   = 90 days;   // max commitment date from now
+uint256 public constant MAX_EXTENSION     = 30 days;   // max deadline extension per request
+uint256 public constant UNCLAIMED_TIMEOUT = 180 days;  // sender can reclaim if merchant never claims
+uint256 public constant FEE_BPS           = 100;       // 1% protocol fee on completed pledges
 ```
 
 ---
 
 ## Reputation Score
 
-Every sender wallet has a public on-chain reputation score readable by any wallet or application:
+Every sender wallet has a public on-chain **weighted trust score** (0–10000 basis points):
 
 ```
-Score = (Pledges on time × 10) - (Defaults × 25) - (Late payments × 5) + Volume bonus
+Score = sum(pledgeAmount × weight) / sum(pledgeAmount)
+
+Weights:
+  On-time payment  → 10000 (100%)
+  Late payment     →  7000 (70%)
+  Default          →     0 (0%)
 ```
 
-The longer a sender uses RemitSafe honestly, the more valuable their score becomes — making it increasingly costly to abandon a wallet and start fresh.
+Larger pledges carry more weight — a single large default outweighs many small on-time payments. The score is used to determine deposit requirements and active pledge limits.
+
+### Deposit Tiers
+
+| Trust Score | Required Upfront Deposit |
+|---|---|
+| No history | 20% |
+| ≥ 80% | 20% |
+| ≥ 50% | 30% |
+| ≥ 20% | 40% |
+| < 20% | 50% |
+
+### Active Pledge Cap
+
+| Trust Score | Max Concurrent Pledges |
+|---|---|
+| No history | 2 |
+| ≥ 50% | 3 |
+| ≥ 80% | 5 |
 
 ---
 
@@ -111,7 +142,12 @@ remit-safe/
 ├── test/
 │   └── RemittancePledge.test.js
 ├── scripts/
-│   └── deploy.js
+│   ├── deploy.js
+│   ├── deployMockUSDC.js
+│   ├── simulate.js            # Automated 4-scenario simulation
+│   ├── simulate-tiers.js      # Deposit tier progression demo
+│   ├── simulate-interactive.js # Menu-driven manual simulation
+│   └── GUIDE.md
 ├── app/
 │   ├── sender/
 │   │   └── page.tsx           # OFW sender dashboard
@@ -158,16 +194,38 @@ NEXT_PUBLIC_USDC_ADDRESS=deployed_usdc_address
 DATABASE_URL=your_supabase_postgresql_url
 ```
 
-### Run Tests (Local Hardhat Network)
+### Run Tests
 
 ```bash
 npx hardhat test
 ```
 
+Expected output: `57 passing`
+
+### Run Simulation Scripts
+
+No separate node needed — runs on an in-memory chain:
+
+```bash
+npx hardhat run scripts/simulate.js --network hardhat
+npx hardhat run scripts/simulate-tiers.js --network hardhat
+```
+
+For the interactive simulator, start a local node first:
+
+```bash
+# Terminal 1 — keep open
+npx hardhat node
+
+# Terminal 2
+npx hardhat run scripts/simulate-interactive.js --network localhost
+```
+
 ### Deploy to Morph Holesky Testnet
 
 ```bash
-npx hardhat run scripts/deploy.js --network morphHolesky
+npm run deploy:mockusdc   # deploy MockUSDC first
+npm run deploy            # deploy RemittancePledge
 ```
 
 Verify the deployed contract at [explorer-holesky.morphl2.io](https://explorer-holesky.morphl2.io).
@@ -203,12 +261,13 @@ Key mitigations implemented in `RemittancePledge.sol`:
 
 - **Auto-release via contract only** — no backend involvement in fund transfers
 - **ReentrancyGuard** on all token-transferring functions (OpenZeppelin)
-- **Minimum 20% initial deposit** — `require(initialDeposit >= totalAmount * 20 / 100)`
+- **Trust-based minimum deposit** — 20%–50% upfront depending on sender reputation
 - **Commitment deadline cap** — `require(commitmentDate <= block.timestamp + 90 days)`
-- **`int256` reputation score** — prevents underflow on defaults
+- **Weighted reputation score** — amount-weighted, prevents score manipulation via small pledges
+- **Merchant signature required** — deadline extensions and cancellations need merchant approval
 - **On-chain grace period constant** — not dependent on off-chain state
 - **USDC address as constructor parameter** — no hardcoded token addresses
-- **Dedicated read-only backend wallet** — all state-changing calls come from MetaMask only
+- **Active pledge cap** — limits concurrent exposure per trust tier
 
 ---
 

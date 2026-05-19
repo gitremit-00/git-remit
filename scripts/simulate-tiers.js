@@ -79,7 +79,7 @@ async function printScore(contract, addr, label) {
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const [, juan, maria, pedro] = await ethers.getSigners();
+  const [deployer, juan, maria, pedro] = await ethers.getSigners();
 
   console.log("\n" + "═".repeat(62));
   console.log("  GitRemit — Deposit Tier Progression Test");
@@ -89,7 +89,7 @@ async function main() {
   const MockUSDC = await ethers.getContractFactory("MockUSDC");
   const usdc = await MockUSDC.deploy();
   const RemittancePledge = await ethers.getContractFactory("RemittancePledge");
-  const contract = await RemittancePledge.deploy(await usdc.getAddress());
+  const contract = await RemittancePledge.deploy(await usdc.getAddress(), deployer.address);
 
   await usdc.faucet(juan.address,  USDC(50000));
   await usdc.faucet(maria.address, USDC(50000));
