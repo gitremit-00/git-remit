@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "RemitSafe",
+    "slug": "remitsafe",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android", "web"]
+  }
+}

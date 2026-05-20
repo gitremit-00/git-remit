@@ -1,0 +1,2 @@
+models/face-recognition/**/*.onnx filter=lfs diff=lfs merge=lfs -text
+models/face-recognition/**/*.zip filter=lfs diff=lfs merge=lfs -text
