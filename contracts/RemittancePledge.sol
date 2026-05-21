@@ -240,7 +240,6 @@ contract RemittancePledge is ReentrancyGuard {
         emit PledgeDefaulted(pledgeId, pledge.merchant, claimAmount);
     }
 
-
     /// @notice Reclaim deposit if merchant never claimed after 180 days past the grace period
     /// @param pledgeId ID of the unclaimed defaulted pledge
     function reclaimDeposit(uint256 pledgeId) external nonReentrant {
