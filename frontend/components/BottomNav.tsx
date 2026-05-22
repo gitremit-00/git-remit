@@ -14,11 +14,11 @@ const navItems = [
 export default function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-[#111] border-t border-[#1e1e1e] flex items-center justify-around px-4 pt-2.5 pb-5 z-[100]">
+    <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-[#111] border-t border-[#1e1e1e] flex items-center justify-around px-4 pt-2.5 pb-5 z-[150]">
       {navItems.map(({ href, label, Icon, fab }) => {
         const active = pathname === href;
         if (fab) return (
-          <Link key={href} href={href} className="w-[52px] h-[52px] rounded-full bg-[#DDE048] flex items-center justify-center -mt-5 shadow-[0_4px_20px_rgba(212,255,0,0.35)]">
+          <Link key={href} href={href} className="w-[52px] h-[52px] rounded-[18px] bg-[#DDE048] flex items-center justify-center -mt-5 shadow-[0_4px_20px_rgba(212,255,0,0.35)]">
             <Icon size={22} color="#000" strokeWidth={2.5} />
           </Link>
         );

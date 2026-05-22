@@ -1,5 +1,6 @@
 "use client";
 import Header from "../components/Header";
+import LoadingSpinner from "../components/LoadingSpinner";
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
@@ -16,15 +17,23 @@ interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount:
 
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
 function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
-function fmtDate(ts: bigint) { return new Date(Number(ts) * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
+function fmtDate(ts: bigint) { const d = new Date(Number(ts) * 1000); return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + " at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); }
 
 export default function Home() {
-  const { account, connect, pledgeRead, usdcRead } = useWallet();
+  const { account, connect, pledgeRead, usdcRead, walletLoading } = useWallet();
   const [balance, setBalance] = useState<string | null>(null);
   const [rep, setRep] = useState<RepState | null>(null);
   const [activePledges, setActivePledges] = useState<PledgeRaw[]>([]);
   const [maxActive, setMaxActive] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function copyAddress() {
+    if (!account) return;
+    navigator.clipboard.writeText(account);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   useEffect(() => { if (account) loadData(); }, [account]);
 
@@ -47,6 +56,8 @@ export default function Home() {
 
   const scoreLabel = (s: number) => s >= 80 ? "EXCELLENT" : s >= 50 ? "GOOD" : s >= 20 ? "FAIR" : "POOR";
 
+  if (walletLoading) return <LoadingSpinner fullScreen />;
+
   if (!account) return (
     <div className="flex flex-col items-center justify-center min-h-screen p-8">
       <Image src="/logo.png" alt="RemitSafe" width={80} height={80} priority style={{ objectFit: "contain", marginBottom: 24 }} />
@@ -66,12 +77,12 @@ export default function Home() {
 
       <div className="mb-3">
         <div className="text-[#888] text-[13px]">Welcome,</div>
-        <div className="font-bold text-2xl">Juan</div>
+        <div className="font-bold text-2xl">{shortAddr(account)}</div>
       </div>
 
-      <div className="inline-flex items-center bg-[#1e1e1e] border border-[#1F2127] rounded-[20px] px-3 py-[5px] text-[13px] text-[#ccc] mb-4 cursor-pointer">
-        <span>{shortAddr(account)}</span>
-        <Copy size={12} color="#666" className="ml-1.5" />
+      <div className="inline-flex items-center bg-[#1e1e1e] border border-[#1F2127] rounded-[20px] px-3 py-[5px] text-[13px] text-[#ccc] mb-4 cursor-pointer" onClick={copyAddress}>
+        <span>{copied ? "Copied!" : shortAddr(account)}</span>
+        <Copy size={12} color={copied ? "#DDE048" : "#666"} className="ml-1.5" />
       </div>
 
       <div className="bg-gradient-to-r from-[#1B1E16] to-[#11141A] border border-[#2a2a2a] rounded-2xl p-5 mb-3.5">
@@ -115,11 +126,7 @@ export default function Home() {
         <Link href="/pledges" className="text-[#DDE048] text-[13px] font-semibold">See all</Link>
       </div>
 
-      {loading && (
-        <div className="bg-[#11141A] border border-[#1F2127] rounded-[18px] py-9 px-5 text-center mb-3 flex flex-col items-center">
-          <div className="text-[#888] text-sm">Loading transfers...</div>
-        </div>
-      )}
+      {loading && <LoadingSpinner />}
 
       {!loading && activePledges.length === 0 && (
         <div className="bg-[#11141A] border border-[#1F2127] rounded-[18px] py-9 px-5 text-center mb-3 flex flex-col items-center">
@@ -144,6 +151,7 @@ export default function Home() {
                 <div className="text-[11px] text-[#888] mt-0.5">{shortAddr(p.merchant)}</div>
               </div>
               <span className="bg-amber-400/15 text-amber-400 rounded-[20px] px-2.5 py-1 text-[11px] font-bold whitespace-nowrap">● PENDING</span>
+              {/* home only shows active/pending pledges so indicator stays as ● */}
             </div>
 
             <div className="text-[30px] font-extrabold">{total.toFixed(2)}<span className="text-[15px] text-[#888] ml-1.5">USDC</span></div>

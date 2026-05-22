@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, useEffect, ReactNode } from "react";
 import { ethers, Contract, JsonRpcProvider, BrowserProvider, Signer } from "ethers";
 import { MORPH_TESTNET, CONTRACTS } from "../contracts/addresses";
 import MockUSDCABI from "../contracts/MockUSDC.json";
@@ -10,6 +10,7 @@ interface WalletContextType {
   signer: Signer | null;
   provider: JsonRpcProvider;
   error: string | null;
+  walletLoading: boolean;
   connect: () => Promise<void>;
   disconnect: () => void;
   usdcRead: Contract;
@@ -29,6 +30,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<string | null>(null);
   const [signer, setSigner] = useState<Signer | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [walletLoading, setWalletLoading] = useState(true);
   const [readProvider] = useState<JsonRpcProvider>(() => getReadProvider());
 
   const connect = useCallback(async () => {
@@ -54,6 +56,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(() => { setAccount(null); setSigner(null); }, []);
 
+  // Auto-reconnect if MetaMask is already connected
+  useEffect(() => {
+    async function tryReconnect() {
+      try {
+        if (!window.ethereum) return;
+        const accounts = await window.ethereum.request({ method: "eth_accounts" }) as string[];
+        if (accounts.length === 0) return;
+        const provider = new BrowserProvider(window.ethereum);
+        const _signer = await provider.getSigner();
+        setAccount(await _signer.getAddress());
+        setSigner(_signer);
+      } catch {
+        // silently fail — user just isn't connected
+      } finally {
+        setWalletLoading(false);
+      }
+    }
+    tryReconnect();
+  }, []);
+
   const contracts = useMemo(() => ({
     usdcRead: new Contract(CONTRACTS.MOCK_USDC, MockUSDCABI, readProvider),
     pledgeRead: new Contract(CONTRACTS.REMITTANCE_PLEDGE, RemittancePledgeABI, readProvider),
@@ -62,7 +84,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }), [signer, readProvider]);
 
   return (
-    <WalletContext.Provider value={{ account, signer, provider: readProvider, error, connect, disconnect, ...contracts }}>
+    <WalletContext.Provider value={{ account, signer, provider: readProvider, error, walletLoading, connect, disconnect, ...contracts }}>
       {children}
     </WalletContext.Provider>
   );

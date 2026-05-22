@@ -19,3 +19,19 @@ export function getPledgeMeta(merchantAddr: string): PledgeMeta | null {
     return null;
   }
 }
+
+export function getAllMeta(): Record<string, PledgeMeta> {
+  try {
+    return JSON.parse(localStorage.getItem("rs_meta") ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function deletePledgeMeta(merchantAddr: string) {
+  try {
+    const all: Record<string, PledgeMeta> = JSON.parse(localStorage.getItem("rs_meta") ?? "{}");
+    delete all[merchantAddr.toLowerCase()];
+    localStorage.setItem("rs_meta", JSON.stringify(all));
+  } catch {}
+}

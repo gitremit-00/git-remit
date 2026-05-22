@@ -1,9 +1,10 @@
 "use client";
 import Header from "../../components/Header";
+import LoadingSpinner from "../../components/LoadingSpinner";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Link2, Inbox, Clock } from "lucide-react";
+import { Link2, Inbox, Clock, Check } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import ProgressBar from "../../components/ProgressBar";
 import { PHP_PER_USDC } from "../../contracts/addresses";
@@ -20,7 +21,7 @@ function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
 
 export default function Pledges() {
-  const { account, connect, pledgeRead } = useWallet();
+  const { account, connect, pledgeRead, walletLoading } = useWallet();
   const [tab, setTab] = useState<Tab>("All");
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,9 +39,12 @@ export default function Pledges() {
     } finally { setLoading(false); }
   }
 
+  if (walletLoading) return <LoadingSpinner fullScreen />;
+
   return (
-    <div className="px-4 pt-5">
+    <div>
       <Header title="My Pledges" />
+      <div className="px-4 pt-5">
 
       <div className="flex gap-2 mb-5">
         {TABS.map((t) => (
@@ -53,7 +57,7 @@ export default function Pledges() {
       </div>
 
       {/* Not connected */}
-      {!account && (
+      {!walletLoading && !account && (
         <div className="bg-[#11141A] border border-[#1F2127] rounded-[18px] py-10 px-6 text-center mb-3 flex flex-col items-center">
           <Link2 size={40} color="#444" className="mb-3" />
           <div className="font-bold text-base mb-1.5">Wallet not connected</div>
@@ -62,12 +66,7 @@ export default function Pledges() {
         </div>
       )}
 
-      {/* Loading */}
-      {loading && (
-        <div className="bg-[#11141A] border border-[#1F2127] rounded-[18px] py-10 px-6 text-center mb-3 flex flex-col items-center">
-          <div className="text-[#888] text-sm">Loading pledges...</div>
-        </div>
-      )}
+      {loading && <LoadingSpinner />}
 
       {/* Empty state */}
       {!loading && account && pledges.length === 0 && (
@@ -81,7 +80,7 @@ export default function Pledges() {
 
       {pledges.map((p) => {
         const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
-        const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
+        const locked = Number(p.status) === 1 ? total : parseFloat(ethers.formatUnits(p.depositedAmount, 6));
         const status = STATUS[p.status];
         const days = daysLeft(p.commitmentDate);
         const deadline = new Date(Number(p.commitmentDate) * 1000);
@@ -95,7 +94,12 @@ export default function Pledges() {
                   <div className="text-[11px] text-[#888] mt-0.5">{shortAddr(isSent ? p.merchant : p.sender)}</div>
                 </>); })()}
               </div>
-              <span className="px-2.5 py-1 rounded-[20px] text-[11px] font-bold whitespace-nowrap" style={{ color: STATUS_COLOR[status], background: STATUS_COLOR[status] + "22" }}>● {status}</span>
+              <span className="px-2.5 py-1 rounded-[20px] text-[11px] font-bold whitespace-nowrap flex items-center gap-1" style={{ color: STATUS_COLOR[status], background: STATUS_COLOR[status] + "22" }}>
+                {status === "COMPLETED"
+                  ? <Check size={11} strokeWidth={3} />
+                  : <span>●</span>}
+                {status}
+              </span>
             </div>
             <div className="text-[26px] font-extrabold mb-0.5">{total.toFixed(2)} <span className="text-sm text-[#888]">USDC</span></div>
             <div className="text-xs text-[#888] mb-2">= ₱{(total * PHP_PER_USDC).toLocaleString()} PHP</div>
@@ -103,12 +107,13 @@ export default function Pledges() {
             <div className="flex justify-between text-[11px] text-[#888] mt-0.5">
               <span className="text-[#DDE048]">{locked.toFixed(2)} locked</span>
               {status === "PENDING"
-                ? <span className="text-amber-400 flex items-center gap-1"><Clock size={11} color="#f59e0b" /> {days}d · {deadline.toLocaleDateString()}</span>
+                ? <span className="text-amber-400 flex items-center gap-1"><Clock size={11} color="#f59e0b" /> {days}d · {deadline.toLocaleDateString()} {deadline.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span>
                 : <span>{status.toLowerCase()}</span>}
             </div>
           </Link>
         );
       })}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 import Header from "../../components/Header";
+import LoadingSpinner from "../../components/LoadingSpinner";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { Droplets, Info } from "lucide-react";
@@ -7,7 +8,7 @@ import { useWallet } from "../../context/WalletContext";
 import { PHP_PER_USDC } from "../../contracts/addresses";
 
 export default function Wallet() {
-  const { account, connect, usdcRead, usdcWrite } = useWallet();
+  const { account, connect, usdcRead, usdcWrite, walletLoading } = useWallet();
   const [balance, setBalance] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -35,9 +36,12 @@ export default function Wallet() {
   }
 
   return (
-    <div className="px-4 pt-5">
+    <div>
       <Header title="Wallet" />
-      {!account ? (
+      <div className="px-4 pt-5">
+      {walletLoading ? (
+        <LoadingSpinner fullScreen />
+      ) : !account ? (
         <button className="w-full bg-[#DDE048] text-black border-0 rounded-[14px] py-4 text-base font-bold cursor-pointer" onClick={connect}>Connect MetaMask</button>
       ) : (
         <>
@@ -68,6 +72,7 @@ export default function Wallet() {
           </div>
         </>
       )}
+      </div>
     </div>
   );
 }
