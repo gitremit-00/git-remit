@@ -31,7 +31,7 @@ export default function Header({ title, back, onBack }: HeaderProps) {
   }, []);
 
   return (
-    <div className="bg-[#11141A] border-b border-[#1e2230] px-4 py-3 flex items-center justify-between sticky top-0 z-50 mb-5 w-full max-w-[430px]">
+    <div className="bg-[#11141A] border-b border-[#1e2230] px-4 py-3 flex items-center justify-between sticky top-0 z-50 mb-5 w-full md:hidden">
       <div className="flex items-center gap-2.5">
         {back && (
           <button onClick={() => onBack ? onBack() : router.back()} className="bg-transparent border-0 cursor-pointer flex p-0">
