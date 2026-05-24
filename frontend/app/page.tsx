@@ -5,15 +5,16 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Copy, Clock, Inbox, Info, TrendingUp, ArrowRight } from "lucide-react";
+import { Copy, Clock, Inbox, Info, TrendingUp, ArrowRight, CheckCircle2, AlertCircle, AlertTriangle, PlusCircle, Shield } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
 import CircularScore from "../components/CircularScore";
 import ProgressBar from "../components/ProgressBar";
-import { PHP_PER_USDC } from "../contracts/addresses";
+import { useCurrency } from "../context/CurrencyContext";
 import { getPledgeMeta } from "../lib/pledgeMeta";
 
 interface RepState { score: number; onTime: number; total: number; defaults: number; late: number; }
 interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
+interface ActivityItem { type: "success" | "warning" | "error" | "info"; label: string; sub: string; time: string; }
 
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
 function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
@@ -24,9 +25,12 @@ function scoreColor(s: number) { return s >= 80 ? "#22c55e" : s >= 50 ? "#DDE048
 
 export default function Home() {
   const { account, connect, pledgeRead, usdcRead, walletLoading } = useWallet();
+  const { fmt, fmtAlt, currency } = useCurrency();
   const [balance, setBalance] = useState<string | null>(null);
   const [rep, setRep] = useState<RepState | null>(null);
   const [activePledges, setActivePledges] = useState<PledgeRaw[]>([]);
+  const [completedPledges, setCompletedPledges] = useState<PledgeRaw[]>([]);
+  const [allPledges, setAllPledges] = useState<PledgeRaw[]>([]);
   const [maxActive, setMaxActive] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -58,8 +62,10 @@ export default function Home() {
         late: Number(repData.lateCount ?? 0),
       });
       setMaxActive(Number(maxAct));
-      const details = await Promise.all((ids as bigint[]).map((id) => pledgeRead.getPledge(id)));
-      setActivePledges((details as PledgeRaw[]).filter((p) => p.status === 0));
+      const details = (await Promise.all((ids as bigint[]).map((id) => pledgeRead.getPledge(id)))) as PledgeRaw[];
+      setAllPledges(details);
+      setActivePledges(details.filter((p) => Number(p.status) === 0));
+      setCompletedPledges(details.filter((p) => Number(p.status) === 1));
     } finally { setLoading(false); }
   }
 
@@ -71,7 +77,7 @@ export default function Home() {
       <Image src="/logo.png" alt="RemitSafe" width={80} height={80} priority style={{ objectFit: "contain", marginBottom: 24 }} />
       <h2 className="text-2xl font-bold mb-2.5 text-white">OFW Payment Pledge</h2>
       <p className="text-[#888] mb-10 text-sm leading-relaxed max-w-[280px] text-center">
-        Secure on-chain remittance commitments on Morph L2 Testnet
+        Secure on-chain remittance commitments, powered by smart contracts
       </p>
       <button className="bg-[#DDE048] text-black border-0 rounded-[14px] px-12 py-4 text-base font-bold cursor-pointer" onClick={connect}>
         Connect MetaMask
@@ -96,8 +102,6 @@ export default function Home() {
               <span className="font-mono">{copied ? "Copied!" : shortAddr(account)}</span>
               <Copy size={11} color={copied ? "#DDE048" : "#555"} />
             </button>
-            <span className="text-[#444]">·</span>
-            <span className="text-[13px] text-[#555]">Morph L2</span>
           </div>
         </div>
         <Link
@@ -168,10 +172,14 @@ export default function Home() {
             <span className="text-[11px] text-[#555] tracking-[1.5px]">USDC BALANCE</span>
           </div>
           <div className="text-3xl font-extrabold text-white mb-0.5 truncate">
-            {loading ? "–" : balance ? parseFloat(balance).toFixed(2) : "0.00"}
-            <span className="text-base text-[#888] font-normal ml-1.5">USDC</span>
+            {loading ? "–" : balance
+              ? currency === "PHP"
+                ? fmt(parseFloat(balance))
+                : `${parseFloat(balance).toFixed(2)}`
+              : currency === "PHP" ? fmt(0) : "0.00"}
+            <span className="text-base text-[#888] font-normal ml-1.5">{currency === "PHP" ? "PHP" : "USDC"}</span>
           </div>
-          {balance && <div className="text-[12px] text-[#555] mb-4">≈ ₱{(parseFloat(balance) * PHP_PER_USDC).toLocaleString()} PHP</div>}
+          {balance && <div className="text-[12px] text-[#555] mb-4">≈ {fmtAlt(parseFloat(balance))}</div>}
           <div className="flex gap-2 mt-auto">
             <Link href="/wallet" className="flex-1 bg-[#DDE048] text-black text-sm font-bold rounded-xl py-2.5 text-center hover:bg-[#c8ce30] transition-colors">Top up</Link>
             <Link href="/wallet" className="flex-1 bg-[#1e2230] text-white text-sm font-semibold rounded-xl py-2.5 text-center hover:bg-[#252836] transition-colors">Withdraw</Link>
@@ -227,7 +235,7 @@ export default function Home() {
                 </div>
 
                 <div className="text-[32px] font-extrabold text-white leading-none">{total.toFixed(2)}<span className="text-base text-[#888] ml-1.5">USDC</span></div>
-                <div className="text-xs text-[#555] mb-3 mt-0.5">≈ ₱{(total * PHP_PER_USDC).toLocaleString()} PHP</div>
+                <div className="text-xs text-[#555] mb-3 mt-0.5">≈ {fmt(total)}</div>
 
                 <ProgressBar locked={locked} total={total} />
                 <div className="flex justify-between text-[12px] mt-1 mb-3">
@@ -259,6 +267,113 @@ export default function Home() {
           })}
         </div>
       </div>
+
+      {/* Recent Activity + Completed */}
+      <div className="grid grid-cols-[1fr_360px] gap-5 mb-8">
+        {/* Recent Activity */}
+        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-base font-bold text-white">Recent activity</h2>
+            <Link href="/notifications" className="text-[#DDE048] text-sm font-semibold hover:text-[#c8ce30]">
+              View all activity →
+            </Link>
+          </div>
+          <p className="text-[12px] text-[#555] mb-5">Latest on-chain events on your transfers</p>
+
+          {allPledges.length === 0 && !loading && (
+            <div className="text-[#555] text-sm py-6 text-center">No activity yet</div>
+          )}
+
+          <div className="space-y-0">
+            {allPledges.flatMap((p): ActivityItem[] => {
+              const meta = getPledgeMeta(p.merchant);
+              const name = meta?.name || shortAddr(p.merchant);
+              const items: ActivityItem[] = [];
+              const days = daysLeft(p.commitmentDate);
+              const status = Number(p.status);
+              if (status === 0 && days <= 3) {
+                items.push({ type: "warning", label: `Payment due in ${days} day${days !== 1 ? "s" : ""}`, sub: `Pledge ${shortAddr(p.id.toString())} · ${ethers.formatUnits(p.depositedAmount, 6)} USDC remaining`, time: "now" });
+              }
+              if (status === 1) {
+                items.push({ type: "success", label: `Pledge ${shortAddr(p.id.toString())} completed`, sub: `${ethers.formatUnits(p.totalAmount, 6)} USDC released to ${name}`, time: fmtShortDate(p.commitmentDate) });
+              }
+              if (status === 2) {
+                items.push({ type: "error", label: `Grace period started · ${shortAddr(p.id.toString())}`, sub: `Merchant can claim ${ethers.formatUnits(p.depositedAmount, 6)} USDC deposit after 14 days`, time: fmtShortDate(p.commitmentDate) });
+              }
+              if (status === 0) {
+                items.push({ type: "info", label: `Pledge ${shortAddr(p.id.toString())} created`, sub: `${ethers.formatUnits(p.depositedAmount, 6)} USDC locked · ${name}`, time: fmtShortDate(p.commitmentDate) });
+              }
+              return items;
+            }).slice(0, 6).map((item, i) => (
+              <div key={i} className={`flex items-start gap-3.5 py-3.5 ${i > 0 ? "border-t border-[#1a1d24]" : ""}`}>
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                  item.type === "success" ? "bg-green-500/10" :
+                  item.type === "warning" ? "bg-amber-400/10" :
+                  item.type === "error"   ? "bg-red-500/10" :
+                  "bg-blue-500/10"
+                }`}>
+                  {item.type === "success" && <CheckCircle2 size={14} color="#22c55e" />}
+                  {item.type === "warning" && <AlertTriangle size={14} color="#f59e0b" />}
+                  {item.type === "error"   && <AlertCircle size={14} color="#ef4444" />}
+                  {item.type === "info"    && <PlusCircle size={14} color="#60a5fa" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-white leading-snug">{item.label}</div>
+                  <div className="text-[11px] text-[#555] font-mono mt-0.5">{item.sub}</div>
+                </div>
+                <div className="text-[11px] text-[#444] whitespace-nowrap shrink-0 mt-0.5">{item.time}</div>
+              </div>
+            ))}
+
+            {rep && rep.onTime > 0 && (
+              <div className="flex items-start gap-3.5 py-3.5 border-t border-[#1a1d24]">
+                <div className="w-7 h-7 rounded-full bg-green-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                  <Shield size={14} color="#22c55e" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-white">Trust score updated</div>
+                  <div className="text-[11px] text-[#555] mt-0.5">{rep.onTime} on-time payment{rep.onTime !== 1 ? "s" : ""} · current score {rep.score}</div>
+                </div>
+                <div className="text-[11px] text-[#444] whitespace-nowrap shrink-0 mt-0.5">–</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Completed */}
+        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
+          <h2 className="text-base font-bold text-white mb-0.5">Completed</h2>
+          <p className="text-[12px] text-[#555] mb-5">{completedPledges.length} on-time release{completedPledges.length !== 1 ? "s" : ""}</p>
+
+          {completedPledges.length === 0 && !loading && (
+            <div className="text-[#555] text-sm py-6 text-center">No completed transfers yet</div>
+          )}
+
+          <div className="space-y-0">
+            {completedPledges.map((p, i) => {
+              const meta = getPledgeMeta(p.merchant);
+              const name = meta?.name || shortAddr(p.merchant);
+              const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
+              return (
+                <Link key={p.id.toString()} href={`/pledge/${p.id}`}
+                  className={`flex items-center gap-3 py-3.5 hover:opacity-80 transition-opacity ${i > 0 ? "border-t border-[#1a1d24]" : ""}`}>
+                  <div className="w-9 h-9 rounded-xl bg-[#1e2230] flex items-center justify-center shrink-0 text-base">
+                    🏢
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-white truncate">{name}</div>
+                    <div className="text-[11px] text-[#555] font-mono">{shortAddr(p.merchant)} · {fmtShortDate(p.commitmentDate)}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-bold text-[#DDE048]">{total.toFixed(2)}</div>
+                    <div className="text-[10px] text-[#555]">USDC</div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 
@@ -281,8 +396,13 @@ export default function Home() {
           <div className="flex justify-between items-start">
             <div>
               <div className="text-[10px] text-[#888] tracking-[1.5px] mb-1.5">USDC BALANCE</div>
-              <div className="text-[38px] font-extrabold leading-none">{loading ? "–" : balance ? parseFloat(balance).toFixed(2) : "0.00"}<span className="text-base font-normal text-[#888]"> USDC</span></div>
-              {balance && <div className="text-xs text-[#888] mt-1.5">= ₱{(parseFloat(balance) * PHP_PER_USDC).toLocaleString()} PHP</div>}
+              <div className="text-[38px] font-extrabold leading-none">
+                {loading ? "–" : balance
+                  ? currency === "PHP" ? fmt(parseFloat(balance)) : parseFloat(balance).toFixed(2)
+                  : currency === "PHP" ? fmt(0) : "0.00"}
+                <span className="text-base font-normal text-[#888]"> {currency === "PHP" ? "PHP" : "USDC"}</span>
+              </div>
+              {balance && <div className="text-xs text-[#888] mt-1.5">= {fmtAlt(parseFloat(balance))}</div>}
             </div>
             <div className="relative flex items-center justify-center">
               <Image src="/logo.png" alt="" width={72} height={72} style={{ position: "absolute", opacity: 0.08, filter: "grayscale(1)", objectFit: "contain", right: 20 }} />
@@ -345,7 +465,7 @@ export default function Home() {
                 <span className="bg-amber-400/15 text-amber-400 rounded-[20px] px-2.5 py-1 text-[11px] font-bold whitespace-nowrap">● PENDING</span>
               </div>
               <div className="text-[30px] font-extrabold">{total.toFixed(2)}<span className="text-[15px] text-[#888] ml-1.5">USDC</span></div>
-              <div className="text-xs text-[#888] mb-2">= ₱{(total * PHP_PER_USDC).toLocaleString()} PHP</div>
+              <div className="text-xs text-[#888] mb-2">= {fmt(total)}</div>
               <ProgressBar locked={locked} total={total} />
               <div className="flex justify-between text-[11px] text-[#888] mt-1 mb-2.5">
                 <span className="text-[#DDE048]">{locked.toFixed(2)} locked</span>
@@ -370,6 +490,91 @@ export default function Home() {
             </Link>
           );
         })}
+
+        {/* Recent Activity */}
+        <div className="mt-2 mb-1 flex items-center justify-between">
+          <span className="text-xs font-bold tracking-[1px] text-[#ccc]">RECENT ACTIVITY</span>
+          <Link href="/notifications" className="text-[#DDE048] text-[13px] font-semibold">See all</Link>
+        </div>
+
+        <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl mb-4">
+          {allPledges.length === 0 && !loading && (
+            <div className="text-[#555] text-sm py-6 text-center">No activity yet</div>
+          )}
+          {allPledges.flatMap((p): ActivityItem[] => {
+            const meta = getPledgeMeta(p.merchant);
+            const name = meta?.name || shortAddr(p.merchant);
+            const items: ActivityItem[] = [];
+            const days = daysLeft(p.commitmentDate);
+            const status = Number(p.status);
+            if (status === 0 && days <= 3) items.push({ type: "warning", label: `Payment due in ${days} day${days !== 1 ? "s" : ""}`, sub: `${shortAddr(p.id.toString())} · ${ethers.formatUnits(p.depositedAmount, 6)} USDC remaining`, time: "now" });
+            if (status === 1) items.push({ type: "success", label: `Pledge ${shortAddr(p.id.toString())} completed`, sub: `${ethers.formatUnits(p.totalAmount, 6)} USDC released to ${name}`, time: fmtShortDate(p.commitmentDate) });
+            if (status === 2) items.push({ type: "error", label: `Grace period started`, sub: `${shortAddr(p.id.toString())} · merchant can claim after 14 days`, time: fmtShortDate(p.commitmentDate) });
+            if (status === 0) items.push({ type: "info", label: `Pledge created`, sub: `${ethers.formatUnits(p.depositedAmount, 6)} USDC locked · ${name}`, time: fmtShortDate(p.commitmentDate) });
+            return items;
+          }).slice(0, 5).map((item, i, arr) => (
+            <div key={i} className={`flex items-start gap-3 px-4 py-3.5 ${i < arr.length - 1 ? "border-b border-[#1F2127]" : ""}`}>
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                item.type === "success" ? "bg-green-500/10" :
+                item.type === "warning" ? "bg-amber-400/10" :
+                item.type === "error"   ? "bg-red-500/10" : "bg-blue-500/10"
+              }`}>
+                {item.type === "success" && <CheckCircle2 size={13} color="#22c55e" />}
+                {item.type === "warning" && <AlertTriangle size={13} color="#f59e0b" />}
+                {item.type === "error"   && <AlertCircle size={13} color="#ef4444" />}
+                {item.type === "info"    && <PlusCircle size={13} color="#60a5fa" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-white leading-snug">{item.label}</div>
+                <div className="text-[11px] text-[#555] font-mono mt-0.5 truncate">{item.sub}</div>
+              </div>
+              <div className="text-[10px] text-[#444] whitespace-nowrap shrink-0 mt-1">{item.time}</div>
+            </div>
+          ))}
+          {rep && rep.onTime > 0 && (
+            <div className="flex items-start gap-3 px-4 py-3.5 border-t border-[#1F2127]">
+              <div className="w-7 h-7 rounded-full bg-green-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                <Shield size={13} color="#22c55e" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-white">Trust score updated</div>
+                <div className="text-[11px] text-[#555] mt-0.5">{rep.onTime} on-time payment{rep.onTime !== 1 ? "s" : ""} · score {rep.score}</div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Completed */}
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs font-bold tracking-[1px] text-[#ccc]">COMPLETED <span className="text-[#888]">•</span> {completedPledges.length}</span>
+          <Link href="/pledges" className="text-[#DDE048] text-[13px] font-semibold">See all</Link>
+        </div>
+
+        {completedPledges.length === 0 && !loading && (
+          <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl py-7 text-center text-[#555] text-sm mb-4">No completed transfers yet</div>
+        )}
+
+        <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl mb-6">
+          {completedPledges.map((p, i) => {
+            const meta = getPledgeMeta(p.merchant);
+            const name = meta?.name || shortAddr(p.merchant);
+            const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
+            return (
+              <Link key={p.id.toString()} href={`/pledge/${p.id}`}
+                className={`flex items-center gap-3 px-4 py-3.5 ${i < completedPledges.length - 1 ? "border-b border-[#1F2127]" : ""}`}>
+                <div className="w-9 h-9 rounded-xl bg-[#1e2230] flex items-center justify-center shrink-0 text-base">🏢</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-bold text-white truncate">{name}</div>
+                  <div className="text-[11px] text-[#555] font-mono">{shortAddr(p.merchant)} · {fmtShortDate(p.commitmentDate)}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-sm font-bold text-[#DDE048]">{total.toFixed(2)}</div>
+                  <div className="text-[10px] text-[#555]">USDC</div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

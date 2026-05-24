@@ -7,7 +7,7 @@ import Header from "../../../components/Header";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import CircularScore from "../../../components/CircularScore";
 import { useWallet } from "../../../context/WalletContext";
-import { PHP_PER_USDC } from "../../../contracts/addresses";
+import { useCurrency } from "../../../context/CurrencyContext";
 import { getPledgeMeta } from "../../../lib/pledgeMeta";
 
 interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }

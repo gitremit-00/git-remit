@@ -7,7 +7,7 @@ import Link from "next/link";
 import { Link2, Inbox, Clock, Check, CheckCircle2, AlertCircle, XCircle, Send } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import ProgressBar from "../../components/ProgressBar";
-import { PHP_PER_USDC } from "../../contracts/addresses";
+import { useCurrency } from "../../context/CurrencyContext";
 import { getPledgeMeta } from "../../lib/pledgeMeta";
 
 const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
@@ -31,6 +31,7 @@ function fmtDate(ts: bigint) { return new Date(Number(ts) * 1000).toLocaleDateSt
 
 export default function Pledges() {
   const { account, connect, pledgeRead, walletLoading } = useWallet();
+  const { fmt } = useCurrency();
   const [tab, setTab] = useState<Tab>("All");
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
   const [loading, setLoading] = useState(false);
@@ -126,12 +127,12 @@ export default function Pledges() {
                     <td className="px-5 py-4 font-mono text-[#555] text-xs">#{p.id.toString()}</td>
                     <td className="px-5 py-4">
                       <div className="font-bold text-white">{total.toFixed(2)} <span className="text-[#555] text-xs font-normal">USDC</span></div>
-                      <div className="text-[10px] text-[#555]">₱{(total * PHP_PER_USDC).toLocaleString()}</div>
+                      <div className="text-[10px] text-[#555]">{fmt(total)}</div>
                     </td>
                     <td className="px-5 py-4 text-[#DDE048] font-semibold">{locked.toFixed(2)}</td>
                     <td className="px-5 py-4 w-32">
-                      <ProgressBar locked={locked} total={gross} />
-                      <div className="text-[10px] text-[#555] mt-0.5">{total > 0 ? Math.round(locked / gross * 100) : 0}%</div>
+                      <ProgressBar locked={locked} total={Number(p.status) === 1 ? total : gross} />
+                      <div className="text-[10px] text-[#555] mt-0.5">{Number(p.status) === 1 ? 100 : total > 0 ? Math.round(locked / gross * 100) : 0}%</div>
                     </td>
                     <td className="px-5 py-4">
                       <span className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full w-fit" style={{ color: STATUS_COLOR[status], background: STATUS_BG[status] }}>
@@ -214,7 +215,7 @@ export default function Pledges() {
                 </span>
               </div>
               <div className="text-[26px] font-extrabold mb-0.5">{total.toFixed(2)} <span className="text-sm text-[#888]">USDC</span></div>
-              <div className="text-xs text-[#888] mb-2">= ₱{(total * PHP_PER_USDC).toLocaleString()} PHP</div>
+              <div className="text-xs text-[#888] mb-2">= {fmt(total)}</div>
               <ProgressBar locked={locked} total={total} />
               <div className="flex justify-between text-[11px] text-[#888] mt-0.5">
                 <span className="text-[#DDE048]">{locked.toFixed(2)} locked</span>

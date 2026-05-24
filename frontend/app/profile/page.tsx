@@ -8,13 +8,14 @@ import { ethers } from "ethers";
 import { Copy, LogOut, ShieldCheck, ArrowRight, Users, BadgeCheck } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import CircularScore from "../../components/CircularScore";
-import { PHP_PER_USDC } from "../../contracts/addresses";
+import { useCurrency } from "../../context/CurrencyContext";
 
 interface RepState { score: number; onTime: number; late: number; defaults: number; total: number; }
 interface PledgeCounts { pending: number; completed: number; defaulted: number; cancelled: number; }
 
 export default function Profile() {
   const { account, connect, disconnect, pledgeRead, usdcRead, walletLoading } = useWallet();
+  const { fmt } = useCurrency();
   const [rep, setRep] = useState<RepState | null>(null);
   const [maxActive, setMaxActive] = useState<number | null>(null);
   const [reqPct, setReqPct] = useState<number | null>(null);
@@ -115,12 +116,9 @@ export default function Profile() {
             <div className="flex items-center gap-8 relative">
               {rep && <CircularScore score={rep.score} size={120} />}
               <div>
-                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-2">TRUST SCORE</div>
-                <div className="text-[64px] font-extrabold leading-none text-white">
-                  {rep?.score ?? "–"}<span className="text-2xl font-normal text-[#555]"> / 100</span>
-                </div>
+                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">TRUST SCORE</div>
                 {rep && (
-                  <div className="flex items-center gap-2 mt-2">
+                  <div className="flex items-center gap-2 mb-3">
                     <span className="text-sm font-bold px-3 py-1 rounded-full" style={{ color: scoreBg(rep.score), background: scoreBg(rep.score) + "22" }}>
                       {scoreLabel(rep.score)}
                     </span>
@@ -130,7 +128,7 @@ export default function Profile() {
                     </div>
                   </div>
                 )}
-                <div className="text-[#555] text-xs mt-3 font-mono">{account.slice(0, 14)}…{account.slice(-12)}</div>
+                <div className="text-[#555] text-xs font-mono">{account.slice(0, 14)}…{account.slice(-12)}</div>
                 <button onClick={copyAddress} className="flex items-center gap-1.5 mt-1.5 text-[#555] text-xs hover:text-[#888] transition-colors">
                   <Copy size={11} /> {copied ? <span className="text-[#DDE048]">Copied!</span> : "Copy address"}
                 </button>
@@ -140,7 +138,7 @@ export default function Profile() {
 
           {/* Stats grid */}
           <div className="grid grid-cols-4 gap-3">
-            <StatCard label="USDC BALANCE" value={balance ? `${parseFloat(balance).toFixed(2)}` : "–"} sub={balance ? `₱${(parseFloat(balance) * PHP_PER_USDC).toLocaleString()}` : undefined} />
+            <StatCard label="USDC BALANCE" value={balance ? `${parseFloat(balance).toFixed(2)}` : "–"} sub={balance ? fmt(parseFloat(balance)) : undefined} />
             <StatCard label="ACTIVE TRANSFERS" value={`${activePledges}`} sub={maxActive !== null ? `of ${maxActive} max` : undefined} highlight />
             <StatCard label="MAX ACTIVE" value={maxActive !== null ? `${maxActive}` : "–"} sub="pledge cap" />
             <StatCard label="DEPOSIT REQUIRED" value={reqPct !== null ? `${reqPct}%` : "–"} sub="upfront" />
@@ -189,7 +187,6 @@ export default function Profile() {
             <div className="space-y-0">
               <LimitRow label="Max active pledges" value={maxActive !== null ? `${maxActive}` : "–"} />
               <LimitRow label="Required deposit" value={reqPct !== null ? `${reqPct}% upfront` : "–"} />
-              <LimitRow label="Network" value="Morph Hoodi" last />
             </div>
             <p className="text-[11px] text-[#555] mt-4 leading-relaxed">
               Limits improve automatically as your trust score rises. Complete pledges on time to increase your score.
@@ -262,7 +259,7 @@ export default function Profile() {
           <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
             <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">USDC BALANCE</div>
             <div className="text-[28px] font-extrabold leading-none">{balance ? parseFloat(balance).toFixed(2) : "–"}</div>
-            {balance && <div className="text-[11px] text-[#888] mt-1">₱{(parseFloat(balance) * PHP_PER_USDC).toLocaleString()}</div>}
+            {balance && <div className="text-[11px] text-[#888] mt-1">{fmt(parseFloat(balance))}</div>}
           </div>
           <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
             <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">ACTIVE CAP</div>
@@ -295,7 +292,6 @@ export default function Profile() {
           </div>
           <div className="flex justify-between py-2.5 border-b border-[#1F2127] text-sm"><span className="text-[#888]">Max active pledges</span><span className="font-extrabold text-[#DDE048]">{maxActive ?? "–"}</span></div>
           <div className="flex justify-between py-2.5 border-b border-[#1F2127] text-sm"><span className="text-[#888]">Required deposit</span><span className="font-extrabold text-[#DDE048]">{reqPct ?? "–"}% upfront</span></div>
-          <div className="flex justify-between py-2.5 text-sm"><span className="text-[#888]">Network</span><span className="font-semibold text-white">Morph Hoodi Testnet</span></div>
         </div>
 
         <Link href="/recipients" className="w-full bg-[#11141A] border border-[#1F2127] rounded-2xl px-5 py-4 flex items-center justify-between mb-4 no-underline text-inherit">

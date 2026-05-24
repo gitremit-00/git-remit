@@ -7,9 +7,10 @@ import { fetchUserRole, Role } from "../lib/supabase";
 interface RoleContextValue {
   role: Role | null;
   loading: boolean;
+  isNewUser: boolean;
 }
 
-const RoleContext = createContext<RoleContextValue>({ role: null, loading: true });
+const RoleContext = createContext<RoleContextValue>({ role: null, loading: true, isNewUser: false });
 
 // Routes only senders can access
 const SENDER_ONLY = ["/", "/new-transfer", "/pledges", "/pledge", "/recipients"];
@@ -31,26 +32,34 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [role, setRole] = useState<Role | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isNewUser, setIsNewUser] = useState(false);
 
   useEffect(() => {
     if (walletLoading) return;
 
     if (!account) {
       setRole(null);
+      setIsNewUser(false);
       setLoading(false);
       return;
     }
 
     // Wallet connected — fetch role from Supabase
     setLoading(true);
+    setIsNewUser(false);
     fetchUserRole(account).then((r) => {
       if (!r) {
         // New user — send to onboarding unless already there
+        setIsNewUser(true);
         if (pathname !== "/onboarding") router.replace("/onboarding");
       } else {
         setRole(r);
         // Set cookie for middleware to read
         document.cookie = `rs_role=${r}; path=/; max-age=2592000`;
+        // Returning user who landed on /onboarding (e.g. after disconnect) — send to dashboard
+        if (pathname === "/onboarding") {
+          router.replace(r === "merchant" ? "/merchant" : "/");
+        }
       }
       setLoading(false);
     });
@@ -69,7 +78,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   }, [role, pathname, loading]);
 
   return (
-    <RoleContext.Provider value={{ role, loading }}>
+    <RoleContext.Provider value={{ role, loading, isNewUser }}>
       {children}
     </RoleContext.Provider>
   );

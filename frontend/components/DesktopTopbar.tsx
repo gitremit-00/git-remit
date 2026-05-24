@@ -1,14 +1,15 @@
 "use client";
 import { Search, Bell, ChevronRight } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
+import { useCurrency } from "../context/CurrencyContext";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
 
-function shortName(addr: string) { return addr.slice(0, 6) + "…" + addr.slice(-4); }
 
 export default function DesktopTopbar() {
   const { account, pledgeRead } = useWallet();
+  const { currency, toggle } = useCurrency();
   const [score, setScore] = useState<number | null>(null);
 
   useEffect(() => {
@@ -37,20 +38,16 @@ export default function DesktopTopbar() {
       </div>
 
       <div className="flex items-center gap-3 ml-auto">
-        {/* Currency corridor */}
-        <div className="flex items-center gap-1.5 bg-[#13161c] border border-[#1e2230] rounded-xl px-3 py-2 text-[12px] text-[#888]">
-          <span className="text-[10px] text-[#555]">US</span>
-          <span>USD</span>
+        {/* Currency toggle */}
+        <button
+          onClick={toggle}
+          title="Switch display currency"
+          className="flex items-center gap-1.5 bg-[#13161c] border border-[#1e2230] rounded-xl px-3 py-2 text-[12px] text-[#888] hover:border-[#333] transition-colors"
+        >
+          <span className={currency === "USD" ? "text-white font-semibold" : "text-[#555]"}>USD</span>
           <ChevronRight size={12} color="#444" />
-          <span className="text-[10px] text-[#555]">PH</span>
-          <span>PHP</span>
-        </div>
-
-        {/* Network */}
-        <div className="flex items-center gap-1.5 bg-[#13161c] border border-[#1e2230] rounded-xl px-3 py-2 text-[12px] text-[#888]">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-          <span>Morph L2</span>
-        </div>
+          <span className={currency === "PHP" ? "text-white font-semibold" : "text-[#555]"}>PHP</span>
+        </button>
 
         {/* Notifications */}
         <Link href="/notifications" className="relative w-9 h-9 flex items-center justify-center bg-[#13161c] border border-[#1e2230] rounded-xl">
@@ -59,18 +56,15 @@ export default function DesktopTopbar() {
 
         {/* User avatar */}
         {account && (
-          <Link href="/profile" className="flex items-center gap-2.5 bg-[#13161c] border border-[#1e2230] rounded-xl px-3 py-2">
-            <div className="w-7 h-7 rounded-full bg-[#DDE048] flex items-center justify-center text-black text-[11px] font-bold">
+          <Link href="/profile" className="flex items-center gap-2 bg-[#13161c] border border-[#1e2230] rounded-xl px-2.5 py-2">
+            <div className="w-7 h-7 rounded-full bg-[#DDE048] flex items-center justify-center text-black text-[11px] font-bold shrink-0">
               {account.slice(2, 4).toUpperCase()}
             </div>
-            <div className="text-right">
-              <div className="text-[12px] font-semibold text-white leading-none">{shortName(account)}</div>
-              {score !== null && (
-                <div className="text-[10px] font-bold mt-0.5" style={{ color: scoreColor(score) }}>
-                  {score} · {scoreLabel(score)}
-                </div>
-              )}
-            </div>
+            {score !== null && (
+              <div className="text-[11px] font-bold" style={{ color: scoreColor(score) }}>
+                {score}
+              </div>
+            )}
           </Link>
         )}
       </div>

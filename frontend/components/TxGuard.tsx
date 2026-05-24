@@ -117,7 +117,7 @@ export default function TxGuard({ active, steps }: TxGuardProps) {
           {/* MetaMask nudge */}
           {needsMetaMask ? (
             <div className="bg-amber-400/10 border border-amber-400/25 rounded-2xl px-4 py-3.5 flex items-center gap-3">
-              <span className="text-2xl shrink-0">🦊</span>
+              <Image src="/MetaMask.png" alt="MetaMask" width={28} height={28} style={{ objectFit: "contain" }} className="shrink-0" />
               <div>
                 <p className="text-amber-400 text-sm font-semibold leading-tight">Action required in MetaMask</p>
                 <p className="text-[#777] text-xs mt-0.5 leading-relaxed">Open MetaMask and confirm the pending transaction.</p>

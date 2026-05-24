@@ -3,13 +3,13 @@ import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface DateTimePickerProps {
-  value: string; // datetime-local format: "YYYY-MM-DDTHH:mm"
+  value: string;
   onChange: (value: string) => void;
 }
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-const MONTHS = ["January", "February", "March", "April", "May", "June",
-                "July", "August", "September", "October", "November", "December"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
@@ -44,7 +44,6 @@ export default function DateTimePicker({ value, onChange }: DateTimePickerProps)
     else setViewMonth(m => m + 1);
   }
 
-  // Build calendar grid
   const firstDay = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const cells: (number | null)[] = [
@@ -54,8 +53,7 @@ export default function DateTimePicker({ value, onChange }: DateTimePickerProps)
   while (cells.length % 7 !== 0) cells.push(null);
 
   function selectDay(day: number) {
-    const d = new Date(viewYear, viewMonth, day, hour, minute, 0, 0);
-    setSelected(d);
+    setSelected(new Date(viewYear, viewMonth, day, hour, minute, 0, 0));
   }
 
   function isSelected(day: number) {
@@ -77,31 +75,30 @@ export default function DateTimePicker({ value, onChange }: DateTimePickerProps)
     return d < t;
   }
 
-  const hours   = Array.from({ length: 24 }, (_, i) => i);
-  const minutes = [0, 15, 30, 45];
-
   return (
     <div className="w-full">
       {/* Month navigation */}
-      <div className="flex items-center justify-between mb-4">
-        <button type="button" onClick={prevMonth} className="w-8 h-8 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center cursor-pointer">
-          <ChevronLeft size={16} color="#888" />
+      <div className="flex items-center justify-between mb-3">
+        <button type="button" onClick={prevMonth}
+          className="w-7 h-7 rounded-lg bg-[#0e1014] border border-[#1e2230] flex items-center justify-center hover:border-[#333] transition-colors">
+          <ChevronLeft size={14} color="#666" />
         </button>
-        <span className="font-bold text-sm text-white">{MONTHS[viewMonth]} {viewYear}</span>
-        <button type="button" onClick={nextMonth} className="w-8 h-8 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center cursor-pointer">
-          <ChevronRight size={16} color="#888" />
+        <span className="text-sm font-bold text-white">{MONTHS[viewMonth]} {viewYear}</span>
+        <button type="button" onClick={nextMonth}
+          className="w-7 h-7 rounded-lg bg-[#0e1014] border border-[#1e2230] flex items-center justify-center hover:border-[#333] transition-colors">
+          <ChevronRight size={14} color="#666" />
         </button>
       </div>
 
       {/* Day headers */}
       <div className="grid grid-cols-7 mb-1">
         {DAYS.map(d => (
-          <div key={d} className="text-center text-[11px] text-[#555] font-semibold py-1">{d}</div>
+          <div key={d} className="text-center text-[11px] text-[#444] font-medium py-1">{d}</div>
         ))}
       </div>
 
       {/* Calendar grid */}
-      <div className="grid grid-cols-7 gap-y-1 mb-4">
+      <div className="grid grid-cols-7 gap-y-0.5 mb-4">
         {cells.map((day, i) => {
           if (!day) return <div key={i} />;
           const past = isPast(day);
@@ -113,49 +110,41 @@ export default function DateTimePicker({ value, onChange }: DateTimePickerProps)
               type="button"
               disabled={past}
               onClick={() => selectDay(day)}
-              className={`mx-auto w-8 h-8 rounded-full text-[13px] font-medium flex items-center justify-center cursor-pointer border transition-all
-                ${sel     ? "bg-[#DDE048] border-[#DDE048] text-black font-bold"
-                : tod     ? "bg-transparent border-[#DDE048] text-[#DDE048]"
-                : past    ? "text-[#333] border-transparent cursor-not-allowed"
-                :           "text-[#ccc] border-transparent hover:bg-[#1e1e1e] hover:border-[#2a2a2a]"}`}
-            >{day}</button>
+              className={`mx-auto w-8 h-8 rounded-lg text-[13px] font-medium flex items-center justify-center transition-all
+                ${sel  ? "bg-[#DDE048] text-black font-bold"
+                : tod  ? "border border-[#DDE048]/40 text-[#DDE048]"
+                : past ? "text-[#2a2a2a] cursor-not-allowed"
+                :        "text-[#777] hover:bg-[#1e2230] hover:text-white"}`}
+            >
+              {day}
+            </button>
           );
         })}
       </div>
 
-      {/* Time picker */}
-      <div className="border-t border-[#1F2127] pt-3">
-        <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">TIME</div>
-        <div className="flex gap-2">
-          {/* Hour */}
-          <div className="flex-1">
-            <div className="text-[10px] text-[#555] mb-1">Hour</div>
-            <select
-              value={hour}
-              onChange={e => setHour(Number(e.target.value))}
-              className="w-full bg-[#0d0f13] border border-[#1F2127] rounded-xl px-3 py-2 text-white text-sm outline-none appearance-none cursor-pointer"
-            >
-              {hours.map(h => (
-                <option key={h} value={h}>{pad(h)}:00</option>
-              ))}
-            </select>
-          </div>
-          {/* Minute */}
-          <div className="flex-1">
-            <div className="text-[10px] text-[#555] mb-1">Minute</div>
-            <select
-              value={minute}
-              onChange={e => setMinute(Number(e.target.value))}
-              className="w-full bg-[#0d0f13] border border-[#1F2127] rounded-xl px-3 py-2 text-white text-sm outline-none appearance-none cursor-pointer"
-            >
-              {minutes.map(m => (
-                <option key={m} value={m}>{pad(m)}</option>
-              ))}
-            </select>
-          </div>
-        </div>
+      {/* Time — simple dropdowns */}
+      <div className="flex items-center gap-2 border-t border-[#1e2230] pt-3">
+        <span className="text-[11px] text-[#555] tracking-wider shrink-0">TIME</span>
+        <select
+          value={hour}
+          onChange={e => setHour(Number(e.target.value))}
+          className="flex-1 bg-[#0e1014] border border-[#1e2230] rounded-lg px-2 py-1.5 text-white text-sm outline-none appearance-none cursor-pointer hover:border-[#333] transition-colors"
+        >
+          {Array.from({ length: 24 }, (_, i) => (
+            <option key={i} value={i}>{pad(i)}h</option>
+          ))}
+        </select>
+        <span className="text-[#555]">:</span>
+        <select
+          value={minute}
+          onChange={e => setMinute(Number(e.target.value))}
+          className="flex-1 bg-[#0e1014] border border-[#1e2230] rounded-lg px-2 py-1.5 text-white text-sm outline-none appearance-none cursor-pointer hover:border-[#333] transition-colors"
+        >
+          {[0, 15, 30, 45].map(m => (
+            <option key={m} value={m}>{pad(m)}</option>
+          ))}
+        </select>
       </div>
-
     </div>
   );
 }
