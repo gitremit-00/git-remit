@@ -14,14 +14,25 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const role = req.cookies.get("rs_role")?.value;
 
-  // No role cookie → let client-side RoleContext handle redirect to /onboarding
-  if (!role) return NextResponse.next();
+  // No role cookie → new user, send to onboarding
+  if (!role) {
+    if (pathname !== "/onboarding") {
+      return NextResponse.redirect(new URL("/onboarding", req.url));
+    }
+    return NextResponse.next();
+  }
 
+  // Known user — block wrong-role routes
   if (role === "sender" && isMerchantOnly(pathname)) {
     return NextResponse.redirect(new URL("/", req.url));
   }
   if (role === "merchant" && isSenderOnly(pathname)) {
     return NextResponse.redirect(new URL("/merchant", req.url));
+  }
+
+  // Known user landing on onboarding → send to their dashboard
+  if (pathname === "/onboarding") {
+    return NextResponse.redirect(new URL(role === "merchant" ? "/merchant" : "/", req.url));
   }
 
   return NextResponse.next();

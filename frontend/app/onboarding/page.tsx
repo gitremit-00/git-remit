@@ -1,18 +1,32 @@
 "use client";
+import React from "react";
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
 import { useRouter } from "next/navigation";
-import { Send, Store, ArrowRight, Loader } from "lucide-react";
+import { ArrowRight, Loader, Check, PlaneTakeoff, Store } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
+import { useRole } from "../../context/RoleContext";
 import { createUser, Role } from "../../lib/supabase";
+import MetaMaskGate from "../../components/MetaMaskGate";
+import LoadingScreen from "../../components/LoadingScreen";
+
+const STEPS = ["Connect", "Choose role", "Confirm"];
 
 export default function Onboarding() {
   const { account, connect, walletLoading } = useWallet();
+  const { loading: roleLoading, isNewUser } = useRole();
   const router = useRouter();
+  const [step, setStep] = useState(0);
   const [selected, setSelected] = useState<Role | null>(null);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Only advance to role picker once Supabase confirms this wallet has no record
+  useEffect(() => {
+    if (isNewUser && step === 0) setStep(1);
+  }, [isNewUser]);
 
   async function handleContinue() {
     if (!account || !selected) return;
@@ -29,105 +43,139 @@ export default function Onboarding() {
     }
   }
 
+  // Show spinner while wallet initializes or while Supabase is confirming this is a new user.
+  // This prevents the role-picker from flashing for returning users being redirected away.
+  if (walletLoading || (account && (roleLoading || !isNewUser))) {
+    return <LoadingScreen />;
+  }
+
   return (
-    <div className="min-h-screen bg-[#0e1014] flex flex-col items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="flex justify-center mb-8">
-          <Image src="/logo.png" alt="RemitSafe" width={56} height={56} style={{ objectFit: "contain" }} />
-        </div>
+    <div className="min-h-screen bg-[#0e1014] flex items-center justify-center px-4">
+      <div className="w-full max-w-sm">
 
-        <h1 className="text-3xl font-extrabold text-white text-center mb-2">Welcome to RemitSafe</h1>
-        <p className="text-[#555] text-sm text-center mb-8">How will you be using RemitSafe?</p>
+        {/* Card */}
+        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
 
-        {/* Connect wallet first if not connected */}
-        {!account ? (
-          <div className="text-center">
-            <p className="text-[#555] text-sm mb-5">Connect your wallet to get started.</p>
-            <button
-              onClick={connect}
-              disabled={walletLoading}
-              className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-4 text-base disabled:opacity-50"
-            >
-              {walletLoading ? "Connecting…" : "Connect MetaMask"}
-            </button>
+          {/* Logo inside card */}
+          <div className="flex flex-col items-center mb-6">
+            <Image src="/logo.png" alt="RemitSafe" width={44} height={44} style={{ objectFit: "contain" }} />
+            <span className="text-white font-extrabold text-base mt-2.5">RemitSafe</span>
           </div>
-        ) : (
-          <>
-            {/* Role cards */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <RoleCard
-                Icon={Send}
-                title="OFW / Sender"
-                description="I'm sending money to merchants in the Philippines"
-                selected={selected === "sender"}
-                onSelect={() => setSelected("sender")}
-              />
-              <RoleCard
-                Icon={Store}
-                title="Merchant"
-                description="I'm a business in the Philippines receiving remittances"
-                selected={selected === "merchant"}
-                onSelect={() => setSelected("merchant")}
-              />
-            </div>
 
-            {/* Optional name */}
-            {selected && (
-              <div className="mb-6">
-                <label className="text-[11px] text-[#555] tracking-[1.5px] block mb-2">
-                  {selected === "merchant" ? "BUSINESS NAME (optional)" : "YOUR NAME (optional)"}
-                </label>
+
+          {/* Step pills */}
+          <div className="flex items-center justify-center gap-1.5 mb-6">
+            {STEPS.map((label, i) => (
+              <div key={label} className="flex items-center gap-1.5">
+                <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
+                  i < step ? "text-[#DDE048]" : i === step ? "bg-[#DDE048]/10 border border-[#DDE048]/40 text-[#DDE048]" : "text-[#333]"
+                }`}>
+                  {i < step ? <Check size={10} strokeWidth={3} /> : null}
+                  {label}
+                </div>
+                {i < STEPS.length - 1 && <div className={`w-4 h-px ${i < step ? "bg-[#DDE048]/30" : "bg-[#1e2230]"}`} />}
+              </div>
+            ))}
+          </div>
+
+          {/* Step 0 — Connect */}
+          {step === 0 && (
+            <div>
+              <h2 className="text-lg font-extrabold text-white mb-1 text-center">Connect your wallet</h2>
+              <p className="text-[#555] text-xs text-center mb-6">Your wallet address is your identity on RemitSafe.</p>
+              <MetaMaskGate>{null}</MetaMaskGate>
+            </div>
+          )}
+
+          {/* Step 1 — Choose role */}
+          {step === 1 && (
+            <div>
+              <h2 className="text-lg font-extrabold text-white mb-1 text-center">Who are you?</h2>
+              <p className="text-[#555] text-xs text-center mb-5">This is permanent and tied to your wallet.</p>
+
+              <div className="space-y-2.5 mb-5">
+                {([
+                  { role: "sender" as Role, Icon: PlaneTakeoff, title: "OFW / Sender", sub: "I'm sending money to the Philippines" },
+                  { role: "merchant" as Role, Icon: Store, title: "Merchant", sub: "I'm a business receiving remittances" },
+                ] as { role: Role; Icon: React.ElementType; title: string; sub: string }[]).map(({ role, Icon, title, sub }) => (
+                  <button
+                    key={role}
+                    onClick={() => setSelected(role)}
+                    className={`w-full flex items-center gap-3.5 p-4 rounded-xl border-2 text-left transition-all ${
+                      selected === role ? "border-[#DDE048] bg-[#DDE048]/5" : "border-[#1e2230] hover:border-[#2a2d36]"
+                    }`}
+                  >
+                    <Icon size={22} color="#DDE048" className="shrink-0" />
+                    <div className="flex-1">
+                      <div className={`font-bold text-sm ${selected === role ? "text-white" : "text-[#888]"}`}>{title}</div>
+                      <div className="text-[11px] text-[#555] mt-0.5">{sub}</div>
+                    </div>
+                    <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
+                      selected === role ? "border-[#DDE048] bg-[#DDE048]" : "border-[#333]"
+                    }`}>
+                      {selected === role && <Check size={9} color="black" strokeWidth={3} />}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                disabled={!selected}
+                onClick={() => setStep(2)}
+                className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2 hover:bg-[#c8ce30] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Continue <ArrowRight size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* Step 2 — Confirm */}
+          {step === 2 && (
+            <div>
+              <h2 className="text-lg font-extrabold text-white mb-1 text-center">Almost done</h2>
+              <p className="text-[#555] text-xs text-center mb-5">Add a name so others can identify you.</p>
+
+              <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-3.5 py-3 flex items-center gap-2.5 mb-4">
+                <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                <span className="font-mono text-xs text-[#888] truncate">{account}</span>
+              </div>
+
+              <div className="mb-4">
                 <input
+                  autoFocus
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={selected === "merchant" ? "e.g. Santos General Store" : "e.g. Juan dela Cruz"}
-                  className="w-full bg-[#13161c] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/50 placeholder:text-[#444]"
+                  onKeyDown={(e) => e.key === "Enter" && handleContinue()}
+                  placeholder={selected === "merchant" ? "Business name (optional)" : "Your name (optional)"}
+                  className="w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/50 placeholder:text-[#333] transition-colors"
                 />
               </div>
-            )}
 
-            {error && <p className="text-red-400 text-sm text-center mb-4">{error}</p>}
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl px-3.5 py-2.5 mb-4">
+                  {error}
+                </div>
+              )}
 
-            <button
-              onClick={handleContinue}
-              disabled={!selected || saving}
-              className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-4 text-base flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#c8ce30] transition-colors"
-            >
-              {saving ? <><Loader size={16} className="animate-spin" /> Setting up…</> : <>Continue <ArrowRight size={16} /></>}
-            </button>
+              <button
+                onClick={handleContinue}
+                disabled={saving}
+                className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2 hover:bg-[#c8ce30] transition-colors disabled:opacity-50"
+              >
+                {saving ? <><Loader size={14} className="animate-spin" /> Setting up…</> : <>Get started <ArrowRight size={14} /></>}
+              </button>
 
-            <p className="text-[#333] text-xs text-center mt-4">
-              Your role is permanent and tied to your wallet address.
-            </p>
-          </>
-        )}
+              <button onClick={() => setSelected(null)} className="w-full text-[#444] text-xs mt-3 hover:text-[#666] transition-colors">
+                ← Change role
+              </button>
+            </div>
+          )}
+        </div>
+
+        <p className="text-[#2a2d36] text-[11px] text-center mt-5">
+          Testnet only · No real funds
+        </p>
       </div>
     </div>
-  );
-}
-
-function RoleCard({ Icon, title, description, selected, onSelect }: {
-  Icon: React.ElementType;
-  title: string;
-  description: string;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      onClick={onSelect}
-      className={`text-left p-5 rounded-2xl border-2 transition-all ${
-        selected
-          ? "border-[#DDE048] bg-[#DDE048]/5"
-          : "border-[#1e2230] bg-[#13161c] hover:border-[#333]"
-      }`}
-    >
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${selected ? "bg-[#DDE048]/20" : "bg-[#1e2230]"}`}>
-        <Icon size={20} color={selected ? "#DDE048" : "#555"} />
-      </div>
-      <div className={`font-bold text-sm mb-1.5 ${selected ? "text-white" : "text-[#888]"}`}>{title}</div>
-      <div className="text-xs text-[#555] leading-relaxed">{description}</div>
-    </button>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import Header from "../../components/Header";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { useEffect, useState } from "react";
@@ -6,12 +7,13 @@ import { ethers } from "ethers";
 import { Droplets, Info, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Copy } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import { CONTRACTS, PHP_PER_USDC } from "../../contracts/addresses";
+import MetaMaskGate from "../../components/MetaMaskGate";
 import Link from "next/link";
 
 function shortAddr(a: string) { return a.slice(0, 6) + "…" + a.slice(-4); }
 
 export default function Wallet() {
-  const { account, connect, usdcRead, usdcWrite, walletLoading } = useWallet();
+  const { account, connect, disconnect, usdcRead, usdcWrite, walletLoading } = useWallet();
   const [balance, setBalance] = useState<string | null>(null);
   const [allowance, setAllowance] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,7 +63,7 @@ export default function Wallet() {
       <p className="text-[#555] text-sm mb-8">Your USDC balance, MetaMask connection, and pledge spending allowance on Morph L2.</p>
 
       {!account ? (
-        <button className="bg-[#DDE048] text-black font-bold rounded-xl px-8 py-3" onClick={connect}>Connect MetaMask</button>
+        <div className="max-w-sm"><MetaMaskGate>{null}</MetaMaskGate></div>
       ) : (
         <div className="grid grid-cols-2 gap-5">
           {/* Left column */}
@@ -138,13 +140,15 @@ export default function Wallet() {
             <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
               <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center text-xl">🦊</div>
+                  <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center p-1.5">
+                    <Image src="/MetaMask.png" alt="MetaMask" width={28} height={28} style={{ objectFit: "contain" }} />
+                  </div>
                   <div>
                     <div className="font-bold text-white">MetaMask</div>
                     <div className="flex items-center gap-1.5 text-[12px] text-green-400"><span className="w-1.5 h-1.5 rounded-full bg-green-400" /> Connected</div>
                   </div>
                 </div>
-                <button className="bg-[#1e2230] text-white text-sm font-semibold rounded-xl px-4 py-2 hover:bg-[#252836] transition-colors">Disconnect</button>
+                <button onClick={disconnect} className="bg-[#1e2230] text-white text-sm font-semibold rounded-xl px-4 py-2 hover:bg-[#252836] transition-colors">Disconnect</button>
               </div>
               <div className="space-y-3">
                 <div>
@@ -203,7 +207,7 @@ export default function Wallet() {
       <Header title="Wallet" />
       <div className="px-4 pt-5">
         {walletLoading ? <LoadingSpinner fullScreen /> : !account ? (
-          <button className="w-full bg-[#DDE048] text-black border-0 rounded-[14px] py-4 text-base font-bold cursor-pointer" onClick={connect}>Connect MetaMask</button>
+          <MetaMaskGate>{null}</MetaMaskGate>
         ) : (
           <>
             <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-4">

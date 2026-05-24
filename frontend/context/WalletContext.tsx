@@ -35,6 +35,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(async () => {
     try {
+      sessionStorage.removeItem("rs_disconnected");
       if (!window.ethereum) { setError("MetaMask not found."); return; }
       try {
         await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: MORPH_TESTNET.chainId }] });
@@ -54,13 +55,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const disconnect = useCallback(() => { setAccount(null); setSigner(null); }, []);
+  const disconnect = useCallback(() => {
+    // Don't mutate state — redirect immediately so the current page never re-renders
+    document.cookie = "rs_role=; path=/; max-age=0";
+    sessionStorage.setItem("rs_disconnected", "1");
+    window.location.href = "/onboarding";
+  }, []);
 
-  // Auto-reconnect if MetaMask is already connected
+  // Auto-reconnect if MetaMask is already connected (skipped if user explicitly disconnected)
   useEffect(() => {
     async function tryReconnect() {
       try {
         if (!window.ethereum) return;
+        if (sessionStorage.getItem("rs_disconnected")) return;
         const accounts = await window.ethereum.request({ method: "eth_accounts" }) as string[];
         if (accounts.length === 0) return;
         const provider = new BrowserProvider(window.ethereum);

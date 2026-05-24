@@ -2,10 +2,12 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Send, FileText, Users, Wallet, Bell, Shield, Settings, HelpCircle, ArrowLeftRight } from "lucide-react";
+import { Home, Send, FileText, Users, Wallet, Bell, Shield, Settings, HelpCircle } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
 import { useRole } from "../context/RoleContext";
 import Logo from "./Logo";
+import Image from "next/image";
+import MetaMaskGate from "./MetaMaskGate";
 
 const senderNav = [
   { href: "/", label: "Dashboard", Icon: Home },
@@ -103,13 +105,7 @@ export default function DesktopSidebar() {
             <div className="text-sm font-bold text-white font-mono">{shortAddr(account)}</div>
           </div>
         ) : (
-          <button
-            onClick={connect}
-            className="w-full bg-[#DDE048] text-black text-sm font-bold rounded-xl py-2.5 flex items-center justify-center gap-2"
-          >
-            <ArrowLeftRight size={14} />
-            Connect Wallet
-          </button>
+          <MetaMaskGate>{null}</MetaMaskGate>
         )}
       </div>
     </aside>
