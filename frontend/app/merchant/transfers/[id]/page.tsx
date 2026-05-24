@@ -9,7 +9,8 @@ import { useParams, useRouter } from "next/navigation";
 import { ethers } from "ethers";
 import { ArrowLeft, ChevronRight, ExternalLink, CheckCircle2, Circle, Clock, AlertCircle, BadgeCheck, MessageCircle } from "lucide-react";
 import { useWallet } from "../../../../context/WalletContext";
-import { PHP_PER_USDC, CONTRACTS } from "../../../../contracts/addresses";
+import { CONTRACTS } from "../../../../contracts/addresses";
+import { useCurrency } from "../../../../context/CurrencyContext";
 import { getPledgeMeta } from "../../../../lib/pledgeMeta";
 
 const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
@@ -247,7 +248,7 @@ export default function MerchantTransferDetail() {
               <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
                 <div className="text-[11px] text-[#555] tracking-[1px] mb-2">YOU RECEIVE</div>
                 <div className="text-2xl font-extrabold text-[#DDE048]">{merchantReceives.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
-                <div className="text-xs text-[#555] mt-1">after 1% protocol fee</div>
+                <div className="text-xs text-[#555] mt-1">after 1% service fee</div>
               </div>
             </div>
             <div className="mb-1.5 flex justify-between text-xs text-[#555]">

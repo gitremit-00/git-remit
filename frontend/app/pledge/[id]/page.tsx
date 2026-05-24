@@ -8,7 +8,8 @@ import TxGuard from "../../../components/TxGuard";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { useWallet } from "../../../context/WalletContext";
 import ProgressBar from "../../../components/ProgressBar";
-import { CONTRACTS, PHP_PER_USDC } from "../../../contracts/addresses";
+import { CONTRACTS } from "../../../contracts/addresses";
+import { useCurrency } from "../../../context/CurrencyContext";
 import { getPledgeMeta } from "../../../lib/pledgeMeta";
 import Link from "next/link";
 
@@ -208,11 +209,11 @@ export default function PledgeDetail() {
           <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-bold text-white">Transfer timeline</h3>
-              <span className="text-[12px] text-[#555]">Smart-contract events on Morph L2</span>
+              <span className="text-[12px] text-[#555]">On-chain smart contract events</span>
             </div>
             <div className="flex flex-col gap-0">
               <TimelineStep state="done" title="Pledge created"
-                sub={`Locked ${ethers.formatUnits(pledge.initialDeposit, 6)} USDC into Morph L2 contract`}
+                sub={`Locked ${ethers.formatUnits(pledge.initialDeposit, 6)} USDC into escrow contract`}
                 amount={`${ethers.formatUnits(pledge.initialDeposit, 6)} USDC`}
                 date={deadline.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                 isLast={false} lineActive={true} />
@@ -242,13 +243,12 @@ export default function PledgeDetail() {
               <a href={`https://explorer-hoodi.morph.network/address/${CONTRACTS.REMITTANCE_PLEDGE}`}
                 target="_blank" rel="noreferrer"
                 className="text-[#DDE048] flex items-center gap-1.5 text-sm font-semibold hover:text-[#c8ce30]">
-                Open in Morph Explorer <ExternalLink size={13} />
+                View on Explorer <ExternalLink size={13} />
               </a>
             </div>
             <div className="space-y-0">
               <ProofRow label="PLEDGE ID" value={pledgeIdShort} copyValue={pledge.id.toString()} />
-              <ProofRow label="CONTRACT" value="0xMorph…Pledge.sol" copyValue={CONTRACTS.REMITTANCE_PLEDGE} />
-              <ProofRow label="NETWORK" value="Morph L2 · chainId 2818" />
+              <ProofRow label="CONTRACT" value="0xRemitSafe…Pledge" copyValue={CONTRACTS.REMITTANCE_PLEDGE} />
               <ProofRow label="SENDER" value={shortAddr(pledge.sender)} copyValue={pledge.sender} last />
             </div>
           </div>
@@ -268,7 +268,7 @@ export default function PledgeDetail() {
               <BreakdownRow label="Total committed" value={`${total.toFixed(2)} USDC`} />
               <BreakdownRow label="Locked" value={`${locked.toFixed(2)} USDC`} accent />
               <BreakdownRow label="Remaining" value={`${remaining.toFixed(2)} USDC`} />
-              <BreakdownRow label="Fee (1% on release)" value={`${fee.toFixed(2)} USDC`} />
+              <BreakdownRow label="Service fee (1%)" value={`${fee.toFixed(2)} USDC`} />
               <div className="pt-2 border-t border-[#1e2230]">
                 <BreakdownRow label="Merchant receives" value={`${merchantReceives.toFixed(2)} USDC`} green />
               </div>
@@ -434,7 +434,6 @@ export default function PledgeDetail() {
                 </a>
               </div>
               <ProofRow label="Pledge ID" value={`#${pledge.id.toString()}`} />
-              <ProofRow label="Network" value="Morph Hoodi Testnet" />
               <ProofRow label="Contract" value={shortAddr(CONTRACTS.REMITTANCE_PLEDGE)} copyValue={CONTRACTS.REMITTANCE_PLEDGE} last />
             </div>
           )}

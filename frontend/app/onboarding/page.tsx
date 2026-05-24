@@ -173,7 +173,7 @@ export default function Onboarding() {
         </div>
 
         <p className="text-[#2a2d36] text-[11px] text-center mt-5">
-          Testnet only · No real funds
+          Powered by Morph L2 · Secured by smart contracts
         </p>
       </div>
     </div>

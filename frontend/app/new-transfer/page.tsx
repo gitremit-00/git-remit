@@ -8,7 +8,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ethers } from "ethers";
 import { ArrowLeft, Calendar, Check, Info, CheckCircle2, Clock, Loader, Shield, ChevronRight } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
-import { CONTRACTS, PHP_PER_USDC } from "../../contracts/addresses";
+import { CONTRACTS } from "../../contracts/addresses";
+import { useCurrency } from "../../context/CurrencyContext";
 import ProgressBar from "../../components/ProgressBar";
 import { savePledgeMeta, getPledgeMeta } from "../../lib/pledgeMeta";
 import Link from "next/link";
@@ -28,6 +29,7 @@ export default function NewTransfer() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { account, signer, pledgeRead, pledgeWrite, usdcRead, usdcWrite } = useWallet();
+  const { fmt } = useCurrency();
 
   useEffect(() => {
     const to = searchParams.get("to");
@@ -43,6 +45,7 @@ export default function NewTransfer() {
     totalAmount: "", initialDeposit: "", commitmentDate: "",
   });
   const [requiredPct, setRequiredPct] = useState(20);
+  const [payInFull, setPayInFull] = useState(false);
   const [txStatus, setTxStatus] = useState("");
   const [txError, setTxError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -55,7 +58,8 @@ export default function NewTransfer() {
       setStep(1);
     } else if (step === 1 && form.totalAmount) {
       if (!form.initialDeposit) setForm({ ...form, initialDeposit: ((parseFloat(form.totalAmount) * 1.01 * requiredPct) / 100).toFixed(2) });
-      setStep(2);
+      // Skip commitment date step if paying in full — no remaining balance to schedule
+      setStep(payInFull ? 3 : 2);
     } else if (step === 2 && form.commitmentDate) {
       setStep(3);
     }
@@ -66,22 +70,34 @@ export default function NewTransfer() {
     const totalAmt = ethers.parseUnits(form.totalAmount, 6);
     const initDeposit = ethers.parseUnits(form.initialDeposit, 6);
     const commitTs = Math.floor(new Date(form.commitmentDate).getTime() / 1000);
-    const balance: bigint = await usdcRead.balanceOf(account);
-    if (balance < initDeposit) {
-      const has = parseFloat(ethers.formatUnits(balance, 6)).toFixed(2);
-      const needs = parseFloat(ethers.formatUnits(initDeposit, 6)).toFixed(2);
-      setTxError(`Insufficient USDC balance. You have ${has} USDC but need ${needs} USDC.`);
-      return;
-    }
-    const approveData = usdcWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, initDeposit]);
-    const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [form.merchant, totalAmt, initDeposit, commitTs]);
-    const frozenSigner = signer;
-    setLoading(true); setTxError(""); setTxStatus("approving");
+
+    setLoading(true); setTxError("");
+
     try {
-      const approveTx = await frozenSigner.sendTransaction({ to: CONTRACTS.MOCK_USDC, data: approveData });
-      await approveTx.wait();
+      // Check balance
+      const balance: bigint = await usdcRead.balanceOf(account);
+      if (balance < initDeposit) {
+        const has = parseFloat(ethers.formatUnits(balance, 6)).toFixed(2);
+        const needs = parseFloat(ethers.formatUnits(initDeposit, 6)).toFixed(2);
+        setTxError(`Insufficient USDC balance. You have ${has} USDC but need ${needs} USDC.`);
+        setLoading(false);
+        return;
+      }
+
+      // Only approve if current allowance is less than the deposit needed
+      const allowance: bigint = await usdcRead.allowance(account, CONTRACTS.REMITTANCE_PLEDGE);
+      if (allowance < initDeposit) {
+        setTxStatus("approving");
+        const approveData = usdcWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, initDeposit]);
+        const approveTx = await signer.sendTransaction({ to: CONTRACTS.MOCK_USDC, data: approveData });
+        await approveTx.wait();
+      } else {
+        setTxStatus("approving"); // show as done immediately
+      }
+
       setTxStatus("creating");
-      const createTx = await frozenSigner.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
+      const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [form.merchant, totalAmt, initDeposit, commitTs]);
+      const createTx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
       await createTx.wait();
       savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note });
       setTxStatus("done");
@@ -92,6 +108,26 @@ export default function NewTransfer() {
       setLoading(false);
     }
   }
+
+  function togglePayInFull() {
+    if (!payInFull) {
+      setPayInFull(true);
+      // Auto-set commitment date 85 days out (contract max is 90; buffer for block timestamp drift)
+      const d = new Date();
+      d.setDate(d.getDate() + 85);
+      d.setHours(9, 0, 0, 0);
+      setForm((f) => ({
+        ...f,
+        initialDeposit: parseFloat((parseFloat(f.totalAmount || "0") * 1.01).toFixed(6)).toFixed(2),
+        commitmentDate: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`,
+      }));
+    } else {
+      setPayInFull(false);
+      setForm((f) => ({ ...f, initialDeposit: "", commitmentDate: "" }));
+    }
+  }
+
+  function pad(n: number) { return String(n).padStart(2, "0"); }
 
   function setQuickDate(days: number) {
     const d = new Date();
@@ -117,10 +153,10 @@ export default function NewTransfer() {
   const deposit = parseFloat(form.initialDeposit) || 0;
   const remaining = Math.max(0, parseFloat((gross - deposit).toFixed(6)));
   const fee = parseFloat((total * 0.01).toFixed(6));
-  const merchantReceives = Math.max(0, parseFloat((total - fee).toFixed(6)));
+  const merchantReceives = total; // fee is added on top (gross = total × 1.01), merchant gets the full pledge amount
   const deadline = form.commitmentDate ? new Date(form.commitmentDate) : null;
   const daysLeft = deadline ? Math.ceil((deadline.getTime() - Date.now()) / 86400000) : 0;
-  const canNext = (step === 0 && !!form.merchant) || (step === 1 && !!form.totalAmount && !!form.initialDeposit) || (step === 2 && !!form.commitmentDate) || step === 3;
+  const canNext = (step === 0 && !!form.merchant) || (step === 1 && !!form.totalAmount && !!form.initialDeposit) || (step === 2 && !!form.commitmentDate) || (step === 3);
 
   const deadlineStr = deadline
     ? deadline.toLocaleDateString("en-US", { month: "short", day: "numeric" })
@@ -248,34 +284,70 @@ export default function NewTransfer() {
                       className="w-full bg-transparent text-white text-2xl font-extrabold outline-none"
                       type="number" placeholder="0.00"
                       value={form.totalAmount}
-                      onChange={(e) => setForm({ ...form, totalAmount: e.target.value })}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const g = parseFloat((parseFloat(v || "0") * 1.01).toFixed(6));
+                        setForm({ ...form, totalAmount: v, initialDeposit: payInFull ? g.toFixed(2) : form.initialDeposit });
+                      }}
                     />
-                    {form.totalAmount && <div className="text-xs text-[#555] mt-1">≈ ₱{(total * PHP_PER_USDC).toLocaleString()} PHP</div>}
+                    {form.totalAmount && <div className="text-xs text-[#555] mt-1">≈ {fmt(total)}</div>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 bg-[#1a1e14] border border-[#DDE048]/20 rounded-xl px-4 py-2.5 text-[13px] text-[#ccc]">
                   <Info size={13} color="#DDE048" />
                   Trust Score {requiredPct ? requiredPct : 20} · minimum upfront is <span className="text-[#DDE048] font-bold ml-1">{requiredPct}% ({((gross * requiredPct) / 100).toFixed(2)} USDC)</span>
                 </div>
+
+                {/* Pay in full toggle */}
+                <button
+                  type="button"
+                  onClick={togglePayInFull}
+                  disabled={!form.totalAmount}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${
+                    payInFull
+                      ? "bg-[#DDE048]/5 border-[#DDE048]/50 text-white"
+                      : "bg-[#0e1014] border-[#1e2230] text-[#666] hover:border-[#333]"
+                  } disabled:opacity-40`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all ${payInFull ? "bg-[#DDE048] border-[#DDE048]" : "border-[#333]"}`}>
+                      {payInFull && <Check size={10} color="black" strokeWidth={3} />}
+                    </div>
+                    <div className="text-left">
+                      <div className="text-sm font-semibold">Pay in full now</div>
+                      <div className="text-[11px] text-[#555] mt-0.5">Lock the entire amount upfront — no remaining balance due</div>
+                    </div>
+                  </div>
+                  {payInFull && form.totalAmount && (
+                    <span className="text-[#DDE048] font-bold text-sm shrink-0 ml-3">{gross.toFixed(2)} USDC</span>
+                  )}
+                </button>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">LOCK NOW (DEPOSIT)</label>
-                    <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3">
+                    <div className={`bg-[#0e1014] border rounded-xl px-4 py-3 transition-colors ${payInFull ? "border-[#DDE048]/30" : "border-[#1e2230]"}`}>
                       <input
-                        className="w-full bg-transparent text-white text-xl font-extrabold outline-none"
+                        className="w-full bg-transparent text-white text-xl font-extrabold outline-none disabled:opacity-60"
                         type="number"
                         placeholder={`Min ${((gross * requiredPct) / 100).toFixed(2)}`}
                         value={form.initialDeposit}
+                        disabled={payInFull}
                         onChange={(e) => setForm({ ...form, initialDeposit: e.target.value })}
                       />
-                      {form.initialDeposit && <div className="text-[11px] text-[#555] mt-1">{total > 0 ? ((deposit / total) * 100).toFixed(0) : 0}% of total</div>}
+                      <div className="text-[11px] text-[#555] mt-1">
+                        {payInFull ? "Full payment" : form.initialDeposit ? `${total > 0 ? ((deposit / total) * 100).toFixed(0) : 0}% of total` : ""}
+                      </div>
                     </div>
                   </div>
                   <div>
                     <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">COMMIT LATER (REMAINING)</label>
                     <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3">
-                      <div className="text-xl font-extrabold text-white">{remaining.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
-                      <div className="text-[11px] text-[#555] mt-1">Due on commitment date</div>
+                      <div className={`text-xl font-extrabold ${payInFull ? "text-green-400" : "text-white"}`}>
+                        {payInFull ? "None" : `${remaining.toFixed(2)}`}
+                        {!payInFull && <span className="text-sm text-[#555] font-normal"> USDC</span>}
+                      </div>
+                      <div className="text-[11px] text-[#555] mt-1">{payInFull ? "Fully paid upfront" : "Due on commitment date"}</div>
                     </div>
                   </div>
                 </div>
@@ -371,9 +443,12 @@ export default function NewTransfer() {
                     {form.merchantName && <ReviewRow label="To" value={form.merchantName} />}
                     <ReviewRow label="Wallet" value={`${form.merchant.slice(0, 10)}…${form.merchant.slice(-6)}`} />
                     {form.note && <ReviewRow label="Note" value={form.note} />}
-                    <ReviewRow label="Total" value={`${total.toFixed(2)} USDC`} />
+                    <ReviewRow label="Pledge amount" value={`${total.toFixed(2)} USDC`} />
+                    <ReviewRow label="Service fee (1%)" value={`${fee.toFixed(2)} USDC`} />
+                    <ReviewRow label="Total you pay" value={`${gross.toFixed(2)} USDC`} />
                     <ReviewRow label="Lock now" value={`${deposit.toFixed(2)} USDC`} accent />
-                    <ReviewRow label="Remaining" value={`${remaining.toFixed(2)} USDC`} />
+                    <ReviewRow label="Remaining" value={remaining > 0 ? `${remaining.toFixed(2)} USDC` : "None"} />
+                    <ReviewRow label="Merchant receives" value={`${merchantReceives.toFixed(2)} USDC`} />
                     <ReviewRow label="Deadline" value={deadline ? deadline.toLocaleString() : "–"} last />
                   </div>
                 )}
@@ -410,10 +485,13 @@ export default function NewTransfer() {
               )}
 
               <div className="space-y-2.5 text-sm mb-4">
-                <SummaryRow label="Total" value={total > 0 ? `${total.toFixed(2)} USDC` : "—"} />
+                <SummaryRow label="Pledge amount" value={total > 0 ? `${total.toFixed(2)} USDC` : "—"} />
+                <SummaryRow label="Service fee (1%)" value={total > 0 ? `+ ${fee.toFixed(2)} USDC` : "—"} />
+                <div className="pt-2 border-t border-[#1e2230] pb-2">
+                  <SummaryRow label="Total you pay" value={gross > 0 ? `${gross.toFixed(2)} USDC` : "—"} bold />
+                </div>
                 <SummaryRow label="Lock now" value={deposit > 0 ? `${deposit.toFixed(2)} USDC` : "—"} accent />
-                <SummaryRow label={`Due ${deadlineStr}`} value={remaining > 0 ? `${remaining.toFixed(2)} USDC` : "—"} />
-                <SummaryRow label="Fee (1% on release)" value={total > 0 ? `${fee.toFixed(2)} USDC` : "—"} />
+                <SummaryRow label={`Due ${deadlineStr}`} value={remaining > 0 ? `${remaining.toFixed(2)} USDC` : (deposit > 0 ? "None" : "—")} />
                 <div className="pt-2 border-t border-[#1e2230]">
                   <SummaryRow label="Merchant receives" value={merchantReceives > 0 ? `${merchantReceives.toFixed(2)} USDC` : "—"} />
                 </div>
@@ -430,18 +508,18 @@ export default function NewTransfer() {
                 <>
                   <div className="flex items-start gap-2 bg-[#0e1014] border border-[#1e2230] rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
                     <Shield size={13} color="#555" className="shrink-0 mt-0.5" />
-                    Locked on Morph L2 · Visible to {form.merchantName || "merchant"} as soon as you sign.
+                    Secured by smart contract · Visible to {form.merchantName || "merchant"} as soon as you sign.
                   </div>
                   <button
                     onClick={submit}
                     disabled={loading}
                     className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#c8ce30] transition-colors"
                   >
-                    {loading ? (txStatus === "done" ? "✓ Done!" : "Processing…") : "⚡ Sign with MetaMask"}
+                    {loading ? (txStatus === "done" ? "✓ Done!" : "Processing…") : "Confirm & Lock Funds"}
                   </button>
                   <button className="w-full text-[#555] text-sm py-2.5 hover:text-[#888] transition-colors">Save as draft</button>
                   <p className="text-[11px] text-[#444] text-center leading-relaxed">
-                    You&apos;ll sign two messages: USDC approval + pledge contract call
+                    MetaMask will ask you to approve two transactions: USDC spend + pledge creation
                   </p>
                 </>
               )}
@@ -455,6 +533,7 @@ export default function NewTransfer() {
         steps={[
           { label: "Approve USDC spend", state: txStatus === "approving" ? "active" : txStatus === "creating" || txStatus === "done" ? "done" : "pending" },
           { label: "Create pledge on-chain", state: txStatus === "creating" ? "active" : txStatus === "done" ? "done" : "pending" },
+
         ]}
       />
     </div>
@@ -491,7 +570,7 @@ export default function NewTransfer() {
             <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Merchant name <span className="text-[#888] font-normal">(optional)</span></label>
             <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block" placeholder="e.g. Dr. Yanga's Colleges Inc."
               value={form.merchantName} onChange={(e) => setForm({ ...form, merchantName: e.target.value })} />
-            <div className="flex items-start gap-1.5 mt-1.5"><Info size={13} color="#666" /><span className="text-xs text-[#888] leading-relaxed">Enter the merchant&apos;s wallet address on Morph L2.</span></div>
+            <div className="flex items-start gap-1.5 mt-1.5"><Info size={13} color="#666" /><span className="text-xs text-[#888] leading-relaxed">Enter the merchant&apos;s wallet address.</span></div>
           </div>
         )}
 
@@ -508,10 +587,30 @@ export default function NewTransfer() {
             <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Total Amount (USDC)</label>
             <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block" type="number" placeholder="e.g. 248.50" value={form.totalAmount}
               onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} />
-            {form.totalAmount && <div className="text-xs text-[#888] -mt-2.5 mb-3.5">= ₱{(total * PHP_PER_USDC).toLocaleString()} PHP</div>}
+            {form.totalAmount && <div className="text-xs text-[#888] -mt-2.5 mb-3.5">= {fmt(total)}</div>}
+            {/* Pay in full toggle — mobile */}
+            <button
+              type="button"
+              onClick={togglePayInFull}
+              disabled={!form.totalAmount}
+              className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-[14px] border mb-3.5 transition-all text-left ${
+                payInFull ? "bg-[#DDE048]/5 border-[#DDE048]/40" : "bg-[#11141A] border-[#1F2127]"
+              } disabled:opacity-40`}
+            >
+              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${payInFull ? "bg-[#DDE048] border-[#DDE048]" : "border-[#333]"}`}>
+                {payInFull && <Check size={11} color="black" strokeWidth={3} />}
+              </div>
+              <div className="flex-1">
+                <div className={`text-sm font-semibold ${payInFull ? "text-white" : "text-[#888]"}`}>Pay in full now</div>
+                <div className="text-[11px] text-[#555] mt-0.5">Lock entire amount — no balance due later</div>
+              </div>
+              {payInFull && form.totalAmount && <span className="text-[#DDE048] font-bold text-sm shrink-0">{gross.toFixed(2)} USDC</span>}
+            </button>
+
             <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Lock Now (initial deposit)</label>
-            <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block" type="number"
+            <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block disabled:opacity-50" type="number"
               placeholder={`Min ${requiredPct}% = ${((gross * requiredPct) / 100).toFixed(2)} USDC`}
+              disabled={payInFull}
               value={form.initialDeposit} onChange={(e) => setForm({ ...form, initialDeposit: e.target.value })} />
             <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Note / Reference <span className="text-[#888] font-normal">(optional)</span></label>
             <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block" placeholder="e.g. Tuition · 2nd Semester"
@@ -597,11 +696,14 @@ export default function NewTransfer() {
               {form.merchantName && <ReviewRow label="To" value={form.merchantName} />}
               <ReviewRow label="Wallet" value={`${form.merchant.slice(0, 10)}...${form.merchant.slice(-6)}`} />
               {form.note && <ReviewRow label="Note" value={form.note} />}
-              <ReviewRow label="Total" value={`${total.toFixed(2)} USDC`} />
+              <ReviewRow label="Pledge amount" value={`${total.toFixed(2)} USDC`} />
+              <ReviewRow label="Service fee (1%)" value={`${fee.toFixed(2)} USDC`} />
+              <ReviewRow label="Total you pay" value={`${gross.toFixed(2)} USDC`} />
               <ReviewRow label="Lock now" value={`${deposit.toFixed(2)} USDC`} accent />
-              <ReviewRow label="Remaining" value={`${remaining.toFixed(2)} USDC`} />
+              <ReviewRow label="Remaining" value={remaining > 0 ? `${remaining.toFixed(2)} USDC` : "None"} />
+              <ReviewRow label="Merchant receives" value={`${merchantReceives.toFixed(2)} USDC`} />
               <ReviewRow label="Deadline" value={deadline ? deadline.toLocaleString() : "–"} />
-              <ReviewRow label="PHP equiv." value={`₱${(total * PHP_PER_USDC).toLocaleString()}`} last />
+              <ReviewRow label="Equiv. value" value={fmt(total)} last />
             </div>
             {txStatus === "done" && (
               <div className="bg-[#0d1f0d] border border-green-500/20 rounded-2xl px-4 py-3.5 mb-3">
@@ -622,13 +724,14 @@ export default function NewTransfer() {
         <TxGuard active={loading && txStatus !== "done"} steps={[
           { label: "Approve USDC spend", state: txStatus === "approving" ? "active" : txStatus === "creating" || txStatus === "done" ? "done" : "pending" },
           { label: "Create pledge on-chain", state: txStatus === "creating" ? "active" : txStatus === "done" ? "done" : "pending" },
+
         ]} />
 
         <button
           className="w-full bg-[#DDE048] text-black border-0 rounded-2xl py-[17px] text-base font-bold cursor-pointer mt-6 mb-6 disabled:opacity-50"
           style={{ opacity: canNext ? 1 : 0.5 }}
           onClick={step < 3 ? nextStep : submit} disabled={!canNext || loading}>
-          {loading ? (txStatus === "done" ? "✓ Done!" : "Processing...") : step < 3 ? "Continue →" : "Confirm & Send →"}
+          {loading ? (txStatus === "done" ? "✓ Done!" : "Processing...") : step < 3 ? "Continue →" : "Confirm & Lock Funds"}
         </button>
       </div>
     </div>
@@ -664,11 +767,11 @@ function ReviewRow({ label, value, accent, last }: { label: string; value: strin
   );
 }
 
-function SummaryRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function SummaryRow({ label, value, accent, bold }: { label: string; value: string; accent?: boolean; bold?: boolean }) {
   return (
     <div className="flex justify-between">
-      <span className="text-[#555]">{label}</span>
-      <span className={`font-semibold ${accent ? "text-[#DDE048]" : "text-white"}`}>{value}</span>
+      <span className={bold ? "text-white font-semibold" : "text-[#555]"}>{label}</span>
+      <span className={`font-semibold ${accent ? "text-[#DDE048]" : bold ? "text-white font-extrabold" : "text-white"}`}>{value}</span>
     </div>
   );
 }

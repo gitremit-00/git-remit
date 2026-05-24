@@ -6,7 +6,7 @@ import { Download, Share2, Search, ExternalLink, Clock, CheckCircle2, AlertCircl
 import { useWallet } from "../../context/WalletContext";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import CircularScore from "../../components/CircularScore";
-import { PHP_PER_USDC } from "../../contracts/addresses";
+import { useCurrency } from "../../context/CurrencyContext";
 import { getPledgeMeta } from "../../lib/pledgeMeta";
 import BottomNav from "../../components/BottomNav";
 import Header from "../../components/Header";
@@ -28,6 +28,7 @@ function avatarColor(addr: string) { return AVATAR_COLORS[parseInt(addr.slice(2,
 
 export default function MerchantDashboard() {
   const { account, connect, pledgeRead, walletLoading } = useWallet();
+  const { fmt } = useCurrency();
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
   const [senderReps, setSenderReps] = useState<Record<string, SenderRep>>({});
   const [loading, setLoading] = useState(false);
@@ -104,8 +105,6 @@ export default function MerchantDashboard() {
               <Copy size={11} color={copied ? "#DDE048" : "#555"} />
             </button>
             <span className="text-[#444]">·</span>
-            <span className="text-[13px] text-[#555]">Morph L2</span>
-            <span className="text-[#444]">·</span>
             <span className="text-[12px] text-green-400 font-semibold">✓ verified registrar</span>
           </div>
         </div>
@@ -126,7 +125,7 @@ export default function MerchantDashboard() {
           <div className="text-4xl font-extrabold text-white leading-none mb-1">
             {totalCommitted.toFixed(2)} <span className="text-base text-[#888] font-normal">USDC</span>
           </div>
-          <div className="text-[#555] text-sm mb-3">≈ ₱{(totalCommitted * PHP_PER_USDC).toLocaleString()} PHP</div>
+          <div className="text-[#555] text-sm mb-3">≈ {fmt(totalCommitted)}</div>
           <div className="text-[12px] text-[#888]">
             <span className="text-[#DDE048] font-bold">{totalLocked.toFixed(2)} USDC</span> locked in holding
             <span className="text-[#444] mx-2">·</span>
@@ -267,7 +266,7 @@ export default function MerchantDashboard() {
             <span className="text-lg">🔒</span>
             <h3 className="font-bold text-white">Every transfer is verifiable</h3>
           </div>
-          <p className="text-[#555] text-sm leading-relaxed">Each row above is backed by a smart-contract call on Morph L2. You can verify any pledge on the Morph Explorer using the Pledge ID.</p>
+          <p className="text-[#555] text-sm leading-relaxed">Each transfer above is backed by a smart contract. You can verify any pledge on-chain using the Pledge ID.</p>
         </div>
         <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5">
           <div className="text-[11px] text-[#555] tracking-[1.5px] mb-4">SENDER TRUST DISTRIBUTION</div>
@@ -302,7 +301,7 @@ export default function MerchantDashboard() {
           <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 col-span-2">
             <div className="text-[10px] text-[#888] tracking-[1.5px] mb-1">TOTAL TRANSFERRED</div>
             <div className="text-3xl font-extrabold">{totalCommitted.toFixed(2)} <span className="text-sm text-[#888] font-normal">USDC</span></div>
-            <div className="text-xs text-[#888] mt-1">≈ ₱{(totalCommitted * PHP_PER_USDC).toLocaleString()} PHP</div>
+            <div className="text-xs text-[#888] mt-1">≈ {fmt(totalCommitted)}</div>
           </div>
           <MobileStatCard label="PENDING" value={pending.length} color="#f59e0b" />
           <MobileStatCard label="COMPLETED" value={completed.length} color="#22c55e" />
