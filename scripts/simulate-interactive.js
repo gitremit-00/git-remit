@@ -17,7 +17,7 @@ function statusBadge(s) {
     "🟡 Waiting for full payment",
     "✅ Fully paid — money sent to receiver",
     "❌ Missed deadline — deposit was forfeited",
-    "⚠️  Under dispute",
+    "🚫 Cancelled by mutual agreement",
   ];
   return badges[Number(s)];
 }
@@ -280,7 +280,7 @@ async function main() {
   usdc = await MockUSDC.deploy();
 
   const RemittancePledge = await ethers.getContractFactory("RemittancePledge");
-  contract = await RemittancePledge.deploy(await usdc.getAddress());
+  contract = await RemittancePledge.deploy(await usdc.getAddress(), accounts[0].address);
 
   for (let i = 1; i <= 3; i++) {
     await usdc.faucet(accounts[i].address, USDC(500));

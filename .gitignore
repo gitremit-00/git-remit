@@ -18,3 +18,14 @@ Thumbs.db
 # Next.js
 .next/
 out/
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Vercel
+.vercel
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

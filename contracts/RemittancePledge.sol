@@ -129,15 +129,16 @@ contract RemittancePledge is ReentrancyGuard {
         require(activePledgeCount[msg.sender] < maxActive, "Active pledge limit reached for your trust tier");
 
         uint256 requiredPct = getRequiredDepositPct(msg.sender);
+        uint256 gross = grossAmount(totalAmount);
         require(
-            initialDeposit >= (totalAmount * requiredPct) / 100,
+            initialDeposit >= (gross * requiredPct) / 100,
             string(abi.encodePacked(
                 "Your trust score requires at least ",
                 _toString(requiredPct),
                 "% upfront"
             ))
         );
-        require(initialDeposit <= totalAmount, "Deposit cannot exceed total");
+        require(initialDeposit <= gross, "Deposit cannot exceed total");
         require(
             commitmentDate <= block.timestamp + MAX_PLEDGE_DAYS,
             "Max 90 days commitment"
@@ -169,6 +170,10 @@ contract RemittancePledge is ReentrancyGuard {
         );
 
         emit PledgeCreated(pledgeId, msg.sender, merchant, totalAmount, initialDeposit, commitmentDate);
+
+        if (initialDeposit >= grossAmount(totalAmount)) {
+            _releaseFunds(pledgeId);
+        }
     }
 
     /// @notice Deposit remaining balance toward a pledge
@@ -186,7 +191,7 @@ contract RemittancePledge is ReentrancyGuard {
         );
         require(amount > 0, "Amount must be > 0");
         require(
-            pledge.depositedAmount + amount <= pledge.totalAmount,
+            pledge.depositedAmount + amount <= grossAmount(pledge.totalAmount),
             "Would exceed total amount"
         );
 
@@ -204,7 +209,7 @@ contract RemittancePledge is ReentrancyGuard {
 
         emit DepositMade(pledgeId, msg.sender, amount, pledge.depositedAmount);
 
-        if (pledge.depositedAmount >= pledge.totalAmount) {
+        if (pledge.depositedAmount >= grossAmount(pledge.totalAmount)) {
             _releaseFunds(pledgeId);
         }
     }
@@ -239,7 +244,6 @@ contract RemittancePledge is ReentrancyGuard {
 
         emit PledgeDefaulted(pledgeId, pledge.merchant, claimAmount);
     }
-
 
     /// @notice Reclaim deposit if merchant never claimed after 180 days past the grace period
     /// @param pledgeId ID of the unclaimed defaulted pledge
@@ -331,6 +335,13 @@ contract RemittancePledge is ReentrancyGuard {
         emit PledgeCancelled(pledgeId, pledge.sender, pledge.merchant, refund);
     }
 
+    // ── View Functions (internal) ──────────────────────────────────────────────
+
+    /// @notice Returns the gross amount the sender must deposit (totalAmount + 1% fee)
+    function grossAmount(uint256 totalAmount) public pure returns (uint256) {
+        return totalAmount + (totalAmount * FEE_BPS) / 10000;
+    }
+
     // ── Internal ───────────────────────────────────────────────────────────────
 
     function _releaseFunds(uint256 pledgeId) internal {
@@ -352,13 +363,12 @@ contract RemittancePledge is ReentrancyGuard {
         activePledgeCount[pledge.sender]--;
 
         uint256 fee = (amount * FEE_BPS) / 10000;
-        uint256 merchantAmount = amount - fee;
 
         require(usdc.transfer(feeRecipient, fee), "Fee transfer failed");
-        require(usdc.transfer(pledge.merchant, merchantAmount), "USDC transfer failed");
+        require(usdc.transfer(pledge.merchant, amount), "USDC transfer failed");
 
         emit FeeCollected(pledgeId, feeRecipient, fee);
-        emit PledgeCompleted(pledgeId, pledge.merchant, merchantAmount);
+        emit PledgeCompleted(pledgeId, pledge.merchant, amount);
     }
 
     // ── View Functions ─────────────────────────────────────────────────────────

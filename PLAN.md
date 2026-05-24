@@ -410,3 +410,341 @@ NEXT_PUBLIC_MORPH_CHAIN_ID=2810
 ---
 
 RemitSafe — Build In! Payments Hackathon, May 18–29, 2026
+
+---
+
+## Post-Hackathon Roadmap — Mobile App (Capacitor) + E2EE
+
+> These phases begin **after** the hackathon submission. The mobile app is built using **Capacitor** wrapping the existing Next.js frontend. E2EE is added after the mobile app is stable.
+
+---
+
+### Decision Log
+
+| Decision | Choice | Reason |
+|----------|--------|--------|
+| Mobile framework | **Capacitor** | Wraps existing Next.js UI — no rewrite. Camera is server-side only. |
+| Face recognition | **Server-side (InsightFace buffalo_s)** | buffalo_l = 327 MB, buffalo_s = 159 MB — too large for on-device. README confirms server-side architecture. |
+| On-device ML | **Not used** | Models are ONNX/InsightFace format, not TFLite/CoreML. No on-device conversion path. |
+| Wallet on mobile | **WalletConnect v2** | `window.ethereum` does not exist in a native WebView. WalletConnect is the standard replacement. |
+| E2EE crypto primitives | **@noble/curves + @noble/hashes** | Already in frontend deps. X25519 ECDH + AES-256-GCM. |
+| Auth layers | **Wallet sig + Native biometric + Camera KYC (registration only)** | Camera re-scan only at registration (KYC). Native Face ID/fingerprint for daily login. |
+
+---
+
+### Phase 8 — Capacitor Mobile App Setup
+
+Owner: M3
+
+#### Step 1 — Install Capacitor
+
+```bash
+cd frontend
+npm install @capacitor/core @capacitor/cli
+npx cap init RemitSafe com.remitsafe.app --web-dir=out
+npm install @capacitor/android @capacitor/ios
+```
+
+#### Step 2 — Enable Static Export
+
+Update [frontend/next.config.mjs](frontend/next.config.mjs):
+
+```js
+const nextConfig = {
+  output: "export",
+  trailingSlash: true,
+};
+```
+
+> **Important**: `output: "export"` disables Next.js API routes. The `/api/rpc` route must be moved to an external server before this change.
+
+#### Step 3 — Move `/api/rpc` to External Server
+
+Options (pick one):
+
+| Option | Cost | Effort |
+|--------|------|--------|
+| Cloudflare Workers | Free | Low |
+| Railway / Render | Free tier | Low |
+| Vercel serverless (separate project) | Free tier | Low |
+
+#### Step 4 — Add Native Platforms
+
+```bash
+npx next build        # outputs static files to /out
+npx cap add android
+npx cap add ios
+npx cap sync          # copies /out into native projects
+```
+
+#### Step 5 — Replace Web APIs with Capacitor Plugins
+
+| Web API | Capacitor Plugin | Why |
+|---------|-----------------|-----|
+| `navigator.clipboard` | `@capacitor/clipboard` | Clipboard access in WebView |
+| `localStorage` | `@capacitor/preferences` | Persistent key-value storage |
+| `window.ethereum` | `@walletconnect/modal` | MetaMask doesn't inject in WebView |
+| Push notifications | `@capacitor/push-notifications` | Native push (FCM / APNs) |
+| Camera (KYC) | `@capacitor/camera` | Photo capture for face verification |
+| Biometric auth | `@capacitor-community/biometric-auth` | Face ID / fingerprint for login |
+| Secure key storage | `@capacitor-community/secure-storage` | Store E2EE private keys in Keychain/Keystore |
+
+#### Step 6 — Fix Wallet Connection for Mobile
+
+In [frontend/context/WalletContext](frontend/context/WalletContext), detect native vs browser:
+
+```ts
+const isNative = !(window as any).ethereum;
+
+if (isNative) {
+  // WalletConnect modal → connects MetaMask Mobile or any WalletConnect wallet
+  const modal = new WalletConnectModal({ projectId: "YOUR_PROJECT_ID" });
+  await modal.openModal();
+} else {
+  // Existing MetaMask browser extension flow — unchanged
+}
+```
+
+#### Step 7 — Build & Run on Device
+
+```bash
+# After every code change
+npx next build && npx cap sync
+
+# Android (requires Android Studio)
+npx cap open android
+
+# iOS (requires Mac + Xcode)
+npx cap open ios
+```
+
+#### Checklist — Phase 8
+
+- [ ] Capacitor installed and initialized
+- [ ] `output: "export"` configured in next.config.mjs
+- [ ] `/api/rpc` moved to external server
+- [ ] Android platform added and syncing
+- [ ] WalletConnect integrated, replaces `window.ethereum` on mobile
+- [ ] `@capacitor/camera` installed and tested
+- [ ] `@capacitor-community/biometric-auth` installed and tested
+- [ ] App runs on Android emulator
+- [ ] App runs on real Android device
+- [ ] (Optional) iOS build on Mac
+
+---
+
+### Phase 9 — Camera Auth + Face KYC (Registration)
+
+Owner: M2 (backend) + M3 (frontend)
+
+#### Architecture
+
+```
+Mobile captures photo (camera)
+  → JPEG sent to backend API
+  → Backend runs InsightFace buffalo_s (Python server)
+  → Returns: { match: true/false, confidence: 0.0–1.0 }
+  → Frontend shows result, proceeds or blocks
+```
+
+> Uses buffalo_s (not buffalo_l) on the server — smaller footprint, adequate accuracy for KYC.
+> Neither model runs on-device — they are server-side only.
+
+#### Registration Flow
+
+```
+Step 1 → Connect wallet (WalletConnect or MetaMask)
+Step 2 → Camera: capture face photo
+Step 3 → POST photo to /api/kyc/register
+  → Backend: detect face → generate embedding → store embedding (not the photo)
+Step 4 → User is registered, wallet ↔ face embedding linked in DB
+```
+
+#### Login Flow (daily use)
+
+```
+Step 1 → Wallet signature (proves wallet ownership)
+Step 2 → Native biometric (Face ID / fingerprint) — fast, offline, OS-trusted
+  (Camera KYC only re-triggered for: new device, suspicious session, or high-value transfer)
+```
+
+#### Backend — New API Routes
+
+| Route | Method | What it does |
+|-------|--------|-------------|
+| `/api/kyc/register` | POST | Receive photo, run buffalo_s, store face embedding |
+| `/api/kyc/verify` | POST | Receive photo, compare embedding, return match result |
+
+#### Environment Variables (add to `.env`)
+
+```env
+# Face Recognition
+FACE_MODEL_DIR=./models/face-recognition
+FACE_MODEL=buffalo_s
+FACE_MATCH_THRESHOLD=0.45
+```
+
+#### Checklist — Phase 9
+
+- [ ] Python face recognition server running (InsightFace + buffalo_s)
+- [ ] `/api/kyc/register` endpoint built and tested
+- [ ] `/api/kyc/verify` endpoint built and tested
+- [ ] Face embedding stored in DB (not the raw photo)
+- [ ] Camera capture UI on registration screen
+- [ ] Native biometric wired up for daily login
+- [ ] Camera re-verification on high-value transfers (>100 USDC)
+
+---
+
+### Phase 10 — End-to-End Encryption (E2EE)
+
+Owner: M2 (backend) + M3 (frontend)
+
+#### What Gets Encrypted
+
+| Data | Encryption | Who Can Decrypt |
+|------|-----------|----------------|
+| Transfer memo / notes | AES-256-GCM (ECDH derived key) | Sender + Recipient only |
+| Recipient PII (name, account) | AES-256-GCM | Sender only |
+| Transfer confirmation (high-value) | TOTP challenge | Server validates hash only |
+| Smart contract data (amounts, addresses) | Not encrypted — on-chain is public | Public |
+
+> On-chain data cannot be E2EE'd. The EVM reads it. E2EE covers off-chain metadata only.
+
+#### Two Encryption Modes
+
+| Mode | Like | Use Case |
+|------|------|---------|
+| **Persistent Key Pair** (ECDH) | Signal / Messenger | Long-term secure channel between sender and recipient |
+| **TOTP** (Time-based One-Time Password) | Google Authenticator | One-time confirmation code for high-value transfers |
+
+---
+
+#### Phase 10A — Key Infrastructure
+
+##### Key Generation (client-side only)
+
+```
+User completes registration
+  → Generate X25519 keypair on device (using @noble/curves)
+  → Private key stored in @capacitor-community/secure-storage
+      (uses iOS Keychain / Android Keystore natively)
+  → Public key signed with wallet private key (non-repudiable)
+  → POST { walletAddress, publicKey, signature } to /api/keys
+```
+
+##### Backend — New DB Column + Route
+
+```sql
+ALTER TABLE users ADD COLUMN public_key TEXT;
+```
+
+| Route | Method | What it does |
+|-------|--------|-------------|
+| `/api/keys` | POST | Verify wallet signature, store public key |
+| `/api/keys/:wallet` | GET | Return public key for a wallet address |
+
+##### Key Exchange for a Transfer
+
+```
+Sender opens new-transfer form
+  → Fetch recipient pubKey from /api/keys/:recipientWallet
+  → sharedSecret = ECDH(senderPrivKey, recipientPubKey)  ← stays on device
+  → encryptedMemo = AES-256-GCM(memo, sharedSecret)
+  → Store encryptedMemo off-chain (backend DB or IPFS)
+  → Recipient fetches and decrypts using their own privKey
+```
+
+---
+
+#### Phase 10B — TOTP for High-Value Transfers
+
+Install:
+
+```bash
+npm install otpauth qrcode
+```
+
+##### Setup (in `/settings` page)
+
+```
+User enables "Secure Transfer Confirmation"
+  → Backend generates TOTP shared secret (RFC 6238)
+  → Show QR code → user scans with authenticator app
+      OR auto-store secret in @capacitor/preferences on mobile
+  → User enters 6-digit code to confirm activation
+```
+
+##### Verification (in `/new-transfer` page)
+
+```
+Transfer amount > 100 USDC
+  → Show 6-digit TOTP prompt
+  → User enters code (auto-filled from on-device secret on mobile)
+  → POST code to /api/totp/verify
+  → Server validates (±1 window tolerance)
+  → On success: proceed with smart contract call
+```
+
+##### Backend — New Routes
+
+| Route | Method | What it does |
+|-------|--------|-------------|
+| `/api/totp/setup` | POST | Generate TOTP secret, return QR code data URL |
+| `/api/totp/verify` | POST | Validate submitted 6-digit code |
+
+---
+
+#### Libraries Summary
+
+| Purpose | Library | Already in deps? |
+|---------|---------|-----------------|
+| ECDH key generation | `@noble/curves` | Yes |
+| Hashing / KDF | `@noble/hashes` | Yes |
+| TOTP | `otpauth` | No — install |
+| QR code (TOTP setup) | `qrcode` | No — install |
+| Secure key storage | `@capacitor-community/secure-storage` | No — install |
+
+---
+
+#### Checklist — Phase 10
+
+- [ ] `public_key` column added to users table
+- [ ] `/api/keys` POST + GET routes built
+- [ ] X25519 keypair generation on device (`@noble/curves`)
+- [ ] Private key stored in `@capacitor-community/secure-storage`
+- [ ] Transfer memos encrypted with ECDH + AES-256-GCM
+- [ ] Encrypted memos decryptable by recipient only
+- [ ] TOTP setup UI in `/settings`
+- [ ] TOTP verification step in `/new-transfer` for transfers > 100 USDC
+- [ ] Key rotation on wallet change
+
+---
+
+### Post-Hackathon Implementation Order
+
+```
+[MOBILE PHASE]
+  1. Move /api/rpc to external server
+  2. Configure next.config.mjs static export
+  3. Install Capacitor + add Android platform
+  4. Replace window.ethereum → WalletConnect
+  5. Add Capacitor native plugins (camera, biometric, preferences)
+  6. Test on Android emulator → real device
+  7. (Optional) iOS build on Mac
+
+[CAMERA + KYC PHASE]
+  8. Set up Python InsightFace server (buffalo_s)
+  9. Build /api/kyc/register and /api/kyc/verify
+  10. Wire camera capture on registration screen
+  11. Wire native biometric for daily login
+
+[E2EE PHASE]
+  12. Add public_key to users DB + /api/keys routes
+  13. Key generation on onboarding (X25519 via @noble/curves)
+  14. Secure key storage via @capacitor-community/secure-storage
+  15. Encrypt transfer memos in new-transfer flow
+  16. TOTP setup UI in /settings
+  17. TOTP gate on transfers > 100 USDC
+  18. Key rotation on wallet change
+```
