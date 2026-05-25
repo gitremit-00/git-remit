@@ -11,7 +11,12 @@ export interface UserProfile {
   wallet_address: string;
   role: Role;
   name: string | null;
+  avatar_url: string | null;
+  bio: string | null;
+  phone: string | null;
+  country: string | null;
   created_at: string;
+  updated_at: string | null;
 }
 
 export async function fetchUserRole(walletAddress: string): Promise<Role | null> {
@@ -22,6 +27,37 @@ export async function fetchUserRole(walletAddress: string): Promise<Role | null>
     .single();
   if (error || !data) return null;
   return data.role as Role;
+}
+
+export async function getUserProfile(walletAddress: string): Promise<UserProfile | null> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("wallet_address", walletAddress.toLowerCase())
+    .single();
+  if (error || !data) return null;
+  return data as UserProfile;
+}
+
+export async function updateUserProfile(
+  walletAddress: string,
+  updates: Partial<Pick<UserProfile, "name" | "avatar_url" | "bio" | "phone" | "country">>
+): Promise<void> {
+  await supabase
+    .from("users")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("wallet_address", walletAddress.toLowerCase());
+}
+
+export async function uploadAvatar(walletAddress: string, file: File): Promise<string | null> {
+  const ext = file.name.split(".").pop();
+  const path = `${walletAddress.toLowerCase()}/avatar.${ext}`;
+  const { error } = await supabase.storage
+    .from("avatars")
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (error) { console.error(error); return null; }
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 export async function createUser(walletAddress: string, role: Role, name?: string): Promise<void> {

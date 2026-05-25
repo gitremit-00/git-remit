@@ -2,6 +2,7 @@
 import { Search, Bell, ChevronRight } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
 import { useCurrency } from "../context/CurrencyContext";
+import { useRole } from "../context/RoleContext";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
@@ -10,6 +11,7 @@ import Link from "next/link";
 export default function DesktopTopbar() {
   const { account, pledgeRead } = useWallet();
   const { currency, toggle } = useCurrency();
+  const { avatarUrl, displayName } = useRole();
   const [score, setScore] = useState<number | null>(null);
 
   useEffect(() => {
@@ -57,8 +59,11 @@ export default function DesktopTopbar() {
         {/* User avatar */}
         {account && (
           <Link href="/profile" className="flex items-center gap-2 bg-[#13161c] border border-[#1e2230] rounded-xl px-2.5 py-2">
-            <div className="w-7 h-7 rounded-full bg-[#DDE048] flex items-center justify-center text-black text-[11px] font-bold shrink-0">
-              {account.slice(2, 4).toUpperCase()}
+            <div className="w-7 h-7 rounded-full overflow-hidden bg-[#DDE048] flex items-center justify-center text-black text-[11px] font-bold shrink-0">
+              {avatarUrl
+                ? <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
+                : (displayName ?? account).slice(0, 1).toUpperCase()
+              }
             </div>
             {score !== null && (
               <div className="text-[11px] font-bold" style={{ color: scoreColor(score) }}>

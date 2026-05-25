@@ -1,10 +1,11 @@
 "use client";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Bell } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Logo from "./Logo";
 import { useEffect, useState } from "react";
-import { Bell } from "lucide-react";
+import { useRole } from "../context/RoleContext";
+import { useWallet } from "../context/WalletContext";
 
 const STORAGE_KEY = "remitsafe_read_notifs";
 const NOTIF_COUNT_KEY = "remitsafe_notif_count";
@@ -18,6 +19,8 @@ interface HeaderProps {
 export default function Header({ title, back, onBack }: HeaderProps) {
   const router = useRouter();
   const [hasUnread, setHasUnread] = useState(false);
+  const { avatarUrl, displayName } = useRole();
+  const { account } = useWallet();
 
   useEffect(() => {
     // Show badge if stored notification count exceeds read count
@@ -43,12 +46,22 @@ export default function Header({ title, back, onBack }: HeaderProps) {
 
       {title && <span className="text-sm font-semibold text-white">{title}</span>}
 
-      <Link href="/notifications" className="relative bg-[#11141A] rounded-[10px] w-9 h-9 flex items-center justify-center border border-[#1F2127]">
-        <Bell size={18} color="#ccc" />
-        {hasUnread && (
-          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#DDE048] border-2 border-[#11141A]" />
+      <div className="flex items-center gap-2">
+        <Link href="/notifications" className="relative bg-[#11141A] rounded-[10px] w-9 h-9 flex items-center justify-center border border-[#1F2127]">
+          <Bell size={18} color="#ccc" />
+          {hasUnread && (
+            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#DDE048] border-2 border-[#11141A]" />
+          )}
+        </Link>
+        {account && (
+          <Link href="/profile" className="w-9 h-9 rounded-[10px] overflow-hidden bg-[#DDE048] border border-[#1F2127] flex items-center justify-center text-black text-[11px] font-bold shrink-0">
+            {avatarUrl
+              ? <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
+              : (displayName ?? account).slice(0, 1).toUpperCase()
+            }
+          </Link>
         )}
-      </Link>
+      </div>
     </div>
   );
 }

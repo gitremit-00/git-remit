@@ -1,7 +1,8 @@
 "use client";
 import Header from "../../components/Header";
 import { ChevronDown, ChevronUp, MessageCircle, Shield, Wallet, Send, AlertTriangle, Clock, TrendingUp, Lock, Store } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useRole } from "../../context/RoleContext";
 
 interface FAQ { q: string; a: string; }
@@ -12,6 +13,7 @@ const SENDER_FAQS: FAQ[] = [
   { q: "Can I pay the full amount upfront?", a: "Yes. When creating a new transfer, toggle 'Pay in full' on the amount step. This sets your initial deposit to the full pledge amount plus the 1% service fee, and auto-assigns a commitment date 85 days out. The pledge is effectively complete at creation — the merchant receives payment as soon as the contract confirms the full amount is locked. Paying in full skips the date selection step and is the fastest way to release funds to the merchant." },
   { q: "How does the upfront deposit work?", a: "When you create a pledge, you must lock an initial deposit immediately — the percentage depends on your trust score. New wallets (score 0–49) lock 20% upfront and can hold 1 active pledge. Score 50–79 locks 15% with up to 3 active pledges. Score 80–89 locks 12% with up to 4 active pledges. Score 90–100 unlocks the best tier at 10% with up to 5 active pledges. The remaining balance is due before the commitment deadline. This deposit protects the merchant in case of default." },
   { q: "What is my trust score and how do I improve it?", a: "Your trust score (0–100) is an on-chain reputation score calculated entirely from your pledge history. It increases each time you complete a pledge on time and decreases when you default. A higher score unlocks lower deposit requirements and a higher active pledge cap — at score 90+ you only need to lock 10% upfront and can hold up to 5 pledges at once. New wallets start at 0. There is no manual override; improve it by completing pledges reliably." },
+  { q: "How does my trust score decrease?", a: "Your score is a weighted average across all your pledge history, where each pledge is weighted by its transfer amount. Completing a pledge on time contributes its full value to the average (100% weight). Paying late during the 3-day grace period contributes only 70% — pulling your average down slightly. Defaulting contributes 0% — the pledge amount is added to the total weight but nothing is added to your score, which pulls the average down significantly. Larger pledges have proportionally more impact than smaller ones. The only way to recover from a default is to complete future pledges reliably so the average rises again over time." },
   { q: "What is the service fee?", a: "RemitSafe charges a 1% service fee on the total transfer amount, paid by the sender on top of the pledge. For example, a 100 USDC pledge costs 101 USDC total. The merchant always receives the full 100 USDC. There are no hidden fees, foreign exchange markups, or withdrawal charges." },
   { q: "What happens if I miss the deadline?", a: "If you miss your commitment deadline, a 3-day grace period begins automatically. You can still complete the deposit during grace at no extra penalty. If the grace period also expires without full payment, the merchant gains the right to claim your locked deposit as partial compensation, and your trust score will decrease — raising your deposit requirement for future pledges." },
   { q: "Is my USDC safe while it's locked?", a: "Yes. Locked funds are held entirely by the RemitSafe smart contract — not by any company wallet or custodian. Only you can add deposits, only the merchant can claim on completion or after default, and mutual cancellation returns the deposit to you. You can verify the contract address and source code on the Morph Hoodi block explorer at any time." },
@@ -32,9 +34,9 @@ const MERCHANT_FAQS: FAQ[] = [
   { q: "What happens to my funds if there is a smart contract bug?", a: "RemitSafe's contracts are deployed on a testnet environment. The platform is under active development and no formal third-party audit has been completed yet. Do not use this for real-value transfers. All USDC on the Hoodi Testnet is test currency with no monetary value. A mainnet deployment will only follow a comprehensive security audit." },
 ];
 
-function FAQItem({ q, a, open, onToggle }: FAQ & { open: boolean; onToggle: () => void }) {
+function FAQItem({ q, a, open, onToggle, id }: FAQ & { open: boolean; onToggle: () => void; id?: string }) {
   return (
-    <div className={`border-b border-[#1e2230] last:border-0 transition-colors ${open ? "bg-[#15181f]" : ""}`}>
+    <div id={id} className={`border-b border-[#1e2230] last:border-0 transition-colors ${open ? "bg-[#15181f]" : ""}`}>
       <button onClick={onToggle} className="w-full flex items-center justify-between px-6 py-4 text-left gap-4">
         <span className="text-sm font-semibold text-white">{q}</span>
         {open ? <ChevronUp size={16} color="#555" className="shrink-0" /> : <ChevronDown size={16} color="#555" className="shrink-0" />}
@@ -44,10 +46,10 @@ function FAQItem({ q, a, open, onToggle }: FAQ & { open: boolean; onToggle: () =
   );
 }
 
-function MobileFAQItem({ q, a }: FAQ) {
-  const [open, setOpen] = useState(false);
+function MobileFAQItem({ q, a, defaultOpen, id }: FAQ & { defaultOpen?: boolean; id?: string }) {
+  const [open, setOpen] = useState(defaultOpen ?? false);
   return (
-    <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl mb-2.5 overflow-hidden">
+    <div id={id} className="bg-[#11141A] border border-[#1F2127] rounded-2xl mb-2.5 overflow-hidden">
       <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-4 py-3.5 text-left gap-3">
         <span className="text-sm font-semibold text-white">{q}</span>
         {open ? <ChevronUp size={15} color="#555" className="shrink-0" /> : <ChevronDown size={15} color="#555" className="shrink-0" />}
@@ -58,12 +60,42 @@ function MobileFAQItem({ q, a }: FAQ) {
 }
 
 export default function Help() {
+  return (
+    <Suspense>
+      <HelpContent />
+    </Suspense>
+  );
+}
+
+function HelpContent() {
   const { role } = useRole();
   const isMerchant = role === "merchant";
   const FAQS = isMerchant ? MERCHANT_FAQS : SENDER_FAQS;
+  const searchParams = useSearchParams();
 
   const [openStates, setOpenStates] = useState<boolean[]>(FAQS.map(() => false));
   const allClosed = openStates.every((v) => !v);
+
+  const autoOpenIdx = (() => {
+    const param = searchParams.get("open");
+    if (!param || isMerchant) return -1;
+    if (param === "trust-score-decrease") return SENDER_FAQS.findIndex(f => f.q.includes("decrease"));
+    if (param === "trust-score-improve") return SENDER_FAQS.findIndex(f => f.q.includes("improve"));
+    return -1;
+  })();
+
+  useEffect(() => {
+    if (autoOpenIdx === -1) return;
+    setOpenStates(s => s.map((_, i) => i === autoOpenIdx));
+    const id = `faq-desktop-${autoOpenIdx}`;
+    const idMobile = `faq-mobile-${autoOpenIdx}`;
+    const tryScroll = (attempts = 0) => {
+      const el = document.getElementById(id) || document.getElementById(idMobile);
+      if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+      if (attempts < 5) setTimeout(() => tryScroll(attempts + 1), 80);
+    };
+    setTimeout(() => tryScroll(), 100);
+  }, [autoOpenIdx]);
 
   function toggleFaq(i: number) { setOpenStates((s) => s.map((v, j) => (j === i ? !v : v))); }
   function toggleAll() { setOpenStates(FAQS.map(() => allClosed)); }
@@ -92,7 +124,7 @@ export default function Help() {
             </button>
           </div>
           <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl overflow-hidden">
-            {FAQS.map((f, i) => <FAQItem key={f.q} {...f} open={openStates[i]} onToggle={() => toggleFaq(i)} />)}
+            {FAQS.map((f, i) => <FAQItem key={f.q} {...f} open={openStates[i]} onToggle={() => toggleFaq(i)} id={`faq-desktop-${i}`} />)}
           </div>
         </div>
 
@@ -166,6 +198,21 @@ export default function Help() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Score impact breakdown */}
+              <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <TrendingUp size={14} color="#DDE048" />
+                  <div className="text-[11px] text-[#555] tracking-[1.5px]">HOW SCORE IS AFFECTED</div>
+                </div>
+                <p className="text-[10px] text-[#555] mb-3 leading-relaxed">Each pledge is weighted by its transfer amount. Larger pledges have more impact on your score.</p>
+                <div className="space-y-2.5">
+                  <ScoreImpactRow color="#22c55e" label="On-time completion" weight="100%" effect="Score increases" />
+                  <ScoreImpactRow color="#f59e0b" label="Late (paid in grace)" weight="70%" effect="Score decreases slightly" />
+                  <ScoreImpactRow color="#ef4444" label="Default" weight="0%" effect="Score decreases significantly" />
+                </div>
+                <p className="text-[10px] text-[#555] mt-3 leading-relaxed">Recover from a default by completing future pledges on time — the weighted average rises again over time.</p>
               </div>
 
               {/* Sender protections */}
@@ -270,6 +317,18 @@ export default function Help() {
               </div>
             </div>
 
+            {/* Score impact breakdown */}
+            <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-4">
+              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-3">HOW SCORE IS AFFECTED</div>
+              <p className="text-[10px] text-[#555] mb-3 leading-relaxed">Each pledge is weighted by its transfer amount. Larger pledges have more impact.</p>
+              <div className="space-y-2.5">
+                <ScoreImpactRow color="#22c55e" label="On-time completion" weight="100%" effect="Score increases" />
+                <ScoreImpactRow color="#f59e0b" label="Late (paid in grace)" weight="70%" effect="Score decreases slightly" />
+                <ScoreImpactRow color="#ef4444" label="Default" weight="0%" effect="Score decreases significantly" />
+              </div>
+              <p className="text-[10px] text-[#555] mt-3 leading-relaxed">Recover by completing future pledges on time — the weighted average rises again.</p>
+            </div>
+
             {/* Sender protections */}
             <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-4">
               <div className="text-[10px] text-[#888] tracking-[1.5px] mb-3">YOUR PROTECTIONS</div>
@@ -284,7 +343,7 @@ export default function Help() {
         )}
 
         <div className="text-[10px] text-[#888] tracking-[1.5px] mb-3">FREQUENTLY ASKED QUESTIONS</div>
-        {FAQS.map((f) => <MobileFAQItem key={f.q} {...f} />)}
+        {FAQS.map((f, i) => <MobileFAQItem key={f.q} {...f} id={`faq-mobile-${i}`} defaultOpen={autoOpenIdx === i} />)}
 
         <p className="text-xs text-[#555] text-center mt-6 leading-relaxed">RemitSafe · Non-custodial remittance for OFWs</p>
       </div>
@@ -319,6 +378,21 @@ function MobileQuickStep({ n, label, sub }: { n: number; label: string; sub: str
         <div className="text-sm font-semibold text-white">{label}</div>
         <div className="text-xs text-[#666] mt-0.5">{sub}</div>
       </div>
+    </div>
+  );
+}
+
+function ScoreImpactRow({ color, label, weight, effect }: { color: string; label: string; weight: string; effect: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
+        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+        <div>
+          <div className="text-xs font-semibold text-white">{label}</div>
+          <div className="text-[10px] text-[#555] mt-0.5">{effect}</div>
+        </div>
+      </div>
+      <div className="text-xs font-bold shrink-0" style={{ color }}>{weight}</div>
     </div>
   );
 }

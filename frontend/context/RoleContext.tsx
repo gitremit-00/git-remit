@@ -2,15 +2,19 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useWallet } from "./WalletContext";
-import { fetchUserRole, Role } from "../lib/supabase";
+import { fetchUserRole, getUserProfile, Role } from "../lib/supabase";
 
 interface RoleContextValue {
   role: Role | null;
   loading: boolean;
   isNewUser: boolean;
+  displayName: string | null;
+  setDisplayName: (name: string) => void;
+  avatarUrl: string | null;
+  setAvatarUrl: (url: string | null) => void;
 }
 
-const RoleContext = createContext<RoleContextValue>({ role: null, loading: true, isNewUser: false });
+const RoleContext = createContext<RoleContextValue>({ role: null, loading: true, isNewUser: false, displayName: null, setDisplayName: () => {}, avatarUrl: null, setAvatarUrl: () => {} });
 
 // Routes only senders can access
 const SENDER_ONLY = ["/", "/new-transfer", "/pledges", "/pledge", "/recipients"];
@@ -33,6 +37,8 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role | null>(null);
   const [loading, setLoading] = useState(true);
   const [isNewUser, setIsNewUser] = useState(false);
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (walletLoading) return;
@@ -47,7 +53,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     // Wallet connected — fetch role from Supabase
     setLoading(true);
     setIsNewUser(false);
-    fetchUserRole(account).then((r) => {
+    fetchUserRole(account).then(async (r) => {
       if (!r) {
         // New user — send to onboarding unless already there
         setIsNewUser(true);
@@ -60,6 +66,10 @@ export function RoleProvider({ children }: { children: ReactNode }) {
         if (pathname === "/onboarding") {
           router.replace(r === "merchant" ? "/merchant" : "/");
         }
+        // Load display name
+        const profile = await getUserProfile(account);
+        if (profile?.name) setDisplayName(profile.name);
+        if (profile?.avatar_url) setAvatarUrl(profile.avatar_url);
       }
       setLoading(false);
     });
@@ -78,7 +88,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   }, [role, pathname, loading]);
 
   return (
-    <RoleContext.Provider value={{ role, loading, isNewUser }}>
+    <RoleContext.Provider value={{ role, loading, isNewUser, displayName, setDisplayName, avatarUrl, setAvatarUrl }}>
       {children}
     </RoleContext.Provider>
   );

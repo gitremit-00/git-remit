@@ -3,11 +3,12 @@ import Header from "../../components/Header";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ethers } from "ethers";
-import { Copy, LogOut, ShieldCheck, ArrowRight, Users, BadgeCheck, Store, FileText } from "lucide-react";
+import { Copy, LogOut, ShieldCheck, ArrowRight, Users, BadgeCheck, Store, FileText, Info, X, Pencil, Check, Loader2, Phone, MapPin } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import { useRole } from "../../context/RoleContext";
+import { UserProfile, uploadAvatar } from "../../lib/supabase";
 import CircularScore from "../../components/CircularScore";
 import { useCurrency } from "../../context/CurrencyContext";
 
@@ -17,13 +18,23 @@ interface MerchantCounts { pending: number; completed: number; defaulted: number
 
 export default function Profile() {
   const { account, connect, disconnect, pledgeRead, usdcRead, walletLoading } = useWallet();
-  const { role } = useRole();
+  const { role, displayName, setDisplayName, setAvatarUrl } = useRole();
   const { fmt } = useCurrency();
   const isMerchant = role === "merchant";
 
   const [rep, setRep] = useState<RepState | null>(null);
+  const [showTrustTooltip, setShowTrustTooltip] = useState(false);
   const [balance, setBalance] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Profile card state
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarCacheBust, setAvatarCacheBust] = useState(Date.now());
 
   // Sender-only state
   const [maxActive, setMaxActive] = useState<number | null>(null);
@@ -34,7 +45,14 @@ export default function Profile() {
   // Merchant-only state
   const [merchantCounts, setMerchantCounts] = useState<MerchantCounts | null>(null);
 
-  useEffect(() => { if (account) loadAll(); }, [account, role]);
+  useEffect(() => {
+    if (account) {
+      loadAll();
+      fetch(`/api/profile?address=${account}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setProfile(data); });
+    }
+  }, [account, role]);
 
   async function loadAll() {
     const [repData, bal] = await Promise.all([
@@ -89,6 +107,50 @@ export default function Profile() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  function startEdit(field: string, current: string | null) {
+    setEditingField(field);
+    setEditValue(current ?? "");
+  }
+
+  async function saveEdit(field: string) {
+    if (!account) return;
+    setSaving(true);
+    const res = await fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address: account, [field]: editValue || null }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setProfile(updated);
+      if (field === "name") setDisplayName(editValue || null);
+    }
+    setSaving(false);
+    setEditingField(null);
+  }
+
+  async function handleAvatarFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !account) return;
+    setAvatarUploading(true);
+    const publicUrl = await uploadAvatar(account, file);
+    if (publicUrl) {
+      // Show image immediately everywhere
+      setProfile(prev => prev ? { ...prev, avatar_url: publicUrl } : prev);
+      setAvatarUrl(publicUrl);
+      setAvatarCacheBust(Date.now());
+      // Persist to DB
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: account, avatar_url: publicUrl }),
+      });
+      if (!res.ok) console.error("Failed to save avatar_url", await res.text());
+    }
+    setAvatarUploading(false);
+    e.target.value = "";
+  }
+
   const scoreLabel = (s: number) => s >= 80 ? "EXCELLENT" : s >= 50 ? "GOOD" : s >= 20 ? "FAIR" : "POOR";
   const scoreBg = (s: number) => s >= 80 ? "#22c55e" : s >= 50 ? "#DDE048" : s >= 20 ? "#f59e0b" : "#ef4444";
 
@@ -136,6 +198,86 @@ export default function Profile() {
       <div className="grid grid-cols-[1fr_320px] gap-6">
         {/* Left column */}
         <div className="space-y-5">
+          {/* Profile card */}
+          <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
+            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-4">PROFILE</div>
+            <div className="flex items-start gap-4">
+              {/* Avatar */}
+              <div className="relative shrink-0">
+                <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarFileChange} />
+                <button
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={avatarUploading}
+                  className="w-16 h-16 rounded-2xl overflow-hidden bg-[#1e2230] border border-[#2a2f3d] flex items-center justify-center hover:border-[#DDE048]/40 transition-colors group disabled:opacity-60"
+                >
+                  {profile?.avatar_url ? (
+                    <img src={`${profile.avatar_url}?t=${avatarCacheBust}`} alt="avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-2xl font-extrabold text-[#DDE048]">
+                      {(profile?.name ?? displayName ?? account)?.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <span className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl">
+                    {avatarUploading ? <Loader2 size={14} className="text-white animate-spin" /> : <Pencil size={14} className="text-white" />}
+                  </span>
+                </button>
+              </div>
+              {/* Fields */}
+              <div className="flex-1 space-y-2.5 min-w-0">
+                <InlineField
+                  field="name"
+                  value={profile?.name ?? null}
+                  placeholder="Add your name"
+                  editingField={editingField}
+                  editValue={editValue}
+                  saving={saving}
+                  onEdit={startEdit}
+                  onSave={saveEdit}
+                  onCancel={() => setEditingField(null)}
+                  onEditValueChange={setEditValue}
+                />
+                <InlineField
+                  field="bio"
+                  value={profile?.bio ?? null}
+                  placeholder="Add a short bio"
+                  multiline
+                  editingField={editingField}
+                  editValue={editValue}
+                  saving={saving}
+                  onEdit={startEdit}
+                  onSave={saveEdit}
+                  onCancel={() => setEditingField(null)}
+                  onEditValueChange={setEditValue}
+                />
+                <InlineField
+                  field="phone"
+                  value={profile?.phone ?? null}
+                  placeholder="Add phone number"
+                  editingField={editingField}
+                  editValue={editValue}
+                  saving={saving}
+                  onEdit={startEdit}
+                  onSave={saveEdit}
+                  onCancel={() => setEditingField(null)}
+                  onEditValueChange={setEditValue}
+                  icon={<Phone size={13} />}
+                />
+                <InlineField
+                  field="country"
+                  value={profile?.country ?? null}
+                  placeholder="Add country"
+                  editingField={editingField}
+                  editValue={editValue}
+                  saving={saving}
+                  onEdit={startEdit}
+                  onSave={saveEdit}
+                  onCancel={() => setEditingField(null)}
+                  onEditValueChange={setEditValue}
+                  icon={<MapPin size={13} />}
+                />
+              </div>
+            </div>
+          </div>
           {/* Identity hero */}
           <div className="bg-gradient-to-r from-[#1B1E16] to-[#13161c] border border-[#1e2230] rounded-2xl p-7 relative overflow-hidden">
             <Image src="/logo.png" alt="" width={120} height={120}
@@ -144,8 +286,15 @@ export default function Profile() {
             <div className="flex items-center gap-8 relative">
               {rep && <CircularScore score={rep.score} size={120} />}
               <div>
-                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">
-                  {isMerchant ? "MERCHANT RATING" : "TRUST SCORE"}
+                <div className="flex items-center gap-1.5 mb-3">
+                  <div className="text-[11px] text-[#555] tracking-[1.5px]">
+                    {isMerchant ? "MERCHANT RATING" : "TRUST SCORE"}
+                  </div>
+                  {!isMerchant && (
+                    <button onClick={() => setShowTrustTooltip(true)} className="text-[#555] hover:text-[#888] transition-colors">
+                      <Info size={12} />
+                    </button>
+                  )}
                 </div>
                 {rep && (
                   <div className="flex items-center gap-2 mb-3">
@@ -341,6 +490,83 @@ export default function Profile() {
           <Copy size={12} color={copied ? "#DDE048" : "#666"} className="ml-1.5" />
         </div>
 
+        {/* Profile card (mobile) */}
+        <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 mb-3.5">
+          <div className="flex items-start gap-3">
+            {/* Avatar (mobile reuses same hidden input) */}
+            <button
+              onClick={() => avatarInputRef.current?.click()}
+              disabled={avatarUploading}
+              className="relative w-14 h-14 rounded-xl overflow-hidden bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center shrink-0 disabled:opacity-60"
+            >
+              {profile?.avatar_url ? (
+                <img src={`${profile.avatar_url}?t=${avatarCacheBust}`} alt="avatar" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl font-extrabold text-[#DDE048]">
+                  {(profile?.name ?? displayName ?? account)?.slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              <span className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-xl">
+                {avatarUploading ? <Loader2 size={12} className="text-white animate-spin" /> : <Pencil size={12} className="text-white opacity-60" />}
+              </span>
+            </button>
+            {/* Fields */}
+            <div className="flex-1 space-y-2 min-w-0">
+              <InlineField
+                field="name"
+                value={profile?.name ?? null}
+                placeholder="Add your name"
+                editingField={editingField}
+                editValue={editValue}
+                saving={saving}
+                onEdit={startEdit}
+                onSave={saveEdit}
+                onCancel={() => setEditingField(null)}
+                onEditValueChange={setEditValue}
+              />
+              <InlineField
+                field="bio"
+                value={profile?.bio ?? null}
+                placeholder="Add a short bio"
+                multiline
+                editingField={editingField}
+                editValue={editValue}
+                saving={saving}
+                onEdit={startEdit}
+                onSave={saveEdit}
+                onCancel={() => setEditingField(null)}
+                onEditValueChange={setEditValue}
+              />
+              <InlineField
+                field="phone"
+                value={profile?.phone ?? null}
+                placeholder="Phone"
+                editingField={editingField}
+                editValue={editValue}
+                saving={saving}
+                onEdit={startEdit}
+                onSave={saveEdit}
+                onCancel={() => setEditingField(null)}
+                onEditValueChange={setEditValue}
+                icon={<Phone size={12} />}
+              />
+              <InlineField
+                field="country"
+                value={profile?.country ?? null}
+                placeholder="Country"
+                editingField={editingField}
+                editValue={editValue}
+                saving={saving}
+                onEdit={startEdit}
+                onSave={saveEdit}
+                onCancel={() => setEditingField(null)}
+                onEditValueChange={setEditValue}
+                icon={<MapPin size={12} />}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Trust score card */}
         <div className="bg-gradient-to-r from-[#1B1E16] to-[#11141A] border border-[#2a2a2a] rounded-2xl p-5 mb-3.5 relative overflow-hidden">
           <Image src="/logo.png" alt="" width={90} height={90}
@@ -348,8 +574,15 @@ export default function Profile() {
           />
           <div className="flex justify-between items-start relative">
             <div>
-              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-1.5">
-                {isMerchant ? "MERCHANT RATING" : "TRUST SCORE"}
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="text-[10px] text-[#888] tracking-[1.5px]">
+                  {isMerchant ? "MERCHANT RATING" : "TRUST SCORE"}
+                </div>
+                {!isMerchant && (
+                  <button onClick={() => setShowTrustTooltip(true)} className="text-[#555] hover:text-[#888] transition-colors">
+                    <Info size={11} />
+                  </button>
+                )}
               </div>
               <div className="text-[38px] font-extrabold leading-none text-[#DDE048]">
                 {rep?.score ?? "–"}<span className="text-base font-normal text-[#888]"> / 100</span>
@@ -473,8 +706,81 @@ export default function Profile() {
     </div>
   );
 
+  const TrustTooltip = showTrustTooltip ? (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+      onClick={() => setShowTrustTooltip(false)}
+    >
+      <div
+        className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5 w-full max-w-sm shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Info size={13} color="#DDE048" />
+            <span className="text-xs font-bold text-white tracking-wide">TRUST SCORE</span>
+          </div>
+          <button onClick={() => setShowTrustTooltip(false)} className="text-[#555] hover:text-[#888] transition-colors">
+            <X size={15} />
+          </button>
+        </div>
+        <div className="space-y-3.5 text-xs leading-relaxed">
+          <div>
+            <div className="font-semibold text-white mb-0.5">What is it?</div>
+            <div className="text-[#888]">A 0–100 on-chain score built entirely from your pledge history. Higher score = lower upfront deposit + more simultaneous pledges allowed.</div>
+          </div>
+          <div>
+            <div className="font-semibold text-white mb-0.5">How does it increase?</div>
+            <div className="text-[#888]">Complete pledges on time. Each on-time completion contributes <span className="text-[#22c55e] font-semibold">100% weight</span> to your score average.</div>
+            <Link
+              href="/help?open=trust-score-improve"
+              onClick={() => setShowTrustTooltip(false)}
+              className="flex items-center gap-1 mt-1 text-[#DDE048] text-[11px] font-semibold hover:underline no-underline"
+            >
+              See more <ArrowRight size={11} />
+            </Link>
+          </div>
+          <div>
+            <div className="font-semibold text-white mb-0.5">How does it decrease?</div>
+            <div className="text-[#888]">
+              Paying during the grace period contributes <span className="text-[#f59e0b] font-semibold">70% weight</span> — a slight drop. Defaulting contributes <span className="text-[#ef4444] font-semibold">0% weight</span> — significantly pulling your average down. Larger pledges have more impact than smaller ones.
+            </div>
+          </div>
+          <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-3">
+            <div className="space-y-1.5">
+              {[
+                { range: "90–100", label: "Elite OFW", deposit: "10% deposit · 5 pledges", color: "#22c55e" },
+                { range: "80–89", label: "Trusted", deposit: "12% deposit · 4 pledges", color: "#DDE048" },
+                { range: "50–79", label: "Good standing", deposit: "15% deposit · 3 pledges", color: "#f59e0b" },
+                { range: "0–49", label: "New sender", deposit: "20% deposit · 1 pledge", color: "#ef4444" },
+              ].map(({ range, label, deposit, color }) => (
+                <div key={range} className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />
+                    <span className="font-semibold text-[10px]" style={{ color }}>{label}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-[#555]">{range} · {deposit}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <Link
+          href="/help?open=trust-score-decrease"
+          onClick={() => setShowTrustTooltip(false)}
+          className="flex items-center justify-end gap-1 mt-4 text-[#DDE048] text-xs font-semibold hover:underline no-underline"
+        >
+          See more in Help <ArrowRight size={12} />
+        </Link>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <>
+      {TrustTooltip}
       {DesktopProfile}
       {MobileProfile}
     </>
@@ -537,6 +843,70 @@ function HistoryStat({ label, value, color }: { label: string; value: number; co
     <div className="bg-[#0d0f13] border border-[#1F2127] rounded-xl px-3 py-3 flex flex-col gap-1">
       <div className="text-[24px] font-extrabold tabular-nums leading-none" style={{ color: value > 0 ? color : "#333" }}>{value}</div>
       <div className="text-[10px] text-[#555] leading-tight">{label}</div>
+    </div>
+  );
+}
+
+interface InlineFieldProps {
+  field: string;
+  value: string | null;
+  placeholder: string;
+  multiline?: boolean;
+  editingField: string | null;
+  editValue: string;
+  saving: boolean;
+  onEdit: (field: string, current: string | null) => void;
+  onSave: (field: string) => void;
+  onCancel: () => void;
+  onEditValueChange: (v: string) => void;
+  icon?: React.ReactNode;
+}
+
+function InlineField({ field, value, placeholder, multiline, editingField, editValue, saving, onEdit, onSave, onCancel, onEditValueChange, icon }: InlineFieldProps) {
+  const isEditing = editingField === field;
+  return (
+    <div className="group flex items-start gap-2 min-h-[24px]">
+      {icon && <span className="mt-0.5 shrink-0 text-[#555]">{icon}</span>}
+      {isEditing ? (
+        <div className="flex-1 flex items-start gap-1.5">
+          {multiline ? (
+            <textarea
+              autoFocus
+              value={editValue}
+              onChange={e => onEditValueChange(e.target.value)}
+              placeholder={placeholder}
+              rows={3}
+              className="flex-1 bg-[#0e1014] border border-[#DDE048]/40 rounded-lg px-2.5 py-1.5 text-sm text-white resize-none outline-none focus:border-[#DDE048]/70 placeholder:text-[#444]"
+            />
+          ) : (
+            <input
+              autoFocus
+              value={editValue}
+              onChange={e => onEditValueChange(e.target.value)}
+              placeholder={placeholder}
+              className="flex-1 bg-[#0e1014] border border-[#DDE048]/40 rounded-lg px-2.5 py-1 text-sm text-white outline-none focus:border-[#DDE048]/70 placeholder:text-[#444]"
+            />
+          )}
+          {saving ? (
+            <Loader2 size={16} className="animate-spin text-[#DDE048] mt-1.5 shrink-0" />
+          ) : (
+            <>
+              <button onClick={() => onSave(field)} className="mt-1 text-[#22c55e] hover:text-green-400 shrink-0"><Check size={15} /></button>
+              <button onClick={onCancel} className="mt-1 text-[#555] hover:text-[#888] shrink-0"><X size={15} /></button>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center gap-1.5">
+          <span className={value ? "text-sm text-white" : "text-sm text-[#444] italic"}>{value || placeholder}</span>
+          <button
+            onClick={() => onEdit(field, value)}
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-[#555] hover:text-[#888] shrink-0"
+          >
+            <Pencil size={12} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
