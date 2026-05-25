@@ -11,19 +11,20 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /// @title RemittancePledge — OFW Payment Pledge System on Morph L2
-/// @notice Lets a sender lock a partial USDC deposit and commit to a future payment date.
-///         Merchants can trust the on-chain pledge like cash. On default, the merchant
-///         claims the locked deposit. Reputation is tracked on-chain across resolved pledges.
-/// @dev Assumes a standard, non-rebasing, non-fee-on-transfer ERC20 (USDC). Pledge IDs
-///      start at 1 (pre-increment of pledgeCounter), so id == 0 always means "nonexistent".
+/// @notice Lets a sender lock a partial stablecoin deposit and commit to a future payment date.
+///         Supports any whitelisted ERC20 (USDC, USDT, etc.) with 6 decimals.
+///         Reputation is unified across all tokens — a sender's history carries regardless
+///         of which token they use. Pledge IDs start at 1 (pre-increment of pledgeCounter),
+///         so id == 0 always means "nonexistent".
+/// @dev Assumes standard, non-rebasing, non-fee-on-transfer ERC20 tokens only.
 contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     using ECDSA for bytes32;
     using SafeERC20 for IERC20;
 
     // ── Constants ──────────────────────────────────────────────────────────────
-    uint256 public constant GRACE_PERIOD   = 3 days;
+    uint256 public constant GRACE_PERIOD    = 3 days;
     uint256 public constant MAX_PLEDGE_DAYS = 90 days;
-    uint256 public constant MAX_EXTENSION  = 30 days;
+    uint256 public constant MAX_EXTENSION   = 30 days;
 
     /// @dev Merchant must claim a defaulted deposit within this window after the grace period.
     uint256 public constant CLAIM_WINDOW = 30 days;
@@ -54,14 +55,14 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     /// @dev Serial defaulters are capped here regardless of any on-time history.
     uint256 public constant DEFAULT_LOCKOUT_THRESHOLD = 3;
 
-    // Protocol fee: 1% of completed pledge amount (basis points, out of 10000)
     // Protocol fee tiers (basis points, out of 10000) — REWARD-ONLY model.
     // Everyone pays the standard rate; high-trust senders earn a loyalty discount.
     // No sender ever pays MORE than the standard rate — there is no penalty tier.
-    uint256 public constant FEE_BPS_STANDARD = 100; // 1%   — new and mid-trust senders
+    uint256 public constant FEE_BPS_STANDARD = 100; // 1%    — new and mid-trust senders
     uint256 public constant FEE_BPS_LOYALTY  = 75;  // 0.75% — high-trust senders (80%+ score)
 
-    /// @dev 1 USDC (6 decimals) — prevents dust-pledge reputation washing.
+    /// @dev 1 unit (6 decimals) — prevents dust-pledge reputation washing.
+    ///      Works for any whitelisted 6-decimal token (USDC, USDT, etc.).
     uint256 public constant MIN_PLEDGE_AMOUNT = 1_000_000;
 
     // ── Types ──────────────────────────────────────────────────────────────────
@@ -71,6 +72,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 id;
         address sender;
         address merchant;
+        address token;           // whitelisted ERC20 used for this pledge
         uint256 totalAmount;     // amount the merchant ultimately receives
         uint256 initialDeposit;  // first deposit locked at creation
         uint256 depositedAmount; // running total deposited (gross, fee-inclusive)
@@ -90,7 +92,9 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     // ── State ──────────────────────────────────────────────────────────────────
-    IERC20  public immutable usdc;
+    /// @notice Returns true if a token is accepted for new pledges.
+    mapping(address => bool) public allowedTokens;
+
     address public feeRecipient;
     uint256 public pledgeCounter;
 
@@ -112,6 +116,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 indexed pledgeId,
         address indexed sender,
         address indexed merchant,
+        address token,
         uint256 totalAmount,
         uint256 initialDeposit,
         uint256 commitmentDate,
@@ -125,33 +130,41 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     event DeadlineExtended(uint256 indexed pledgeId, uint256 oldDate, uint256 newDate);
     event FeeCollected(uint256 indexed pledgeId, address indexed feeRecipient, uint256 fee);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+    event TokenAllowanceSet(address indexed token, bool allowed);
 
     // ── Constructor ────────────────────────────────────────────────────────────
-    /// @param _usdcToken Address of the USDC token contract (MockUSDC on testnet)
-    /// @param _feeRecipient Address that receives the protocol fee on completed pledges
-    constructor(address _usdcToken, address _feeRecipient) Ownable(msg.sender) {
-        require(_usdcToken != address(0), "Invalid USDC address");
+    /// @param initialTokens List of token addresses to whitelist at deployment (e.g. [USDC, USDT])
+    /// @param _feeRecipient  Address that receives the protocol fee on completed pledges
+    constructor(address[] memory initialTokens, address _feeRecipient) Ownable(msg.sender) {
+        require(initialTokens.length > 0, "At least one token required");
         require(_feeRecipient != address(0), "Invalid fee recipient");
-        usdc = IERC20(_usdcToken);
+        for (uint256 i = 0; i < initialTokens.length; i++) {
+            require(initialTokens[i] != address(0), "Invalid token address");
+            allowedTokens[initialTokens[i]] = true;
+            emit TokenAllowanceSet(initialTokens[i], true);
+        }
         feeRecipient = _feeRecipient;
     }
 
     // ── Write Functions ────────────────────────────────────────────────────────
 
-    /// @notice Create a new payment pledge with an initial USDC deposit.
-    /// @param merchant Address of the merchant who will receive payment
-    /// @param totalAmount Net USDC the merchant receives (6 decimals)
+    /// @notice Create a new payment pledge with an initial stablecoin deposit.
+    /// @param token          Whitelisted ERC20 token to use for this pledge (USDC, USDT, etc.)
+    /// @param merchant       Address of the merchant who will receive payment
+    /// @param totalAmount    Net token amount the merchant receives (6 decimals)
     /// @param initialDeposit Initial gross deposit — minimum depends on sender trust score
     /// @param commitmentDate Unix timestamp of the payment deadline (max 90 days out)
     function createPledge(
+        address token,
         address merchant,
         uint256 totalAmount,
         uint256 initialDeposit,
         uint256 commitmentDate
     ) external nonReentrant whenNotPaused {
+        require(allowedTokens[token], "Token not supported");
         require(merchant != address(0), "Invalid merchant address");
         require(merchant != msg.sender, "Sender cannot be merchant");
-        require(totalAmount >= MIN_PLEDGE_AMOUNT, "Amount below 1 USDC minimum");
+        require(totalAmount >= MIN_PLEDGE_AMOUNT, "Amount below minimum");
         require(commitmentDate > block.timestamp, "Commitment date must be in future");
         require(
             commitmentDate <= block.timestamp + MAX_PLEDGE_DAYS,
@@ -187,6 +200,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
             id: pledgeId,
             sender: msg.sender,
             merchant: merchant,
+            token: token,
             totalAmount: totalAmount,
             initialDeposit: initialDeposit,
             depositedAmount: initialDeposit,
@@ -201,9 +215,9 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         activePledgeCount[msg.sender]++;
 
         // Interactions last (Checks-Effects-Interactions).
-        usdc.safeTransferFrom(msg.sender, address(this), initialDeposit);
+        IERC20(token).safeTransferFrom(msg.sender, address(this), initialDeposit);
 
-        emit PledgeCreated(pledgeId, msg.sender, merchant, totalAmount, initialDeposit, commitmentDate, feeBps);
+        emit PledgeCreated(pledgeId, msg.sender, merchant, token, totalAmount, initialDeposit, commitmentDate, feeBps);
 
         // If the initial deposit already covers the gross amount, release immediately.
         if (initialDeposit >= gross) {
@@ -215,7 +229,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     /// @dev Enforces depositedAmount + amount == gross — partial top-ups are rejected to
     ///      prevent stranded funds (no path where a pledge sits half-funded after grace).
     /// @param pledgeId ID of the pledge to top up
-    /// @param amount Amount of USDC to deposit — must equal the exact remaining balance
+    /// @param amount   Amount of tokens to deposit — must equal the exact remaining balance
     function depositRemaining(uint256 pledgeId, uint256 amount)
         external
         nonReentrant
@@ -245,7 +259,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         pledge.depositedAmount += amount;
 
         // Interactions
-        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        IERC20(pledge.token).safeTransferFrom(msg.sender, address(this), amount);
 
         emit DepositMade(pledgeId, msg.sender, amount, pledge.depositedAmount);
 
@@ -254,10 +268,9 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice Merchant claims the full locked deposit after a pledge default.
-    /// @dev Claims the entire depositedAmount (not a partial slice). Callable only after the
-    ///      grace period and within CLAIM_WINDOW. The TIME_BUFFER absorbs validator timestamp
-    ///      drift. After the claim window closes, the sender may recover the funds via
-    ///      reclaimDeposit() — there is no period where funds are frozen.
+    /// @dev Claims the entire depositedAmount. Callable only after the grace period and
+    ///      within CLAIM_WINDOW. The TIME_BUFFER absorbs validator timestamp drift.
+    ///      After the claim window closes, the sender may recover the funds via reclaimDeposit().
     /// @param pledgeId ID of the defaulted pledge
     function claimDefaultedDeposit(uint256 pledgeId) external nonReentrant whenNotPaused {
         Pledge storage pledge = pledges[pledgeId];
@@ -283,17 +296,16 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         _decrementActive(pledge.sender);
 
         // Interactions
-        usdc.safeTransfer(pledge.merchant, claimAmount);
+        IERC20(pledge.token).safeTransfer(pledge.merchant, claimAmount);
 
         emit PledgeDefaulted(pledgeId, pledge.merchant, claimAmount);
     }
 
     /// @notice Sender reclaims the deposit once the merchant's claim window has closed.
-    /// @dev Becomes available immediately after CLAIM_WINDOW expires (plus TIME_BUFFER) — there
-    ///      is no dead zone where funds are frozen. The default is still recorded against the
-    ///      sender, so reclaiming is not a way to escape the reputation penalty. Emits both
-    ///      PledgeDefaulted (amount 0 — merchant claimed nothing) and DepositReclaimed so
-    ///      off-chain indexers counting defaults stay consistent.
+    /// @dev Becomes available immediately after CLAIM_WINDOW expires (plus TIME_BUFFER).
+    ///      The default is still recorded against the sender — reclaiming does not escape
+    ///      the reputation penalty. Emits PledgeDefaulted (amount 0) and DepositReclaimed
+    ///      so off-chain indexers counting defaults stay consistent.
     /// @param pledgeId ID of the unclaimed defaulted pledge
     function reclaimDeposit(uint256 pledgeId) external nonReentrant whenNotPaused {
         Pledge storage pledge = pledges[pledgeId];
@@ -316,10 +328,9 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         _decrementActive(pledge.sender);
 
         // Interactions
-        usdc.safeTransfer(pledge.sender, amount);
+        IERC20(pledge.token).safeTransfer(pledge.sender, amount);
 
-        // PledgeDefaulted with amount 0 — the merchant claimed nothing. DepositReclaimed
-        // carries the amount actually returned to the sender.
+        // PledgeDefaulted with amount 0 — the merchant claimed nothing.
         emit PledgeDefaulted(pledgeId, pledge.merchant, 0);
         emit DepositReclaimed(pledgeId, pledge.sender, amount);
     }
@@ -327,9 +338,9 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     /// @notice Extend a pledge deadline with the merchant's off-chain signature approval.
     /// @dev The signed hash includes chainId, contract address, a per-pledge nonce and an
     ///      expiry — preventing cross-chain replay, cross-contract replay and signature reuse.
-    /// @param pledgeId ID of the pledge to extend
-    /// @param newDate New commitment date (max 30 days past the current deadline)
-    /// @param sigExpiry Timestamp after which the merchant signature is no longer valid
+    /// @param pledgeId   ID of the pledge to extend
+    /// @param newDate    New commitment date (max 30 days past the current deadline)
+    /// @param sigExpiry  Timestamp after which the merchant signature is no longer valid
     /// @param merchantSig Merchant's ECDSA signature approving the extension
     function extendDeadline(
         uint256 pledgeId,
@@ -374,8 +385,8 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice Cancel a pledge by mutual agreement — sender calls with merchant's signature.
-    /// @param pledgeId ID of the pledge to cancel
-    /// @param sigExpiry Timestamp after which the merchant signature is no longer valid
+    /// @param pledgeId    ID of the pledge to cancel
+    /// @param sigExpiry   Timestamp after which the merchant signature is no longer valid
     /// @param merchantSig Merchant's ECDSA signature approving the cancellation
     function cancelPledge(
         uint256 pledgeId,
@@ -413,7 +424,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         _decrementActive(pledge.sender);
 
         // Interactions
-        usdc.safeTransfer(pledge.sender, refund);
+        IERC20(pledge.token).safeTransfer(pledge.sender, refund);
 
         emit PledgeCancelled(pledgeId, pledge.sender, pledge.merchant, refund);
     }
@@ -445,10 +456,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
 
         // Interactions last.
         if (fee > 0) {
-            usdc.safeTransfer(feeRecipient, fee);
+            IERC20(pledge.token).safeTransfer(feeRecipient, fee);
             emit FeeCollected(pledgeId, feeRecipient, fee);
         }
-        usdc.safeTransfer(pledge.merchant, amount);
+        IERC20(pledge.token).safeTransfer(pledge.merchant, amount);
 
         emit PledgeCompleted(pledgeId, pledge.merchant, amount);
     }
@@ -469,6 +480,15 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     // ── Admin Functions ────────────────────────────────────────────────────────
+
+    /// @notice Add or remove a token from the whitelist.
+    /// @dev Only whitelisted tokens can be used in new pledges. Removing a token does not
+    ///      affect existing pledges — they keep their locked-in token until resolved.
+    function setTokenAllowed(address token, bool allowed) external onlyOwner {
+        require(token != address(0), "Invalid token address");
+        allowedTokens[token] = allowed;
+        emit TokenAllowanceSet(token, allowed);
+    }
 
     /// @notice Emergency stop — halts all state-changing user functions.
     function pause() external onlyOwner {
@@ -501,8 +521,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         return FEE_BPS_STANDARD;
     }
 
-    /// @dev Gross amount (net + fee) for a given fee rate. Used internally so that
-    ///      creation and top-up always agree on the same locked-in rate.
+    /// @dev Gross amount (net + fee) for a given fee rate.
     function _grossWithFee(uint256 totalAmount, uint256 feeBps)
         internal
         pure
@@ -513,6 +532,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
 
     /// @notice Gross amount a given sender would deposit for a pledge of `totalAmount`,
     ///         using their current trust-tier fee rate. For frontends/quotes.
+    ///         Token does not affect the fee calculation — only the sender's trust score does.
     function quoteGrossAmount(address sender, uint256 totalAmount)
         external
         view

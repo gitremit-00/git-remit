@@ -3,7 +3,7 @@ pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
 import "../contracts/RemittancePledge.sol";
-import "../contracts/MockUSDC.sol";
+import "../contracts/MockTokens.sol";
 
 contract RemittancePledgeFuzzTest is Test {
     RemittancePledge internal pledge;
@@ -18,7 +18,9 @@ contract RemittancePledgeFuzzTest is Test {
 
     function setUp() public {
         usdc = new MockUSDC();
-        pledge = new RemittancePledge(address(usdc), feeRecip);
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        pledge = new RemittancePledge(tokens, feeRecip);
     }
 
     function testFuzz_grossNeverBelowNet(uint256 totalAmount) public view {
@@ -45,7 +47,7 @@ contract RemittancePledgeFuzzTest is Test {
         vm.prank(sender);
         usdc.approve(address(pledge), deposit);
         vm.prank(sender);
-        pledge.createPledge(merchant, totalAmount, deposit, block.timestamp + 30 days);
+        pledge.createPledge(address(usdc), merchant, totalAmount, deposit, block.timestamp + 30 days);
         uint256 contractBal = usdc.balanceOf(address(pledge));
         if (deposit >= gross) {
             assertEq(contractBal, 0, "completed pledge should leave 0 in contract");
@@ -62,7 +64,7 @@ contract RemittancePledgeFuzzTest is Test {
         vm.prank(sender);
         usdc.approve(address(pledge), gross);
         vm.prank(sender);
-        pledge.createPledge(merchant, totalAmount, deposit, block.timestamp + 30 days);
+        pledge.createPledge(address(usdc), merchant, totalAmount, deposit, block.timestamp + 30 days);
         uint256 remaining = gross - deposit;
         vm.prank(sender);
         pledge.depositRemaining(1, remaining);

@@ -8,15 +8,16 @@ const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
 // ── Constants mirrored from the contract ──────────────────────────────────────
-const USDC = (n) => ethers.parseUnits(n.toString(), 6); // 6-decimal USDC
+const UNITS = (n) => ethers.parseUnits(n.toString(), 6); // 6-decimal token amount
 const GRACE_PERIOD = 3 * 24 * 60 * 60;
 const CLAIM_WINDOW = 30 * 24 * 60 * 60;
 const TIME_BUFFER = 15 * 60;
 const DAY = 24 * 60 * 60;
 
 describe("RemittancePledge", function () {
-  let usdc, pledge;
+  let usdc, usdt, pledge;
   let owner, sender, merchant, feeRecipient, outsider;
+  let usdcAddr, usdtAddr, pledgeAddr;
 
   // Helper: merchant signs an extension approval
   async function signExtension(pledgeId, newDate, oldDate, sigExpiry, nonce) {
@@ -24,7 +25,7 @@ describe("RemittancePledge", function () {
       ["uint256", "address", "string", "uint256", "uint256", "uint256", "uint256", "uint256"],
       [
         (await ethers.provider.getNetwork()).chainId,
-        await pledge.getAddress(),
+        pledgeAddr,
         "extend",
         pledgeId,
         newDate,
@@ -42,7 +43,7 @@ describe("RemittancePledge", function () {
       ["uint256", "address", "string", "uint256", "uint256", "uint256"],
       [
         (await ethers.provider.getNetwork()).chainId,
-        await pledge.getAddress(),
+        pledgeAddr,
         "cancel",
         pledgeId,
         sigExpiry,
@@ -52,125 +53,159 @@ describe("RemittancePledge", function () {
     return merchant.signMessage(ethers.getBytes(hash));
   }
 
-  // Helper: create a standard pledge (150 USDC total, 40% initial deposit + fee)
-  async function createStandardPledge() {
-    const total = USDC(150);
+  // Helper: create a standard USDC pledge (150 total, 40% deposit)
+  async function createStandardPledge(token = null) {
+    const tok = token ?? usdc;
+    const tokAddr = await tok.getAddress();
+    const total = UNITS(150);
     const gross = await pledge.quoteGrossAmount(sender.address, total);
-    const deposit = (gross * 40n) / 100n; // 40% — comfortably above 20% min
+    const deposit = (gross * 40n) / 100n;
     const deadline = (await time.latest()) + 30 * DAY;
-    await usdc.connect(sender).approve(await pledge.getAddress(), deposit);
-    await pledge.connect(sender).createPledge(merchant.address, total, deposit, deadline);
-    return { total, gross, deposit, deadline };
+    await tok.connect(sender).approve(pledgeAddr, deposit);
+    await pledge.connect(sender).createPledge(tokAddr, merchant.address, total, deposit, deadline);
+    return { total, gross, deposit, deadline, tokAddr };
   }
 
   beforeEach(async function () {
     [owner, sender, merchant, feeRecipient, outsider] = await ethers.getSigners();
 
     const MockUSDC = await ethers.getContractFactory("MockUSDC");
-    usdc = await MockUSDC.deploy();
+    const MockUSDT = await ethers.getContractFactory("MockUSDT");
+    usdc = await MockUSDC.deploy();  // defined in MockTokens.sol
+    usdt = await MockUSDT.deploy();  // defined in MockTokens.sol
+
+    usdcAddr = await usdc.getAddress();
+    usdtAddr = await usdt.getAddress();
 
     const RemittancePledge = await ethers.getContractFactory("RemittancePledge");
-    pledge = await RemittancePledge.deploy(await usdc.getAddress(), feeRecipient.address);
+    pledge = await RemittancePledge.deploy([usdcAddr, usdtAddr], feeRecipient.address);
+    pledgeAddr = await pledge.getAddress();
 
-    // Fund the sender generously
-    await usdc.faucet(sender.address, USDC(100000));
+    // Fund the sender with both tokens
+    await usdc.faucet(sender.address, UNITS(100000));
+    await usdt.faucet(sender.address, UNITS(100000));
   });
 
   // ── Constructor ───────────────────────────────────────────────────────────────
   describe("constructor", function () {
-    it("reverts on zero USDC address", async function () {
+    it("reverts with empty token list", async function () {
       const F = await ethers.getContractFactory("RemittancePledge");
-      await expect(F.deploy(ethers.ZeroAddress, feeRecipient.address))
-        .to.be.revertedWith("Invalid USDC address");
+      await expect(F.deploy([], feeRecipient.address))
+        .to.be.revertedWith("At least one token required");
     });
+
+    it("reverts on zero token address in list", async function () {
+      const F = await ethers.getContractFactory("RemittancePledge");
+      await expect(F.deploy([ethers.ZeroAddress], feeRecipient.address))
+        .to.be.revertedWith("Invalid token address");
+    });
+
     it("reverts on zero fee recipient", async function () {
       const F = await ethers.getContractFactory("RemittancePledge");
-      await expect(F.deploy(await usdc.getAddress(), ethers.ZeroAddress))
+      await expect(F.deploy([usdcAddr], ethers.ZeroAddress))
         .to.be.revertedWith("Invalid fee recipient");
+    });
+
+    it("whitelists all tokens passed at deployment", async function () {
+      expect(await pledge.allowedTokens(usdcAddr)).to.equal(true);
+      expect(await pledge.allowedTokens(usdtAddr)).to.equal(true);
     });
   });
 
   // ── createPledge ──────────────────────────────────────────────────────────────
   describe("createPledge", function () {
-    it("creates a pledge and locks the initial deposit", async function () {
-      const { deposit } = await createStandardPledge();
+    it("creates a USDC pledge and locks the initial deposit", async function () {
+      const { deposit } = await createStandardPledge(usdc);
       const p = await pledge.getPledge(1);
       expect(p.sender).to.equal(sender.address);
       expect(p.merchant).to.equal(merchant.address);
+      expect(p.token).to.equal(usdcAddr);
       expect(p.depositedAmount).to.equal(deposit);
       expect(p.status).to.equal(0); // PENDING
-      expect(await usdc.balanceOf(await pledge.getAddress())).to.equal(deposit);
+    });
+
+    it("creates a USDT pledge and locks the initial deposit", async function () {
+      const { deposit } = await createStandardPledge(usdt);
+      const p = await pledge.getPledge(1);
+      expect(p.token).to.equal(usdtAddr);
+      expect(p.depositedAmount).to.equal(deposit);
+    });
+
+    it("reverts when token is not whitelisted", async function () {
+      const rogue = await (await ethers.getContractFactory("MockUSDC")).deploy();
+      const deadline = (await time.latest()) + 30 * DAY;
+      await expect(
+        pledge.connect(sender).createPledge(await rogue.getAddress(), merchant.address, UNITS(150), UNITS(30), deadline)
+      ).to.be.revertedWith("Token not supported");
     });
 
     it("reverts on zero merchant address", async function () {
       const deadline = (await time.latest()) + 30 * DAY;
       await expect(
-        pledge.connect(sender).createPledge(ethers.ZeroAddress, USDC(150), USDC(60), deadline)
+        pledge.connect(sender).createPledge(usdcAddr, ethers.ZeroAddress, UNITS(150), UNITS(60), deadline)
       ).to.be.revertedWith("Invalid merchant address");
     });
 
     it("reverts when sender is the merchant", async function () {
       const deadline = (await time.latest()) + 30 * DAY;
       await expect(
-        pledge.connect(sender).createPledge(sender.address, USDC(150), USDC(60), deadline)
+        pledge.connect(sender).createPledge(usdcAddr, sender.address, UNITS(150), UNITS(60), deadline)
       ).to.be.revertedWith("Sender cannot be merchant");
     });
 
-    it("reverts below the 1 USDC minimum", async function () {
+    it("reverts below the minimum amount", async function () {
       const deadline = (await time.latest()) + 30 * DAY;
       await expect(
-        pledge.connect(sender).createPledge(merchant.address, USDC(0.5), USDC(0.5), deadline)
-      ).to.be.revertedWith("Amount below 1 USDC minimum");
+        pledge.connect(sender).createPledge(usdcAddr, merchant.address, UNITS(0.5), UNITS(0.5), deadline)
+      ).to.be.revertedWith("Amount below minimum");
     });
 
     it("reverts when commitment date is in the past", async function () {
       const past = (await time.latest()) - DAY;
       await expect(
-        pledge.connect(sender).createPledge(merchant.address, USDC(150), USDC(60), past)
+        pledge.connect(sender).createPledge(usdcAddr, merchant.address, UNITS(150), UNITS(60), past)
       ).to.be.revertedWith("Commitment date must be in future");
     });
 
     it("reverts when commitment date exceeds 90 days", async function () {
       const tooFar = (await time.latest()) + 100 * DAY;
       await expect(
-        pledge.connect(sender).createPledge(merchant.address, USDC(150), USDC(60), tooFar)
+        pledge.connect(sender).createPledge(usdcAddr, merchant.address, UNITS(150), UNITS(60), tooFar)
       ).to.be.revertedWith("Max 90 days commitment");
     });
 
     it("reverts when initial deposit is below the required percentage", async function () {
-      const total = USDC(150);
       const deadline = (await time.latest()) + 30 * DAY;
-      const tooLittle = USDC(1); // far below 20%
-      await usdc.connect(sender).approve(await pledge.getAddress(), tooLittle);
+      const tooLittle = UNITS(1);
+      await usdc.connect(sender).approve(pledgeAddr, tooLittle);
       await expect(
-        pledge.connect(sender).createPledge(merchant.address, total, tooLittle, deadline)
-      ).to.be.reverted; // string-built revert message
+        pledge.connect(sender).createPledge(usdcAddr, merchant.address, UNITS(150), tooLittle, deadline)
+      ).to.be.reverted;
     });
 
     it("reverts when initial deposit exceeds the gross amount", async function () {
-      const total = USDC(150);
+      const total = UNITS(150);
       const gross = await pledge.quoteGrossAmount(sender.address, total);
       const deadline = (await time.latest()) + 30 * DAY;
-      const tooMuch = gross + USDC(1);
-      await usdc.connect(sender).approve(await pledge.getAddress(), tooMuch);
+      const tooMuch = gross + UNITS(1);
+      await usdc.connect(sender).approve(pledgeAddr, tooMuch);
       await expect(
-        pledge.connect(sender).createPledge(merchant.address, total, tooMuch, deadline)
+        pledge.connect(sender).createPledge(usdcAddr, merchant.address, total, tooMuch, deadline)
       ).to.be.revertedWith("Deposit cannot exceed total");
     });
 
     it("auto-releases when initial deposit covers the full gross", async function () {
-      const total = USDC(150);
+      const total = UNITS(150);
       const gross = await pledge.quoteGrossAmount(sender.address, total);
       const deadline = (await time.latest()) + 30 * DAY;
-      await usdc.connect(sender).approve(await pledge.getAddress(), gross);
-      await pledge.connect(sender).createPledge(merchant.address, total, gross, deadline);
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await pledge.connect(sender).createPledge(usdcAddr, merchant.address, total, gross, deadline);
       const p = await pledge.getPledge(1);
       expect(p.status).to.equal(1); // COMPLETED
       expect(await usdc.balanceOf(merchant.address)).to.equal(total);
     });
 
     it("enforces the active pledge limit", async function () {
-      // New sender cap is 2
       await createStandardPledge();
       await createStandardPledge();
       await expect(createStandardPledge())
@@ -183,16 +218,15 @@ describe("RemittancePledge", function () {
     it("completes the pledge when the exact remaining balance is deposited", async function () {
       const { gross, deposit } = await createStandardPledge();
       const remaining = gross - deposit;
-      await usdc.connect(sender).approve(await pledge.getAddress(), remaining);
+      await usdc.connect(sender).approve(pledgeAddr, remaining);
       await pledge.connect(sender).depositRemaining(1, remaining);
-      const p = await pledge.getPledge(1);
-      expect(p.status).to.equal(1); // COMPLETED
+      expect((await pledge.getPledge(1)).status).to.equal(1); // COMPLETED
     });
 
     it("reverts on a partial (non-exact) deposit", async function () {
       const { gross, deposit } = await createStandardPledge();
       const partial = (gross - deposit) / 2n;
-      await usdc.connect(sender).approve(await pledge.getAddress(), partial);
+      await usdc.connect(sender).approve(pledgeAddr, partial);
       await expect(pledge.connect(sender).depositRemaining(1, partial))
         .to.be.revertedWith("Must deposit the exact remaining balance");
     });
@@ -208,7 +242,7 @@ describe("RemittancePledge", function () {
       const { gross, deposit, deadline } = await createStandardPledge();
       await time.increaseTo(deadline + GRACE_PERIOD + 1);
       const remaining = gross - deposit;
-      await usdc.connect(sender).approve(await pledge.getAddress(), remaining);
+      await usdc.connect(sender).approve(pledgeAddr, remaining);
       await expect(pledge.connect(sender).depositRemaining(1, remaining))
         .to.be.revertedWith("Grace period has ended");
     });
@@ -220,27 +254,35 @@ describe("RemittancePledge", function () {
     });
 
     it("reverts on a nonexistent pledge", async function () {
-      await expect(pledge.connect(sender).depositRemaining(999, USDC(1)))
+      await expect(pledge.connect(sender).depositRemaining(999, UNITS(1)))
         .to.be.revertedWith("Pledge does not exist");
     });
 
     it("reverts on a non-PENDING pledge", async function () {
       const { gross, deposit } = await createStandardPledge();
       const remaining = gross - deposit;
-      await usdc.connect(sender).approve(await pledge.getAddress(), remaining);
-      await pledge.connect(sender).depositRemaining(1, remaining); // completes it
+      await usdc.connect(sender).approve(pledgeAddr, remaining);
+      await pledge.connect(sender).depositRemaining(1, remaining);
       await expect(pledge.connect(sender).depositRemaining(1, remaining))
         .to.be.revertedWith("Pledge not pending");
     });
 
     it("marks paidDuringGrace when paid after the deadline", async function () {
       const { gross, deposit, deadline } = await createStandardPledge();
-      await time.increaseTo(deadline + DAY); // within grace
+      await time.increaseTo(deadline + DAY);
       const remaining = gross - deposit;
-      await usdc.connect(sender).approve(await pledge.getAddress(), remaining);
+      await usdc.connect(sender).approve(pledgeAddr, remaining);
       await pledge.connect(sender).depositRemaining(1, remaining);
-      const p = await pledge.getPledge(1);
-      expect(p.paidDuringGrace).to.equal(true);
+      expect((await pledge.getPledge(1)).paidDuringGrace).to.equal(true);
+    });
+
+    it("works with USDT pledge", async function () {
+      const { gross, deposit } = await createStandardPledge(usdt);
+      const remaining = gross - deposit;
+      await usdt.connect(sender).approve(pledgeAddr, remaining);
+      await pledge.connect(sender).depositRemaining(1, remaining);
+      expect((await pledge.getPledge(1)).status).to.equal(1); // COMPLETED
+      expect(await usdt.balanceOf(merchant.address)).to.equal(UNITS(150));
     });
   });
 
@@ -250,8 +292,7 @@ describe("RemittancePledge", function () {
       const { deposit, deadline } = await createStandardPledge();
       await time.increaseTo(deadline + GRACE_PERIOD + TIME_BUFFER + 1);
       await pledge.connect(merchant).claimDefaultedDeposit(1);
-      const p = await pledge.getPledge(1);
-      expect(p.status).to.equal(2); // DEFAULTED
+      expect((await pledge.getPledge(1)).status).to.equal(2); // DEFAULTED
       expect(await usdc.balanceOf(merchant.address)).to.equal(deposit);
     });
 
@@ -297,13 +338,12 @@ describe("RemittancePledge", function () {
       await time.increaseTo(deadline + GRACE_PERIOD + CLAIM_WINDOW + TIME_BUFFER + 1);
       const before = await usdc.balanceOf(sender.address);
       await pledge.connect(sender).reclaimDeposit(1);
-      const after = await usdc.balanceOf(sender.address);
-      expect(after - before).to.equal(deposit);
+      expect(await usdc.balanceOf(sender.address) - before).to.equal(deposit);
     });
 
     it("reverts while the merchant claim window is still open", async function () {
       const { deadline } = await createStandardPledge();
-      await time.increaseTo(deadline + GRACE_PERIOD + DAY); // window still open
+      await time.increaseTo(deadline + GRACE_PERIOD + DAY);
       await expect(pledge.connect(sender).reclaimDeposit(1))
         .to.be.revertedWith("Merchant claim window still open");
     });
@@ -345,8 +385,7 @@ describe("RemittancePledge", function () {
       const sigExpiry = (await time.latest()) + DAY;
       const sig = await signExtension(1, newDate, deadline, sigExpiry, 0);
       await pledge.connect(sender).extendDeadline(1, newDate, sigExpiry, sig);
-      const p = await pledge.getPledge(1);
-      expect(p.commitmentDate).to.equal(newDate);
+      expect((await pledge.getPledge(1)).commitmentDate).to.equal(newDate);
     });
 
     it("reverts with an invalid signature (signed by outsider)", async function () {
@@ -355,8 +394,7 @@ describe("RemittancePledge", function () {
       const sigExpiry = (await time.latest()) + DAY;
       const hash = ethers.solidityPackedKeccak256(
         ["uint256", "address", "string", "uint256", "uint256", "uint256", "uint256", "uint256"],
-        [(await ethers.provider.getNetwork()).chainId, await pledge.getAddress(),
-         "extend", 1, newDate, deadline, sigExpiry, 0]
+        [(await ethers.provider.getNetwork()).chainId, pledgeAddr, "extend", 1, newDate, deadline, sigExpiry, 0]
       );
       const badSig = await outsider.signMessage(ethers.getBytes(hash));
       await expect(pledge.connect(sender).extendDeadline(1, newDate, sigExpiry, badSig))
@@ -366,7 +404,7 @@ describe("RemittancePledge", function () {
     it("reverts when the signature has expired", async function () {
       const { deadline } = await createStandardPledge();
       const newDate = deadline + 20 * DAY;
-      const sigExpiry = (await time.latest()) - 1; // already expired
+      const sigExpiry = (await time.latest()) - 1;
       const sig = await signExtension(1, newDate, deadline, sigExpiry, 0);
       await expect(pledge.connect(sender).extendDeadline(1, newDate, sigExpiry, sig))
         .to.be.revertedWith("Signature expired");
@@ -413,10 +451,7 @@ describe("RemittancePledge", function () {
       const newDate = deadline + 20 * DAY;
       const sigExpiry = (await time.latest()) + 100 * DAY;
       const sig = await signExtension(1, newDate, deadline, sigExpiry, 0);
-      // First use — succeeds; commitmentDate is now newDate
       await pledge.connect(sender).extendDeadline(1, newDate, sigExpiry, sig);
-      // Replay: use a date beyond the updated deadline so it passes the "New date must be later"
-      // check and reaches the signature verification — which fails because nonce is now 1
       const laterDate = newDate + DAY;
       await expect(pledge.connect(sender).extendDeadline(1, laterDate, sigExpiry, sig))
         .to.be.revertedWith("Invalid merchant signature");
@@ -431,10 +466,8 @@ describe("RemittancePledge", function () {
       const sig = await signCancel(1, sigExpiry, 0);
       const before = await usdc.balanceOf(sender.address);
       await pledge.connect(sender).cancelPledge(1, sigExpiry, sig);
-      const after = await usdc.balanceOf(sender.address);
-      expect(after - before).to.equal(deposit);
-      const p = await pledge.getPledge(1);
-      expect(p.status).to.equal(3); // CANCELLED
+      expect(await usdc.balanceOf(sender.address) - before).to.equal(deposit);
+      expect((await pledge.getPledge(1)).status).to.equal(3); // CANCELLED
     });
 
     it("does not count a cancellation against reputation", async function () {
@@ -452,8 +485,7 @@ describe("RemittancePledge", function () {
       const sigExpiry = (await time.latest()) + DAY;
       const hash = ethers.solidityPackedKeccak256(
         ["uint256", "address", "string", "uint256", "uint256", "uint256"],
-        [(await ethers.provider.getNetwork()).chainId, await pledge.getAddress(),
-         "cancel", 1, sigExpiry, 0]
+        [(await ethers.provider.getNetwork()).chainId, pledgeAddr, "cancel", 1, sigExpiry, 0]
       );
       const badSig = await outsider.signMessage(ethers.getBytes(hash));
       await expect(pledge.connect(sender).cancelPledge(1, sigExpiry, badSig))
@@ -505,14 +537,14 @@ describe("RemittancePledge", function () {
       await pledge.connect(owner).pause();
       const deadline = (await time.latest()) + 30 * DAY;
       await expect(
-        pledge.connect(sender).createPledge(merchant.address, USDC(150), USDC(60), deadline)
+        pledge.connect(sender).createPledge(usdcAddr, merchant.address, UNITS(150), UNITS(60), deadline)
       ).to.be.reverted;
     });
 
     it("unpause restores functionality", async function () {
       await pledge.connect(owner).pause();
       await pledge.connect(owner).unpause();
-      await createStandardPledge(); // should not revert
+      await createStandardPledge();
     });
 
     it("owner can update fee recipient", async function () {
@@ -524,9 +556,93 @@ describe("RemittancePledge", function () {
       await expect(pledge.connect(owner).setFeeRecipient(ethers.ZeroAddress))
         .to.be.revertedWith("Invalid fee recipient");
     });
+
+    it("owner can add a new token to the whitelist", async function () {
+      const newToken = await (await ethers.getContractFactory("MockUSDC")).deploy();
+      await pledge.connect(owner).setTokenAllowed(await newToken.getAddress(), true);
+      expect(await pledge.allowedTokens(await newToken.getAddress())).to.equal(true);
+    });
+
+    it("owner can remove a token from the whitelist", async function () {
+      await pledge.connect(owner).setTokenAllowed(usdtAddr, false);
+      expect(await pledge.allowedTokens(usdtAddr)).to.equal(false);
+    });
+
+    it("reverts setTokenAllowed with zero address", async function () {
+      await expect(pledge.connect(owner).setTokenAllowed(ethers.ZeroAddress, true))
+        .to.be.revertedWith("Invalid token address");
+    });
+
+    it("removed token cannot be used in new pledges", async function () {
+      await pledge.connect(owner).setTokenAllowed(usdtAddr, false);
+      const deadline = (await time.latest()) + 30 * DAY;
+      await expect(
+        pledge.connect(sender).createPledge(usdtAddr, merchant.address, UNITS(150), UNITS(30), deadline)
+      ).to.be.revertedWith("Token not supported");
+    });
+
+    it("non-owner cannot change token whitelist", async function () {
+      await expect(pledge.connect(outsider).setTokenAllowed(usdcAddr, false))
+        .to.be.reverted;
+    });
+
+    it("emits TokenAllowanceSet when whitelist changes", async function () {
+      await expect(pledge.connect(owner).setTokenAllowed(usdtAddr, false))
+        .to.emit(pledge, "TokenAllowanceSet")
+        .withArgs(usdtAddr, false);
+    });
   });
 
-  // ── View functions & fee tiers ────────────────────────────────────────────────
+  // ── Multi-token & unified reputation ─────────────────────────────────────────
+  describe("multi-token unified reputation", function () {
+    it("USDC pledge completion builds reputation that applies to USDT pledges", async function () {
+      // Complete a USDC pledge on time (full deposit)
+      const total = UNITS(100);
+      const gross = await pledge.quoteGrossAmount(sender.address, total);
+      const deadline = (await time.latest()) + 30 * DAY;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await pledge.connect(sender).createPledge(usdcAddr, merchant.address, total, gross, deadline);
+
+      // Sender now has 100% trust score — USDT pledge should get loyalty fee
+      expect(await pledge.getServiceFeeBps(sender.address)).to.equal(75);
+      expect(await pledge.getRequiredDepositPct(sender.address)).to.equal(20);
+      expect(await pledge.getMaxActivePledges(sender.address)).to.equal(5);
+
+      // Can now create a USDT pledge with the high-trust benefits
+      const usdtGross = await pledge.quoteGrossAmount(sender.address, total);
+      const usdtDeposit = (usdtGross * 20n) / 100n + 1n;
+      const deadline2 = (await time.latest()) + 30 * DAY;
+      await usdt.connect(sender).approve(pledgeAddr, usdtDeposit);
+      await pledge.connect(sender).createPledge(usdtAddr, merchant.address, total, usdtDeposit, deadline2);
+      expect((await pledge.getPledge(2)).token).to.equal(usdtAddr);
+    });
+
+    it("USDT default reduces trust score affecting USDC pledge requirements", async function () {
+      // Build trust with a USDC on-time payment
+      const total = UNITS(10);
+      const gross1 = await pledge.quoteGrossAmount(sender.address, total);
+      const deadline1 = (await time.latest()) + 30 * DAY;
+      await usdc.connect(sender).approve(pledgeAddr, gross1);
+      await pledge.connect(sender).createPledge(usdcAddr, merchant.address, total, gross1, deadline1);
+
+      // Default a large USDT pledge — tanks the score
+      const largeTotal = UNITS(40);
+      const gross2 = await pledge.quoteGrossAmount(sender.address, largeTotal);
+      const dep2 = (gross2 * 20n) / 100n + 1n;
+      const deadline2 = (await time.latest()) + 30 * DAY;
+      await usdt.connect(sender).approve(pledgeAddr, dep2);
+      await pledge.connect(sender).createPledge(usdtAddr, merchant.address, largeTotal, dep2, deadline2);
+      await time.increaseTo(deadline2 + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).claimDefaultedDeposit(2);
+
+      // Score is now low — USDC pledge deposit requirement should be higher
+      const score = await pledge.getTrustScore(sender.address);
+      expect(score).to.be.lt(5000n);
+      expect(await pledge.getRequiredDepositPct(sender.address)).to.be.gte(30);
+    });
+  });
+
+  // ── Views and fee tiers ───────────────────────────────────────────────────────
   describe("views and fee tiers", function () {
     it("new user gets the standard 1% fee", async function () {
       expect(await pledge.getServiceFeeBps(sender.address)).to.equal(100);
@@ -594,104 +710,86 @@ describe("RemittancePledge", function () {
     });
 
     it("quoteGrossAmount adds the 1% fee for a new user", async function () {
-      const gross = await pledge.quoteGrossAmount(sender.address, USDC(100));
-      expect(gross).to.equal(USDC(101)); // 100 + 1%
+      expect(await pledge.quoteGrossAmount(sender.address, UNITS(100))).to.equal(UNITS(101));
     });
 
     it("high-trust sender gets 0.75% loyalty fee", async function () {
-      // Complete a pledge on-time to build high trust score
-      const total = USDC(100);
+      const total = UNITS(100);
       const gross = await pledge.quoteGrossAmount(sender.address, total);
       const deadline = (await time.latest()) + 30 * DAY;
-      await usdc.connect(sender).approve(await pledge.getAddress(), gross);
-      await pledge.connect(sender).createPledge(merchant.address, total, gross, deadline);
-      // Now sender has 100% trust score — should get loyalty rate
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await pledge.connect(sender).createPledge(usdcAddr, merchant.address, total, gross, deadline);
       expect(await pledge.getServiceFeeBps(sender.address)).to.equal(75);
       expect(await pledge.getRequiredDepositPct(sender.address)).to.equal(20);
       expect(await pledge.getMaxActivePledges(sender.address)).to.equal(5);
     });
 
-    it("serial defaulter (3 defaults) is capped at 2 active pledges regardless of score", async function () {
-      // Trigger 3 defaults — deposit % rises after each default so we query it each iteration
+    it("mid-trust sender (50% score) gets 3 active pledge slots", async function () {
+      const total = UNITS(100);
+      const gross1 = await pledge.quoteGrossAmount(sender.address, total);
+      const deadline1 = (await time.latest()) + 30 * DAY;
+      await usdc.connect(sender).approve(pledgeAddr, gross1);
+      await pledge.connect(sender).createPledge(usdcAddr, merchant.address, total, gross1, deadline1);
+
+      const gross2 = await pledge.quoteGrossAmount(sender.address, total);
+      const dep2 = (gross2 * 20n) / 100n + 1n;
+      const deadline2 = (await time.latest()) + 30 * DAY;
+      await usdc.connect(sender).approve(pledgeAddr, dep2);
+      await pledge.connect(sender).createPledge(usdcAddr, merchant.address, total, dep2, deadline2);
+      await time.increaseTo(deadline2 + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).claimDefaultedDeposit(2);
+
+      expect(await pledge.getTrustScore(sender.address)).to.equal(5000);
+      expect(await pledge.getMaxActivePledges(sender.address)).to.equal(3);
+    });
+
+    it("low-trust sender (20–49% score) requires 40% deposit", async function () {
+      const gross1 = await pledge.quoteGrossAmount(sender.address, UNITS(10));
+      const deadline1 = (await time.latest()) + 30 * DAY;
+      await usdc.connect(sender).approve(pledgeAddr, gross1);
+      await pledge.connect(sender).createPledge(usdcAddr, merchant.address, UNITS(10), gross1, deadline1);
+
+      const gross2 = await pledge.quoteGrossAmount(sender.address, UNITS(40));
+      const dep2 = (gross2 * 20n) / 100n + 1n;
+      const deadline2 = (await time.latest()) + 30 * DAY;
+      await usdc.connect(sender).approve(pledgeAddr, dep2);
+      await pledge.connect(sender).createPledge(usdcAddr, merchant.address, UNITS(40), dep2, deadline2);
+      await time.increaseTo(deadline2 + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).claimDefaultedDeposit(2);
+
+      const score = await pledge.getTrustScore(sender.address);
+      expect(score).to.be.gte(2000n);
+      expect(score).to.be.lt(5000n);
+      expect(await pledge.getRequiredDepositPct(sender.address)).to.equal(40);
+    });
+
+    it("serial defaulter (3 defaults) is capped at 2 active pledges", async function () {
       for (let i = 0; i < 3; i++) {
-        const total = USDC(150);
+        const total = UNITS(150);
         const gross = await pledge.quoteGrossAmount(sender.address, total);
         const requiredPct = await pledge.getRequiredDepositPct(sender.address);
-        const deposit = (gross * requiredPct) / 100n + 1n; // just above minimum
+        const deposit = (gross * requiredPct) / 100n + 1n;
         const deadline = (await time.latest()) + 30 * DAY;
-        await usdc.connect(sender).approve(await pledge.getAddress(), deposit);
-        await pledge.connect(sender).createPledge(merchant.address, total, deposit, deadline);
+        await usdc.connect(sender).approve(pledgeAddr, deposit);
+        await pledge.connect(sender).createPledge(usdcAddr, merchant.address, total, deposit, deadline);
         await time.increaseTo(deadline + GRACE_PERIOD + TIME_BUFFER + 1);
         await pledge.connect(merchant).claimDefaultedDeposit(i + 1);
       }
       expect(await pledge.getMaxActivePledges(sender.address)).to.equal(2);
     });
 
-    it("mid-trust sender (50% score) gets 3 active pledge slots", async function () {
-      // 1 on-time + 1 default of equal amount → weightedScore/totalWeight = 5000 (50%)
-      const total = USDC(100);
-      const gross = await pledge.quoteGrossAmount(sender.address, total);
-
-      // Pledge 1 — complete on time (full deposit upfront)
-      const deadline1 = (await time.latest()) + 30 * DAY;
-      await usdc.connect(sender).approve(await pledge.getAddress(), gross);
-      await pledge.connect(sender).createPledge(merchant.address, total, gross, deadline1);
-
-      // Pledge 2 — default it
-      const gross2 = await pledge.quoteGrossAmount(sender.address, total);
-      const dep2 = (gross2 * 20n) / 100n + 1n;
-      const deadline2 = (await time.latest()) + 30 * DAY;
-      await usdc.connect(sender).approve(await pledge.getAddress(), dep2);
-      await pledge.connect(sender).createPledge(merchant.address, total, dep2, deadline2);
-      await time.increaseTo(deadline2 + GRACE_PERIOD + TIME_BUFFER + 1);
-      await pledge.connect(merchant).claimDefaultedDeposit(2);
-
-      // Score = (100 * 10000) / (100 + 100) = 5000 — exactly TIER_MID
-      expect(await pledge.getTrustScore(sender.address)).to.equal(5000);
-      expect(await pledge.getMaxActivePledges(sender.address)).to.equal(3);
+    it("MockUSDC decimals() returns 6", async function () {
+      expect(await usdc.decimals()).to.equal(6);
     });
 
-    it("low-trust sender (20–49% score) requires 40% deposit", async function () {
-      // 1 on-time small + 1 default large → score between 20–49%
-      // on-time: 10 USDC * 10000 = 100000; default: 40 USDC * 0 = 0
-      // totalWeight = 50, weightedScore = 100000 → score = 100000/50 = 2000 (20%)
-      const smallTotal = USDC(10);
-      const largeTotal = USDC(40);
-
-      // Pledge 1 — complete on time
-      const gross1 = await pledge.quoteGrossAmount(sender.address, smallTotal);
-      const deadline1 = (await time.latest()) + 30 * DAY;
-      await usdc.connect(sender).approve(await pledge.getAddress(), gross1);
-      await pledge.connect(sender).createPledge(merchant.address, smallTotal, gross1, deadline1);
-
-      // Pledge 2 — default it (large amount tanks the score)
-      const gross2 = await pledge.quoteGrossAmount(sender.address, largeTotal);
-      const dep2 = (gross2 * 20n) / 100n + 1n;
-      const deadline2 = (await time.latest()) + 30 * DAY;
-      await usdc.connect(sender).approve(await pledge.getAddress(), dep2);
-      await pledge.connect(sender).createPledge(merchant.address, largeTotal, dep2, deadline2);
-      await time.increaseTo(deadline2 + GRACE_PERIOD + TIME_BUFFER + 1);
-      await pledge.connect(merchant).claimDefaultedDeposit(2);
-
-      // Score should be in TIER_LOW (20–49%) → 40% deposit required
-      const score = await pledge.getTrustScore(sender.address);
-      expect(score).to.be.gte(2000);
-      expect(score).to.be.lt(5000);
-      expect(await pledge.getRequiredDepositPct(sender.address)).to.equal(40);
+    it("MockUSDC mints 1M tokens to deployer on construction", async function () {
+      expect(await usdc.balanceOf(owner.address)).to.equal(ethers.parseUnits("1000000", 6));
     });
 
     it("MockUSDC reverts when faucet amount exceeds MAX_FAUCET", async function () {
       const maxFaucet = await usdc.MAX_FAUCET();
       await expect(usdc.faucet(sender.address, maxFaucet + 1n))
         .to.be.revertedWith("Faucet: amount too large");
-    });
-
-    it("MockUSDC decimals() returns 6", async function () {
-      expect(await usdc.decimals()).to.equal(6);
-    });
-
-    it("MockUSDC mints 1M USDC to deployer on construction", async function () {
-      expect(await usdc.balanceOf(owner.address)).to.equal(ethers.parseUnits("1000000", 6));
     });
   });
 });
