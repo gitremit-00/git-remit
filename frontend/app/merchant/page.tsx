@@ -10,8 +10,14 @@ import { useCurrency } from "../../context/CurrencyContext";
 import { getPledgeMeta } from "../../lib/pledgeMeta";
 import BottomNav from "../../components/BottomNav";
 import Header from "../../components/Header";
+import { CONTRACTS } from "../../contracts/addresses";
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
+interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
+
+function tokenSymbol(addr: string): string {
+  if (addr?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
+  return "USDC";
+}
 interface SenderRep { score: number; total: number; defaults: number; }
 
 const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
@@ -126,13 +132,13 @@ export default function MerchantDashboard() {
         <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5 col-span-1 relative overflow-hidden">
           <div className="text-[11px] text-[#555] tracking-[1.5px] mb-2">TOTAL TRANSFERRED (THIS TERM)</div>
           <div className="text-4xl font-extrabold text-white leading-none mb-1">
-            {totalCommitted.toFixed(2)} <span className="text-base text-[#888] font-normal">USDC</span>
+            {totalCommitted.toFixed(2)} <span className="text-base text-[#888] font-normal">tokens</span>
           </div>
           <div className="text-[#555] text-sm mb-3">≈ {fmt(totalCommitted)}</div>
           <div className="text-[12px] text-[#888]">
-            <span className="text-[#DDE048] font-bold">{totalLocked.toFixed(2)} USDC</span> locked in holding
+            <span className="text-[#DDE048] font-bold">{totalLocked.toFixed(2)}</span> locked in holding
             <span className="text-[#444] mx-2">·</span>
-            {(totalCommitted - totalLocked).toFixed(2)} USDC committed
+            {(totalCommitted - totalLocked).toFixed(2)} committed
           </div>
         </div>
         <StatCard label="PENDING" value={pending.length} sub="awaiting deposit" color="#f59e0b" />
@@ -181,7 +187,10 @@ export default function MerchantDashboard() {
             {filtered.map((p) => {
               const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
               const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
-              const remaining = Math.max(0, total * 1.01 - locked);
+              const feeBps = Number(p.appliedFeeBps);
+              const gross = total * (1 + feeBps / 10000);
+              const remaining = Math.max(0, gross - locked);
+              const sym = tokenSymbol(p.token);
               const status = STATUS[p.status];
               const rep = senderReps[p.sender.toLowerCase()];
               const meta = getPledgeMeta(p.merchant);
@@ -240,7 +249,7 @@ export default function MerchantDashboard() {
                     {isClaimable ? (
                       <Link href={`/merchant/transfers/${p.id}`}>
                         <span className="bg-[#DDE048] text-black text-[12px] font-bold rounded-xl px-3 py-2 whitespace-nowrap hover:bg-[#c8ce30] transition-colors">
-                          Claim {locked.toFixed(2)}
+                          Claim {locked.toFixed(2)} {sym}
                         </span>
                       </Link>
                     ) : status === "COMPLETED" ? (
@@ -303,7 +312,7 @@ export default function MerchantDashboard() {
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 col-span-2">
             <div className="text-[10px] text-[#888] tracking-[1.5px] mb-1">TOTAL TRANSFERRED</div>
-            <div className="text-3xl font-extrabold">{totalCommitted.toFixed(2)} <span className="text-sm text-[#888] font-normal">USDC</span></div>
+            <div className="text-3xl font-extrabold">{totalCommitted.toFixed(2)} <span className="text-sm text-[#888] font-normal">tokens</span></div>
             <div className="text-xs text-[#888] mt-1">≈ {fmt(totalCommitted)}</div>
           </div>
           <MobileStatCard label="PENDING" value={pending.length} color="#f59e0b" />
@@ -335,7 +344,10 @@ export default function MerchantDashboard() {
         {filtered.map((p) => {
           const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
           const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
-          const remaining = Math.max(0, total * 1.01 - locked);
+          const feeBps = Number(p.appliedFeeBps);
+          const gross = total * (1 + feeBps / 10000);
+          const remaining = Math.max(0, gross - locked);
+          const sym = tokenSymbol(p.token);
           const status = STATUS[p.status];
           const rep = senderReps[p.sender.toLowerCase()];
           const isClaimable = status === "PENDING" && Date.now() / 1000 > Number(p.commitmentDate) + 3 * 86400;
@@ -360,14 +372,14 @@ export default function MerchantDashboard() {
                   {status === "COMPLETED" ? "✓" : "●"} {status}
                 </span>
               </div>
-              <div className="text-[28px] font-extrabold">{total.toFixed(2)} <span className="text-sm text-[#888] font-normal">USDC</span></div>
+              <div className="text-[28px] font-extrabold">{total.toFixed(2)} <span className="text-sm text-[#888] font-normal">{sym}</span></div>
               <div className="flex justify-between text-[12px] mt-1">
                 <span className="text-[#DDE048] font-semibold">{locked.toFixed(2)} locked</span>
                 <span className="text-[#888]">{remaining.toFixed(2)} remaining</span>
               </div>
               {isClaimable && (
                 <div className="mt-3 bg-[#DDE048] text-black rounded-xl py-2.5 text-sm font-bold text-center">
-                  Claim {locked.toFixed(2)} USDC
+                  Claim {locked.toFixed(2)} {sym}
                 </div>
               )}
             </Link>

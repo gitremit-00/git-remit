@@ -16,7 +16,7 @@ module.exports = {
   networks: {
     morphTestnet: {
       url: process.env.MORPH_RPC || "https://rpc-quicknode-holesky.morphl2.io",
-      chainId: 2810,
+      chainId: 2910,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
     },
     localhost: {

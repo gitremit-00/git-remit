@@ -10,17 +10,24 @@ async function main() {
   const deployments = JSON.parse(fs.readFileSync(deploymentsPath));
 
   if (!deployments.mockUSDC) {
-    throw new Error("MockUSDC address not found — run deployMockUSDC.js first");
+    throw new Error("MockUSDC address not found — run deployMockTokens.js first");
+  }
+  if (!deployments.mockUSDT) {
+    throw new Error("MockUSDT address not found — run deployMockTokens.js first");
   }
 
   console.log("Using MockUSDC at:", deployments.mockUSDC);
+  console.log("Using MockUSDT at:", deployments.mockUSDT);
   console.log("Deploying RemittancePledge...");
 
   const feeRecipient = process.env.FEE_RECIPIENT || deployer.address;
   console.log("Fee recipient:", feeRecipient);
 
   const RemittancePledge = await ethers.getContractFactory("RemittancePledge");
-  const contract = await RemittancePledge.deploy(deployments.mockUSDC, feeRecipient);
+  const contract = await RemittancePledge.deploy(
+    [deployments.mockUSDC, deployments.mockUSDT],
+    feeRecipient
+  );
   await contract.waitForDeployment();
 
   const address = await contract.getAddress();

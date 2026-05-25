@@ -10,6 +10,12 @@ import { ethers } from "ethers";
 import { ArrowLeft, ChevronRight, ExternalLink, CheckCircle2, Circle, Clock, AlertCircle, BadgeCheck, MessageCircle, Dot } from "lucide-react";
 import { useWallet } from "../../../../context/WalletContext";
 import { CONTRACTS } from "../../../../contracts/addresses";
+
+function tokenSymbol(addr: string) {
+  if (addr.toLowerCase() === CONTRACTS.MOCK_USDC.toLowerCase()) return "USDC";
+  if (addr.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
+  return "TOKEN";
+}
 import { useCurrency } from "../../../../context/CurrencyContext";
 import { getPledgeMeta } from "../../../../lib/pledgeMeta";
 
@@ -17,7 +23,7 @@ const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
 const STATUS_COLOR: Record<string, string> = { PENDING: "#f59e0b", COMPLETED: "#22c55e", DEFAULTED: "#ef4444", CANCELLED: "#888" };
 const STATUS_BG: Record<string, string> = { PENDING: "#f59e0b22", COMPLETED: "#22c55e22", DEFAULTED: "#ef444422", CANCELLED: "#88888822" };
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; initialDeposit: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; paidDuringGrace: boolean; }
+interface PledgeRaw { id: bigint; sender: string; merchant: string; token: string; totalAmount: bigint; initialDeposit: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; paidDuringGrace: boolean; }
 interface SenderRep { score: number; total: number; defaults: number; label: string; }
 
 function shortAddr(a: string) { return a.slice(0, 6) + "…" + a.slice(-4); }
@@ -82,7 +88,7 @@ export default function MerchantTransferDetail() {
     if (!pledgeWrite) return;
     setTxLoading(true); setTxStatus("Claiming...");
     try {
-      const tx = await pledgeWrite.claimPartial(id);
+      const tx = await pledgeWrite.claimDefaultedDeposit(id);
       await tx.wait();
       setTxStatus("Claimed!"); loadPledge();
     } catch (err: unknown) {
@@ -100,9 +106,11 @@ export default function MerchantTransferDetail() {
     </div>
   );
 
+  const token = tokenSymbol(pledge.token);
   const total = parseFloat(ethers.formatUnits(pledge.totalAmount, 6));
-  const gross = total * 1.01;
-  const fee = total * 0.01;
+  const feeBps = Number(pledge.appliedFeeBps);
+  const gross = total * (1 + feeBps / 10000);
+  const fee = total * (feeBps / 10000);
   const merchantReceives = total;
   const rawLocked = parseFloat(ethers.formatUnits(pledge.depositedAmount, 6));
   const locked = Number(pledge.status) === 1 ? total : rawLocked;
@@ -142,7 +150,7 @@ export default function MerchantTransferDetail() {
             <span className="text-[#555] text-sm font-mono">{pledgeIdHex}</span>
           </div>
           <div className="text-[56px] font-extrabold text-white leading-none">
-            {total.toFixed(2)} <span className="text-2xl text-[#888] font-normal">USDC</span>
+            {total.toFixed(2)} <span className="text-2xl text-[#888] font-normal">{token}</span>
           </div>
           <div className="text-[#555] text-sm mt-1">≈ {fmt(total)} · from sender</div>
           <div className="flex items-center gap-2 mt-3">
@@ -234,21 +242,21 @@ export default function MerchantTransferDetail() {
             <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
                 <div className="text-[11px] text-[#555] tracking-[1px] mb-2">TOTAL PLEDGED</div>
-                <div className="text-2xl font-extrabold text-white">{total.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
+                <div className="text-2xl font-extrabold text-white">{total.toFixed(2)} <span className="text-sm text-[#555] font-normal">{token}</span></div>
                 <div className="text-xs text-[#555] mt-1">≈ {fmt(total)}</div>
               </div>
               <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
                 <div className="text-[11px] text-[#555] tracking-[1px] mb-2">LOCKED SO FAR</div>
-                <div className="text-2xl font-extrabold text-white">{rawLocked.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
+                <div className="text-2xl font-extrabold text-white">{rawLocked.toFixed(2)} <span className="text-sm text-[#555] font-normal">{token}</span></div>
                 <div className="text-xs text-[#555] mt-1">{total > 0 ? Math.round(rawLocked / gross * 100) : 0}% of total</div>
               </div>
               <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
                 <div className="text-[11px] text-[#555] tracking-[1px] mb-2">REMAINING</div>
-                <div className={`text-2xl font-extrabold ${remaining > 0 ? "text-[#f59e0b]" : "text-[#22c55e]"}`}>{remaining.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
+                <div className={`text-2xl font-extrabold ${remaining > 0 ? "text-[#f59e0b]" : "text-[#22c55e]"}`}>{remaining.toFixed(2)} <span className="text-sm text-[#555] font-normal">{token}</span></div>
               </div>
               <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
                 <div className="text-[11px] text-[#555] tracking-[1px] mb-2">YOU RECEIVE</div>
-                <div className="text-2xl font-extrabold text-[#DDE048]">{merchantReceives.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
+                <div className="text-2xl font-extrabold text-[#DDE048]">{merchantReceives.toFixed(2)} <span className="text-sm text-[#555] font-normal">{token}</span></div>
                 <div className="text-xs text-[#555] mt-1">after 1% service fee</div>
               </div>
             </div>

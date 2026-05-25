@@ -24,9 +24,10 @@ function scoreLabel(s: number) { return s >= 80 ? "Excellent" : s >= 50 ? "Good"
 function scoreColor(s: number) { return s >= 80 ? "#22c55e" : s >= 50 ? "#DDE048" : s >= 20 ? "#f59e0b" : "#ef4444"; }
 
 export default function Home() {
-  const { account, connect, pledgeRead, usdcRead, walletLoading } = useWallet();
+  const { account, connect, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
   const { fmt, fmtAlt, currency } = useCurrency();
-  const [balance, setBalance] = useState<string | null>(null);
+  const [usdcBal, setUsdcBal] = useState<string | null>(null);
+  const [usdtBal, setUsdtBal] = useState<string | null>(null);
   const [rep, setRep] = useState<RepState | null>(null);
   const [activePledges, setActivePledges] = useState<PledgeRaw[]>([]);
   const [completedPledges, setCompletedPledges] = useState<PledgeRaw[]>([]);
@@ -47,13 +48,15 @@ export default function Home() {
   async function loadData() {
     setLoading(true);
     try {
-      const [bal, repData, ids, maxAct] = await Promise.all([
+      const [uBal, tBal, repData, ids, maxAct] = await Promise.all([
         usdcRead.balanceOf(account),
+        usdtRead.balanceOf(account),
         pledgeRead.getReputation(account),
         pledgeRead.getSenderPledges(account),
         pledgeRead.getMaxActivePledges(account),
       ]);
-      setBalance(ethers.formatUnits(bal, 6));
+      setUsdcBal(ethers.formatUnits(uBal, 6));
+      setUsdtBal(ethers.formatUnits(tBal, 6));
       setRep({
         score: Math.round(Number(repData.basisPoints) / 100),
         onTime: Number(repData.onTimeCount),
@@ -169,27 +172,27 @@ export default function Home() {
           </p>
         </div>
 
-        {/* USDC Balance */}
+        {/* Token Balances */}
         <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-5 h-5 rounded-full bg-[#DDE048]/10 flex items-center justify-center">
               <span className="text-[10px] text-[#DDE048] font-bold">$</span>
             </div>
-            <span className="text-[11px] text-[#555] tracking-[1.5px]">USDC BALANCE</span>
+            <span className="text-[11px] text-[#555] tracking-[1.5px]">TOKEN BALANCES</span>
           </div>
-          <div className="text-3xl font-extrabold text-white mb-0.5 truncate">
-            {loading ? "–" : balance
-              ? currency === "PHP"
-                ? fmt(parseFloat(balance))
-                : `${parseFloat(balance).toFixed(2)}`
-              : currency === "PHP" ? fmt(0) : "0.00"}
-            <span className="text-base text-[#888] font-normal ml-1.5">{currency === "PHP" ? "PHP" : "USDC"}</span>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            {([["USDC", usdcBal], ["USDT", usdtBal]] as const).map(([sym, bal]) => {
+              const n = parseFloat(bal ?? "0");
+              return (
+                <div key={sym} className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-3">
+                  <div className="text-[10px] text-[#555] tracking-[1px] mb-1">{sym}</div>
+                  <div className="text-lg font-extrabold text-white">{loading ? "–" : currency === "PHP" ? fmt(n) : `${n.toFixed(2)}`}</div>
+                  <div className="text-[10px] text-[#555] mt-0.5">{loading ? "" : fmtAlt(n, sym)}</div>
+                </div>
+              );
+            })}
           </div>
-          {balance && <div className="text-[12px] text-[#555] mb-4">≈ {fmtAlt(parseFloat(balance))}</div>}
-          <div className="flex gap-2 mt-auto">
-            <Link href="/wallet" className="flex-1 bg-[#DDE048] text-black text-sm font-bold rounded-xl py-2.5 text-center hover:bg-[#c8ce30] transition-colors">Top up</Link>
-            <Link href="/wallet" className="flex-1 bg-[#1e2230] text-white text-sm font-semibold rounded-xl py-2.5 text-center hover:bg-[#252836] transition-colors">Withdraw</Link>
-          </div>
+          <Link href="/wallet" className="w-full block bg-[#DDE048] text-black text-sm font-bold rounded-xl py-2.5 text-center hover:bg-[#c8ce30] transition-colors">Manage wallet</Link>
         </div>
       </div>
 
@@ -199,7 +202,7 @@ export default function Home() {
           <div>
             <h2 className="text-xl font-bold text-white">Active Transfers</h2>
             <p className="text-[13px] text-[#555] mt-0.5">
-              {activePledges.length} pending · {activePledges.reduce((s, p) => s + parseFloat(ethers.formatUnits(p.depositedAmount, 6)), 0).toFixed(2)} USDC locked in holding
+              {activePledges.length} pending · {activePledges.reduce((s, p) => s + parseFloat(ethers.formatUnits(p.depositedAmount, 6)), 0).toFixed(2)} locked in holding
             </p>
           </div>
           <Link href="/pledges" className="flex items-center gap-1 text-[#DDE048] text-sm font-semibold hover:text-[#c8ce30]">
@@ -307,7 +310,7 @@ export default function Home() {
                 items.push({ type: "error", label: `Grace period started · ${shortAddr(p.id.toString())}`, sub: `Merchant can claim ${ethers.formatUnits(p.depositedAmount, 6)} USDC deposit after 14 days`, time: fmtShortDate(p.commitmentDate) });
               }
               if (status === 0) {
-                items.push({ type: "info", label: `Pledge ${shortAddr(p.id.toString())} created`, sub: `${ethers.formatUnits(p.depositedAmount, 6)} USDC locked · ${name}`, time: fmtShortDate(p.commitmentDate) });
+                items.push({ type: "info", label: `Pledge ${shortAddr(p.id.toString())} created`, sub: `${ethers.formatUnits(p.depositedAmount, 6)} locked ·${name}`, time: fmtShortDate(p.commitmentDate) });
               }
               return items;
             }).slice(0, 6).map((item, i) => (
@@ -399,31 +402,38 @@ export default function Home() {
         </div>
 
         <div className="bg-gradient-to-r from-[#1B1E16] to-[#11141A] border border-[#2a2a2a] rounded-2xl p-5 mb-3.5">
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-1.5">USDC BALANCE</div>
-              <div className="text-[38px] font-extrabold leading-none">
-                {loading ? "–" : balance
-                  ? currency === "PHP" ? fmt(parseFloat(balance)) : parseFloat(balance).toFixed(2)
-                  : currency === "PHP" ? fmt(0) : "0.00"}
-                <span className="text-base font-normal text-[#888]"> {currency === "PHP" ? "PHP" : "USDC"}</span>
+          <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">TOKEN BALANCES</div>
+          {currency === "PHP" ? (
+            <div className="mb-1">
+              <div className="text-[9px] text-[#555] tracking-[1px] mb-1">TOTAL (PHP)</div>
+              <div className="text-[28px] font-extrabold leading-none text-white">
+                {loading ? "–" : fmt(parseFloat(usdcBal ?? "0") + parseFloat(usdtBal ?? "0"))}
               </div>
-              {balance && <div className="text-xs text-[#888] mt-1.5">= {fmtAlt(parseFloat(balance))}</div>}
+              <div className="text-xs text-[#888] mt-1">{parseFloat(usdcBal ?? "0").toFixed(2)} USDC + {parseFloat(usdtBal ?? "0").toFixed(2)} USDT</div>
             </div>
-            <div className="relative flex items-center justify-center">
-              <Image src="/logo.png" alt="" width={72} height={72} style={{ position: "absolute", opacity: 0.08, filter: "grayscale(1)", objectFit: "contain", right: 20 }} />
-              {rep && <CircularScore score={rep.score} size={90} />}
+          ) : (
+            <div className="flex gap-3 mb-1">
+              <div>
+                <div className="text-[9px] text-[#555] tracking-[1px]">USDC</div>
+                <div className="text-[22px] font-extrabold leading-none text-white">{loading ? "–" : parseFloat(usdcBal ?? "0").toFixed(2)}</div>
+              </div>
+              <div className="w-px bg-[#2a2a2a]" />
+              <div>
+                <div className="text-[9px] text-[#555] tracking-[1px]">USDT</div>
+                <div className="text-[22px] font-extrabold leading-none text-white">{loading ? "–" : parseFloat(usdtBal ?? "0").toFixed(2)}</div>
+              </div>
             </div>
-          </div>
+          )}
+          {currency === "USD" && <div className="text-xs text-[#888] mt-1">≈ {fmtAlt(parseFloat(usdcBal ?? "0") + parseFloat(usdtBal ?? "0"))}</div>}
           <div className="flex gap-2.5 mt-[18px]">
             <Link href="/new-transfer" className="flex-1 bg-[#DDE048] text-black border-0 rounded-xl py-[13px] text-sm font-bold text-center block">+ New Transfer</Link>
             <Link href="/wallet" className="flex-1 bg-[#1e1e1e] text-white border border-[#1F2127] rounded-xl py-[13px] text-sm font-semibold text-center block">Top up</Link>
           </div>
         </div>
 
-        {/* Cap + Balance row */}
-        <div className="flex gap-3 mb-[22px]">
-          <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
+        {/* Stats row */}
+        <div className="grid grid-cols-2 gap-3 mb-[22px]">
+          <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
             <div className="flex items-center gap-1.5 mb-2">
               <TrendingUp size={11} color="#DDE048" />
               <div className="text-[10px] text-[#888] tracking-[1.5px]">ACTIVE CAP</div>
@@ -432,15 +442,16 @@ export default function Home() {
             <div className="h-[3px] bg-[#2a2a2a] rounded mt-2.5 mb-1.5">
               <div className="h-full bg-[#DDE048] rounded" style={{ width: maxActive ? `${(activePledges.length / maxActive) * 100}%` : "0%" }} />
             </div>
-            <div className="text-[11px] text-[#555]">{maxActive ? maxActive - activePledges.length : "–"} slot{(maxActive ?? 0) - activePledges.length !== 1 ? "s" : ""} left</div>
+            <div className="text-[11px] text-[#555]">{maxActive ? maxActive - activePledges.length : "–"} slots left</div>
           </div>
-          <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
-            <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">USDC BALANCE</div>
-            <div className="text-[22px] font-extrabold leading-tight">
-              {loading ? "–" : balance ? parseFloat(balance).toFixed(2) : "0.00"}
-            </div>
-            <div className="text-[11px] text-[#555] mb-2">≈ {balance ? fmtAlt(parseFloat(balance)) : "–"}</div>
-            <Link href="/wallet" className="text-[11px] font-bold text-[#DDE048]">Top up →</Link>
+          <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px] flex flex-col items-center justify-center">
+            <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2 self-start">TRUST</div>
+            {rep ? (
+              <>
+                <CircularScore score={rep.score} size={72} />
+                <div className="text-[11px] font-bold mt-1.5" style={{ color: scoreColor(rep.score) }}>{scoreLabel(rep.score).toUpperCase()}</div>
+              </>
+            ) : <div className="text-[#555] text-xs">–</div>}
           </div>
         </div>
 
@@ -524,7 +535,7 @@ export default function Home() {
             if (status === 0 && days <= 3) items.push({ type: "warning", label: `Payment due in ${days} day${days !== 1 ? "s" : ""}`, sub: `${shortAddr(p.id.toString())} · ${ethers.formatUnits(p.depositedAmount, 6)} USDC remaining`, time: "now" });
             if (status === 1) items.push({ type: "success", label: `Pledge ${shortAddr(p.id.toString())} completed`, sub: `${ethers.formatUnits(p.totalAmount, 6)} USDC released to ${name}`, time: fmtShortDate(p.commitmentDate) });
             if (status === 2) items.push({ type: "error", label: `Grace period started`, sub: `${shortAddr(p.id.toString())} · merchant can claim after 14 days`, time: fmtShortDate(p.commitmentDate) });
-            if (status === 0) items.push({ type: "info", label: `Pledge created`, sub: `${ethers.formatUnits(p.depositedAmount, 6)} USDC locked · ${name}`, time: fmtShortDate(p.commitmentDate) });
+            if (status === 0) items.push({ type: "info", label: `Pledge created`, sub: `${ethers.formatUnits(p.depositedAmount, 6)} locked ·${name}`, time: fmtShortDate(p.commitmentDate) });
             return items;
           }).slice(0, 5).map((item, i, arr) => (
             <div key={i} className={`flex items-start gap-3 px-4 py-3.5 ${i < arr.length - 1 ? "border-b border-[#1F2127]" : ""}`}>

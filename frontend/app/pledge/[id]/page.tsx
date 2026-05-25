@@ -9,6 +9,12 @@ import LoadingSpinner from "../../../components/LoadingSpinner";
 import { useWallet } from "../../../context/WalletContext";
 import ProgressBar from "../../../components/ProgressBar";
 import { CONTRACTS, PHP_PER_USDC } from "../../../contracts/addresses";
+
+function tokenSymbol(addr: string) {
+  if (addr.toLowerCase() === CONTRACTS.MOCK_USDC.toLowerCase()) return "USDC";
+  if (addr.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
+  return "TOKEN";
+}
 import { useCurrency } from "../../../context/CurrencyContext";
 import { getPledgeMeta } from "../../../lib/pledgeMeta";
 import Link from "next/link";
@@ -17,7 +23,7 @@ const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
 const STATUS_COLOR: Record<string, string> = { PENDING: "#f59e0b", COMPLETED: "#22c55e", DEFAULTED: "#ef4444", CANCELLED: "#888" };
 const STATUS_BG: Record<string, string> = { PENDING: "#f59e0b22", COMPLETED: "#22c55e22", DEFAULTED: "#ef444422", CANCELLED: "#88888822" };
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; initialDeposit: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; paidDuringGrace: boolean; }
+interface PledgeRaw { id: bigint; sender: string; merchant: string; token: string; totalAmount: bigint; initialDeposit: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; paidDuringGrace: boolean; }
 
 function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
@@ -48,7 +54,7 @@ export default function PledgeDetail() {
 
   async function handleDeposit() {
     if (!pledgeWrite || !usdcWrite || !pledge || !signer) return;
-    const gross = pledge.totalAmount + pledge.totalAmount / 100n;
+    const gross = pledge.totalAmount + pledge.totalAmount * pledge.appliedFeeBps / 10000n;
     const remaining = gross - pledge.depositedAmount;
     const balance: bigint = await usdcRead.balanceOf(account);
     if (balance < remaining) {
@@ -79,7 +85,7 @@ export default function PledgeDetail() {
     if (!pledgeWrite) return;
     setTxLoading(true); setTxStatus("Claiming...");
     try {
-      await (await pledgeWrite.claimPartial(id)).wait();
+      await (await pledgeWrite.claimDefaultedDeposit(id)).wait();
       setTxStatus("Claimed!"); loadPledge();
     } catch (err: unknown) {
       const e = err as { reason?: string; message?: string };
@@ -96,10 +102,12 @@ export default function PledgeDetail() {
     </div>
   );
 
+  const token = tokenSymbol(pledge.token);
   const total = parseFloat(ethers.formatUnits(pledge.totalAmount, 6));
-  const gross = total * 1.01;
-  const fee = total * 0.01;
-  const merchantReceives = total - fee;
+  const feeBps = Number(pledge.appliedFeeBps);
+  const gross = total * (1 + feeBps / 10000);
+  const fee = total * (feeBps / 10000);
+  const merchantReceives = total;
   const rawLocked = parseFloat(ethers.formatUnits(pledge.depositedAmount, 6));
   const locked = Number(pledge.status) === 1 ? total : rawLocked;
   const remaining = Math.max(0, parseFloat((gross - rawLocked).toFixed(6)));
@@ -137,7 +145,7 @@ export default function PledgeDetail() {
             {meta?.note && <span className="text-[#555] text-sm">{meta.note}</span>}
           </div>
           <div className="text-[56px] font-extrabold text-white leading-none">
-            {total.toFixed(2)} <span className="text-2xl text-[#888] font-normal">USDC</span>
+            {total.toFixed(2)} <span className="text-2xl text-[#888] font-normal">{token}</span>
           </div>
           <div className="text-[#555] text-sm mt-1">≈ ₱{(total * PHP_PER_USDC).toLocaleString()} PHP</div>
           <div className="flex items-center gap-2 mt-3">
@@ -265,10 +273,10 @@ export default function PledgeDetail() {
               <span className="text-[#555]">{status === "COMPLETED" ? "paid in full" : `${remaining.toFixed(2)} remaining`}</span>
             </div>
             <div className="space-y-2.5 text-sm">
-              <BreakdownRow label="Total committed" value={`${total.toFixed(2)} USDC`} />
+              <BreakdownRow label="Total committed" value={`${total.toFixed(2)} ${token}`} />
               <BreakdownRow label="Locked" value={`${locked.toFixed(2)} USDC`} accent />
-              <BreakdownRow label="Remaining" value={`${remaining.toFixed(2)} USDC`} />
-              <BreakdownRow label="Service fee (1%)" value={`${fee.toFixed(2)} USDC`} />
+              <BreakdownRow label="Remaining" value={`${remaining.toFixed(2)} ${token}`} />
+              <BreakdownRow label="Service fee ({feeBps / 100}%)" value={`${fee.toFixed(2)} ${token}`} />
               <div className="pt-2 border-t border-[#1e2230]">
                 <BreakdownRow label="Merchant receives" value={`${merchantReceives.toFixed(2)} USDC`} green />
               </div>
