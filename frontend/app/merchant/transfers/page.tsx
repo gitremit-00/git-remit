@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Search, ArrowLeft, Clock, CheckCircle2, AlertCircle, XCircle } from "lucide-react";
+import { Search, ArrowLeft, Clock, CheckCircle2, AlertCircle, XCircle, ChevronRight } from "lucide-react";
 import Header from "../../../components/Header";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import CircularScore from "../../../components/CircularScore";
@@ -174,7 +174,7 @@ export default function MerchantTransfers() {
                     <td className="px-5 py-4 text-[#555] text-xs">{fmtDate(p.commitmentDate)}</td>
                     <td className="px-5 py-4">
                       <Link href={`/merchant/transfers/${p.id.toString()}`} className="opacity-0 group-hover:opacity-100 transition-opacity text-[#DDE048] text-xs font-semibold hover:underline">
-                        View →
+                        View <ChevronRight size={13} />
                       </Link>
                     </td>
                   </tr>
@@ -259,7 +259,7 @@ export default function MerchantTransfers() {
                     <div className="text-xl font-extrabold text-white">{total.toFixed(2)} <span className="text-sm text-[#888] font-normal">USDC</span></div>
                     <div className="text-xs text-[#666] mt-0.5">Locked: {locked.toFixed(2)} USDC · Due {fmtDate(p.commitmentDate)}</div>
                   </div>
-                  <span className="text-[#DDE048] text-xs font-semibold">View →</span>
+                  <span className="flex items-center gap-0.5 text-[#DDE048] text-xs font-semibold">View <ChevronRight size={13} /></span>
                 </div>
               </div>
             </Link>

@@ -2,7 +2,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Send, FileText, Users, Wallet, Bell, Shield, Settings, HelpCircle, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Home, Send, FileText, Users, Wallet, Bell, Shield, Settings, HelpCircle, PanelLeftClose, PanelLeftOpen, ChevronRight } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
 import { useRole } from "../context/RoleContext";
 import Logo from "./Logo";
@@ -72,7 +72,7 @@ export default function DesktopSidebar() {
       {/* Main nav */}
       <nav className="flex-1 px-2 py-4 flex flex-col gap-0.5">
         {navMain.map(({ href, label, Icon, arrow, badge }: { href: string; label: string; Icon: React.ElementType; arrow?: boolean; badge?: boolean }) => {
-          const active = pathname === href || (href !== "/" && pathname.startsWith(href));
+          const active = pathname === href || (href.split("/").length > 2 && pathname.startsWith(href + "/"));
           return (
             <div key={href} className="relative">
               {active && (
@@ -87,7 +87,7 @@ export default function DesktopSidebar() {
               >
                 <Icon size={17} color={active ? "#DDE048" : "currentColor"} className="shrink-0" />
                 {!collapsed && <span className="flex-1 truncate">{label}</span>}
-                {!collapsed && arrow && <span className="text-[#444] text-xs group-hover:text-[#666]">→</span>}
+                {!collapsed && arrow && <ChevronRight size={13} color="#444" className="group-hover:text-[#666]" />}
                 {!collapsed && badge && <span className="w-2 h-2 rounded-full bg-[#DDE048]" />}
                 {collapsed && badge && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#DDE048]" />}
               </Link>
@@ -125,7 +125,7 @@ export default function DesktopSidebar() {
           <div className="bg-[#13161c] border border-[#1e2230] rounded-xl px-3 py-3">
             <div className="flex items-center gap-2 mb-1">
               <span className="w-2 h-2 rounded-full bg-green-400" />
-              <span className="text-[11px] text-[#888] font-medium">METAMASK · MORPH L2</span>
+              <span className="text-[11px] text-[#888] font-medium">METAMASK · CONNECTED</span>
             </div>
             <div className="text-sm font-bold text-white font-mono">{shortAddr(account)}</div>
           </div>

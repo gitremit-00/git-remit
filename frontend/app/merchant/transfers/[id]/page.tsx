@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ethers } from "ethers";
-import { ArrowLeft, ChevronRight, ExternalLink, CheckCircle2, Circle, Clock, AlertCircle, BadgeCheck, MessageCircle } from "lucide-react";
+import { ArrowLeft, ChevronRight, ExternalLink, CheckCircle2, Circle, Clock, AlertCircle, BadgeCheck, MessageCircle, Dot } from "lucide-react";
 import { useWallet } from "../../../../context/WalletContext";
 import { CONTRACTS } from "../../../../contracts/addresses";
 import { useCurrency } from "../../../../context/CurrencyContext";
@@ -59,6 +59,7 @@ export default function MerchantTransferDetail() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { account, pledgeRead, pledgeWrite, walletLoading } = useWallet();
+  const { fmt } = useCurrency();
   const [pledge, setPledge] = useState<PledgeRaw | null>(null);
   const [rep, setRep] = useState<SenderRep | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,7 +103,7 @@ export default function MerchantTransferDetail() {
   const total = parseFloat(ethers.formatUnits(pledge.totalAmount, 6));
   const gross = total * 1.01;
   const fee = total * 0.01;
-  const merchantReceives = total - fee;
+  const merchantReceives = total;
   const rawLocked = parseFloat(ethers.formatUnits(pledge.depositedAmount, 6));
   const locked = Number(pledge.status) === 1 ? total : rawLocked;
   const remaining = Math.max(0, parseFloat((gross - rawLocked).toFixed(6)));
@@ -137,13 +138,13 @@ export default function MerchantTransferDetail() {
       <div className="flex items-start justify-between mb-8">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{ color: statusColor, background: statusBg }}>● {status}</span>
+            <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{ color: statusColor, background: statusBg }} className="flex items-center gap-1"><Dot size={14} style={{ color: statusColor }} />{status}</span>
             <span className="text-[#555] text-sm font-mono">{pledgeIdHex}</span>
           </div>
           <div className="text-[56px] font-extrabold text-white leading-none">
             {total.toFixed(2)} <span className="text-2xl text-[#888] font-normal">USDC</span>
           </div>
-          <div className="text-[#555] text-sm mt-1">≈ ₱{(total * PHP_PER_USDC).toLocaleString()} PHP · from sender</div>
+          <div className="text-[#555] text-sm mt-1">≈ {fmt(total)} · from sender</div>
           <div className="flex items-center gap-2 mt-3">
             <div
               className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black text-black"
@@ -234,7 +235,7 @@ export default function MerchantTransferDetail() {
               <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
                 <div className="text-[11px] text-[#555] tracking-[1px] mb-2">TOTAL PLEDGED</div>
                 <div className="text-2xl font-extrabold text-white">{total.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
-                <div className="text-xs text-[#555] mt-1">≈ ₱{(total * PHP_PER_USDC).toLocaleString()}</div>
+                <div className="text-xs text-[#555] mt-1">≈ {fmt(total)}</div>
               </div>
               <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
                 <div className="text-[11px] text-[#555] tracking-[1px] mb-2">LOCKED SO FAR</div>
@@ -379,11 +380,11 @@ export default function MerchantTransferDetail() {
         {/* Status + amount */}
         <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ color: statusColor, background: statusBg }}>● {status}</span>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ color: statusColor, background: statusBg }} className="flex items-center gap-1"><Dot size={14} style={{ color: statusColor }} />{status}</span>
             <span className="text-[#555] text-xs font-mono">{pledgeIdHex}</span>
           </div>
           <div className="text-[32px] font-extrabold text-white">{total.toFixed(2)} <span className="text-base text-[#888] font-normal">USDC</span></div>
-          <div className="text-[#888] text-sm mt-1">≈ ₱{(total * PHP_PER_USDC).toLocaleString()} PHP</div>
+          <div className="text-[#888] text-sm mt-1">≈ {fmt(total)}</div>
           <div className="flex items-center gap-2 mt-3 pt-3 border-t border-[#1F2127]">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black text-black" style={{ background: avatarColor(pledge.sender) }}>
               {initials(pledge.sender)}

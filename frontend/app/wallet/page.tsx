@@ -19,6 +19,7 @@ export default function Wallet() {
   const [balance, setBalance] = useState<string | null>(null);
   const [allowance, setAllowance] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [status, setStatus] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -31,6 +32,21 @@ export default function Wallet() {
     ]);
     setBalance(ethers.formatUnits(bal, 6));
     setAllowance(ethers.formatUnits(allow, 6));
+  }
+
+  async function approveAllowance() {
+    if (!usdcWrite) return;
+    setApproving(true); setStatus("");
+    try {
+      const tx = await usdcWrite.approve(CONTRACTS.REMITTANCE_PLEDGE, ethers.parseUnits("1000", 6));
+      setStatus("Approving...");
+      await tx.wait();
+      setStatus("1,000 USDC approved!");
+      fetchBalance();
+    } catch (err: unknown) {
+      const e = err as { reason?: string; message?: string };
+      setStatus("Error: " + (e.reason ?? e.message));
+    } finally { setApproving(false); }
   }
 
   async function mintFaucet() {
@@ -85,10 +101,10 @@ export default function Wallet() {
                 <button onClick={mintFaucet} disabled={loading} className="flex items-center gap-2 bg-[#DDE048] text-black text-sm font-bold rounded-xl px-5 py-2.5 hover:bg-[#c8ce30] transition-colors disabled:opacity-50">
                   <ArrowDownLeft size={15} /> {loading ? "Minting…" : "Top up"}
                 </button>
-                <button className="flex items-center gap-2 bg-[#1e2230] text-white text-sm font-semibold rounded-xl px-5 py-2.5 hover:bg-[#252836] transition-colors">
+                <button disabled title="Coming soon" className="flex items-center gap-2 bg-[#1e2230] text-[#555] text-sm font-semibold rounded-xl px-5 py-2.5 cursor-not-allowed">
                   <ArrowUpRight size={15} /> Withdraw
                 </button>
-                <button className="flex items-center gap-2 bg-[#1e2230] text-white text-sm font-semibold rounded-xl px-5 py-2.5 hover:bg-[#252836] transition-colors">
+                <button disabled title="Coming soon" className="flex items-center gap-2 bg-[#1e2230] text-[#555] text-sm font-semibold rounded-xl px-5 py-2.5 cursor-not-allowed">
                   <ArrowLeftRight size={15} /> Swap
                 </button>
               </div>
@@ -99,8 +115,8 @@ export default function Wallet() {
             <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="font-bold text-white">USDC spending allowance</h3>
-                <button className="flex items-center gap-2 bg-[#DDE048]/10 border border-[#DDE048]/30 text-[#DDE048] text-sm font-bold rounded-xl px-4 py-2 hover:bg-[#DDE048]/20 transition-colors">
-                  Approve 1,000 USDC
+                <button onClick={approveAllowance} disabled={approving} className="flex items-center gap-2 bg-[#DDE048]/10 border border-[#DDE048]/30 text-[#DDE048] text-sm font-bold rounded-xl px-4 py-2 hover:bg-[#DDE048]/20 transition-colors disabled:opacity-50">
+                  {approving ? "Approving…" : "Approve 1,000 USDC"}
                 </button>
               </div>
               <p className="text-[#555] text-sm mb-5">How much USDC the Transfer contract can move on your behalf. Required for each transfer.</p>
@@ -133,7 +149,7 @@ export default function Wallet() {
                   <div className="text-[12px] text-[#555]">USD → PHP · 1 USDC ≈ ₱{rate.toLocaleString(undefined, { maximumFractionDigits: 2 })} · merchants in PH paid in USDC, settled to PHP via partner</div>
                 </div>
               </div>
-              <button className="bg-[#1e2230] text-white text-sm font-semibold rounded-xl px-4 py-2 hover:bg-[#252836] transition-colors whitespace-nowrap">Change corridor</button>
+              <button disabled title="Coming soon" className="bg-[#1e2230] text-[#555] text-sm font-semibold rounded-xl px-4 py-2 cursor-not-allowed whitespace-nowrap">Change corridor</button>
             </div>
           </div>
 

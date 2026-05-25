@@ -3,11 +3,12 @@ import Header from "../../components/Header";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Bell, CheckCircle2, AlertCircle, ArrowDownCircle, PlusCircle, XCircle } from "lucide-react";
+import { Bell, CheckCircle2, AlertCircle, ArrowDownCircle, PlusCircle, XCircle, FileText } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { CONTRACTS } from "../../contracts/addresses";
 import RemittancePledgeABI from "../../contracts/RemittancePledge.json";
+import { getSenderNotifications, markNotificationRead, type PaymentRequestNotification } from "../../lib/supabase";
 
 interface Notification {
   id: string;
@@ -63,11 +64,17 @@ export default function Notifications() {
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
+  const [paymentReqNotifs, setPaymentReqNotifs] = useState<PaymentRequestNotification[]>([]);
 
   useEffect(() => {
-    if (account) { setReadIds(getReadIds()); loadNotifs(); }
+    if (account) { setReadIds(getReadIds()); loadNotifs(); loadPaymentReqNotifs(); }
     else if (!walletLoading) setLoading(false);
   }, [account, walletLoading]);
+
+  async function loadPaymentReqNotifs() {
+    const data = await getSenderNotifications(account!);
+    setPaymentReqNotifs(data);
+  }
 
   async function loadNotifs() {
     setLoading(true);
@@ -175,6 +182,38 @@ export default function Notifications() {
             ))}
           </div>
 
+          {/* Payment request notifications */}
+          {paymentReqNotifs.length > 0 && (
+            <div className="mb-6">
+              <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">PAYMENT REQUESTS</div>
+              <div className="space-y-2">
+                {paymentReqNotifs.map((n) => {
+                  const req = n.payment_requests;
+                  if (!req) return null;
+                  const days = Math.ceil((new Date(req.deadline).getTime() - Date.now()) / 86400000);
+                  const href = `/new-transfer?request=${req.id}&notif=${n.id}`;
+                  return (
+                    <Link key={n.id} href={href}
+                      onClick={() => markNotificationRead(n.id)}
+                      className={`flex items-center gap-4 p-4 rounded-2xl border transition-colors hover:border-[#DDE048]/30 ${n.read ? "bg-[#13161c] border-[#1e2230]" : "bg-[#1a1d12] border-[#DDE048]/20"}`}>
+                      <div className="w-10 h-10 rounded-xl bg-[#DDE048]/10 border border-[#DDE048]/20 flex items-center justify-center shrink-0">
+                        <FileText size={18} color="#DDE048" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="font-bold text-white text-sm truncate">{req.title || "Payment Request"}</span>
+                          {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
+                        </div>
+                        <div className="text-xs text-[#888]">{req.amount.toFixed(2)} USDC · {days > 0 ? `${days}d left` : "Overdue"}</div>
+                      </div>
+                      <div className="text-[#DDE048] text-xs font-bold shrink-0">Pay →</div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {loading && <LoadingSpinner />}
 
           {!loading && filtered.length === 0 && (
@@ -223,8 +262,37 @@ export default function Notifications() {
             <div className="text-[#888] text-sm">Connect your wallet to see notifications</div>
           </div>
         )}
+        {/* Payment request notifications */}
+        {!loading && account && paymentReqNotifs.length > 0 && (
+          <div className="mb-4">
+            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-2">PAYMENT REQUESTS</div>
+            {paymentReqNotifs.map((n) => {
+              const req = n.payment_requests;
+              if (!req) return null;
+              const days = Math.ceil((new Date(req.deadline).getTime() - Date.now()) / 86400000);
+              return (
+                <Link key={n.id} href={`/new-transfer?request=${req.id}&notif=${n.id}`}
+                  onClick={() => markNotificationRead(n.id)}
+                  className={`flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border no-underline text-inherit ${n.read ? "border-[#1F2127] bg-[#11141A]" : "border-[#DDE048]/20 bg-[#1a1d12]"}`}>
+                  <div className="w-10 h-10 rounded-xl bg-[#DDE048]/10 border border-[#DDE048]/20 flex items-center justify-center shrink-0">
+                    <FileText size={18} color="#DDE048" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-bold text-white text-sm truncate">{req.title || "Payment Request"}</span>
+                      {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
+                    </div>
+                    <div className="text-xs text-[#888]">{req.amount.toFixed(2)} USDC · {days > 0 ? `${days}d left` : "Overdue"}</div>
+                  </div>
+                  <span className="text-[#DDE048] text-xs font-bold shrink-0">Pay →</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+
         {loading && <LoadingSpinner />}
-        {!loading && account && notifs.length === 0 && (
+        {!loading && account && notifs.length === 0 && paymentReqNotifs.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Bell size={40} color="#444" className="mb-3" />
             <div className="font-bold mb-1.5">No notifications yet</div>

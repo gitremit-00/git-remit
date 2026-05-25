@@ -6,12 +6,13 @@ import TxGuard from "../../components/TxGuard";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ethers } from "ethers";
-import { ArrowLeft, Calendar, Check, Info, CheckCircle2, Clock, Loader, Shield, ChevronRight } from "lucide-react";
+import { ArrowLeft, Calendar, Check, Info, CheckCircle2, Clock, Loader, Shield, ChevronRight, FileText } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import { CONTRACTS } from "../../contracts/addresses";
 import { useCurrency } from "../../context/CurrencyContext";
 import ProgressBar from "../../components/ProgressBar";
 import { savePledgeMeta, getPledgeMeta } from "../../lib/pledgeMeta";
+import { getPaymentRequest, type PaymentRequest, markNotificationRead } from "../../lib/supabase";
 import Link from "next/link";
 
 const STEPS = ["Recipient", "Amount", "Commitment", "Review"];
@@ -33,7 +34,19 @@ export default function NewTransfer() {
 
   useEffect(() => {
     const to = searchParams.get("to");
-    if (to) {
+    const reqId = searchParams.get("request");
+
+    if (reqId) {
+      setRequestId(reqId);
+      getPaymentRequest(reqId).then((req) => {
+        if (!req) return;
+        setRequestPreview(req);
+        setShowPreview(true);
+        // Mark notification read if notifId param present
+        const notifId = searchParams.get("notif");
+        if (notifId) markNotificationRead(notifId);
+      });
+    } else if (to) {
       const known = getPledgeMeta(to);
       setForm((f) => ({ ...f, merchant: to, merchantName: known?.name ?? "" }));
     }
@@ -44,6 +57,10 @@ export default function NewTransfer() {
     merchant: "", merchantName: "", note: "",
     totalAmount: "", initialDeposit: "", commitmentDate: "",
   });
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [requestPreview, setRequestPreview] = useState<PaymentRequest | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [lockedFields, setLockedFields] = useState<Set<string>>(new Set());
   const [requiredPct, setRequiredPct] = useState(20);
   const [payInFull, setPayInFull] = useState(false);
   const [txStatus, setTxStatus] = useState("");
@@ -129,11 +146,33 @@ export default function NewTransfer() {
 
   function pad(n: number) { return String(n).padStart(2, "0"); }
 
+  function acceptRequest() {
+    if (!requestPreview) return;
+    const req = requestPreview;
+    const known = getPledgeMeta(req.merchant_address);
+    const d = new Date(req.deadline);
+    const localDt = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setForm((f) => ({
+      ...f,
+      merchant: req.merchant_address,
+      merchantName: req.merchant_name ?? known?.name ?? "",
+      totalAmount: req.amount.toFixed(2),
+      commitmentDate: localDt,
+      note: req.title ?? req.note ?? f.note,
+    }));
+    setLockedFields(new Set(["merchant", "totalAmount", "commitmentDate"]));
+    setShowPreview(false);
+    setStep(1);
+  }
+
   function setQuickDate(days: number) {
     const d = new Date();
     d.setDate(d.getDate() + days);
     d.setHours(9, 0, 0, 0);
-    setForm({ ...form, commitmentDate: d.toISOString().slice(0, 16) });
+    const val = d.toISOString().slice(0, 16);
+    // Toggle off if already selected
+    const isActive = deadline && Math.ceil((deadline.getTime() - Date.now()) / 86400000) === days;
+    setForm({ ...form, commitmentDate: isActive ? "" : val });
   }
 
   function setPayday() {
@@ -163,6 +202,59 @@ export default function NewTransfer() {
     : "—";
 
   /* ── DESKTOP LAYOUT ── */
+  const RequestPreviewScreen = requestPreview && showPreview && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md bg-[#13161c] border border-[#1e2230] rounded-2xl overflow-hidden">
+        {/* Header */}
+        <div className="relative p-6 overflow-hidden" style={{ background: "linear-gradient(135deg, #1B1E16 0%, #11141A 55%, #0e1012 100%)" }}>
+          <div className="absolute -right-4 -top-4 opacity-[0.06] pointer-events-none select-none">
+            <Image src="/logo.png" alt="" width={120} height={120} style={{ objectFit: "contain", filter: "grayscale(1)" }} />
+          </div>
+          <div className="relative">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-7 h-7 rounded-lg bg-[#DDE048]/10 border border-[#DDE048]/20 flex items-center justify-center">
+                <FileText size={14} color="#DDE048" />
+              </div>
+              <span className="text-[11px] text-[#DDE048] tracking-[1.5px] font-semibold">PAYMENT REQUEST</span>
+            </div>
+            {requestPreview.title && <h2 className="text-xl font-extrabold text-white mb-1">{requestPreview.title}</h2>}
+            {requestPreview.note && <p className="text-sm text-[#888]">{requestPreview.note}</p>}
+          </div>
+        </div>
+        {/* Details */}
+        <div className="px-6 py-4 space-y-3 border-b border-[#1e2230]">
+          <div className="flex justify-between text-sm">
+            <span className="text-[#555]">From</span>
+            <span className="text-white font-mono text-xs">{requestPreview.merchant_address.slice(0, 6)}…{requestPreview.merchant_address.slice(-4)}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-[#555]">Amount</span>
+            <span className="text-[#DDE048] font-extrabold text-lg">{requestPreview.amount.toFixed(2)} <span className="text-sm font-normal text-[#888]">USDC</span></span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-[#555]">Deadline</span>
+            <span className="text-white font-semibold">{new Date(requestPreview.deadline).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-[#555]">Days left</span>
+            <span className="text-amber-400 font-semibold">{Math.ceil((new Date(requestPreview.deadline).getTime() - Date.now()) / 86400000)}d</span>
+          </div>
+        </div>
+        {/* Actions */}
+        <div className="px-6 py-4 flex flex-col gap-2">
+          <button onClick={acceptRequest}
+            className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-3.5 text-sm hover:bg-[#c8ce30] transition-colors">
+            Accept &amp; Proceed to Pay
+          </button>
+          <button onClick={() => { setShowPreview(false); setRequestId(null); }}
+            className="w-full text-[#555] text-sm py-2 text-center hover:text-[#888] transition-colors">
+            Decline
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   const DesktopNewTransfer = (
     <div className="hidden md:block p-8">
       {/* Breadcrumb */}
@@ -177,6 +269,13 @@ export default function NewTransfer() {
       </div>
 
       <h1 className="text-3xl font-extrabold text-white mb-6">Create a transfer</h1>
+
+      {requestId && !showPreview && (
+        <div className="flex items-center gap-3 bg-[#DDE048]/10 border border-[#DDE048]/30 rounded-xl px-4 py-3 mb-6 text-sm text-[#DDE048]">
+          <FileText size={15} />
+          <span>You&apos;re fulfilling a <strong>payment request</strong> — amount and deadline are set by the merchant.</span>
+        </div>
+      )}
 
       {/* Step pills */}
       <div className="flex items-center gap-2 mb-8">
@@ -281,8 +380,9 @@ export default function NewTransfer() {
                   <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">TOTAL AMOUNT</label>
                   <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-4">
                     <input
-                      className="w-full bg-transparent text-white text-2xl font-extrabold outline-none"
+                      className="w-full bg-transparent text-white text-2xl font-extrabold outline-none disabled:opacity-70 disabled:cursor-not-allowed"
                       type="number" placeholder="0.00"
+                      disabled={lockedFields.has("totalAmount")}
                       value={form.totalAmount}
                       onChange={(e) => {
                         const v = e.target.value;
@@ -399,13 +499,18 @@ export default function NewTransfer() {
             </div>
             {step === 2 && (
               <div className="px-5 py-5 space-y-4">
-                <DateTimePicker value={form.commitmentDate} onChange={(val) => setForm({ ...form, commitmentDate: val })} />
+                {lockedFields.has("commitmentDate") && (
+                  <div className="flex items-center gap-2 text-xs text-[#DDE048] bg-[#DDE048]/10 border border-[#DDE048]/20 rounded-xl px-3 py-2">
+                    <FileText size={12} /> Deadline set by merchant — cannot be changed
+                  </div>
+                )}
+                <DateTimePicker value={form.commitmentDate} onChange={(val) => { if (!lockedFields.has("commitmentDate")) setForm({ ...form, commitmentDate: val }); }} />
                 <div className="flex gap-2 flex-wrap">
-                  <button onClick={setPayday} className={`rounded-xl px-4 py-2 text-[13px] font-semibold border ${deadline && (deadline.getDate() === 15 || deadline.getDate() === new Date(deadline.getFullYear(), deadline.getMonth() + 1, 0).getDate()) ? "bg-[#DDE048] border-[#DDE048] text-black" : "bg-[#0e1014] border-[#1e2230] text-[#888]"}`}>Payday</button>
+                  <button onClick={setPayday} disabled={lockedFields.has("commitmentDate")} className={`rounded-xl px-4 py-2 text-[13px] font-semibold border ${deadline && (deadline.getDate() === 15 || deadline.getDate() === new Date(deadline.getFullYear(), deadline.getMonth() + 1, 0).getDate()) ? "bg-[#DDE048] border-[#DDE048] text-black" : "bg-[#0e1014] border-[#1e2230] text-[#888]"}`}>Payday</button>
                   {[{ label: "15d", days: 15 }, { label: "30d", days: 30 }, { label: "60d", days: 60 }].map(({ label, days }) => {
                     const isActive = deadline && Math.ceil((deadline.getTime() - Date.now()) / 86400000) === days;
                     return (
-                      <button key={label} onClick={() => setQuickDate(days)} className={`rounded-xl px-4 py-2 text-[13px] font-semibold border ${isActive ? "bg-[#DDE048] border-[#DDE048] text-black" : "bg-[#0e1014] border-[#1e2230] text-[#888]"}`}>{label}</button>
+                      <button key={label} disabled={lockedFields.has("commitmentDate")} onClick={() => setQuickDate(days)} className={`rounded-xl px-4 py-2 text-[13px] font-semibold border disabled:opacity-40 ${isActive ? "bg-[#DDE048] border-[#DDE048] text-black" : "bg-[#0e1014] border-[#1e2230] text-[#888]"}`}>{label}</button>
                     );
                   })}
                 </div>
@@ -465,23 +570,91 @@ export default function NewTransfer() {
 
         {/* Right: Transfer Summary panel */}
         <div className="w-[320px] shrink-0 sticky top-24">
+          {/* Payment request context card */}
+          {requestPreview && (
+            <div className="relative rounded-2xl p-4 mb-3 overflow-hidden"
+              style={{ background: "linear-gradient(135deg, #1B1E16 0%, #11141A 55%, #0e1012 100%)", border: "1px solid #1F2127" }}>
+              <div className="absolute -right-4 -top-4 opacity-[0.06] pointer-events-none select-none">
+                <Image src="/logo.png" alt="" width={100} height={100} style={{ objectFit: "contain", filter: "grayscale(1)" }} />
+              </div>
+              <div className="relative">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <FileText size={12} color="#DDE048" />
+                  <span className="text-[10px] text-[#DDE048] tracking-[1.5px] font-semibold">PAYMENT REQUEST</span>
+                </div>
+                {requestPreview.title && <div className="text-white font-bold text-sm mb-2 truncate">{requestPreview.title}</div>}
+                {requestPreview.note && <div className="text-[#888] text-xs mb-2 truncate">{requestPreview.note}</div>}
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">From</span>
+                    <span className="text-[#888] font-mono">{requestPreview.merchant_address.slice(0, 6)}…{requestPreview.merchant_address.slice(-4)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Amount due</span>
+                    <span className="text-[#DDE048] font-bold">{requestPreview.amount.toFixed(2)} USDC</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Deadline</span>
+                    <span className="text-white">{new Date(requestPreview.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Days left</span>
+                    <span className="text-amber-400 font-semibold">{Math.ceil((new Date(requestPreview.deadline).getTime() - Date.now()) / 86400000)}d</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl overflow-hidden">
             <div className="px-5 py-4 border-b border-[#1e2230]">
               <div className="text-[11px] text-[#555] tracking-[1.5px]">TRANSFER SUMMARY</div>
             </div>
             <div className="px-5 py-4">
-              {form.merchantName || form.merchant ? (
-                <div className="flex items-center gap-3 mb-4 pb-4 border-b border-[#1e2230]">
-                  <div className="w-9 h-9 rounded-xl bg-[#1e2230] flex items-center justify-center text-xs font-bold text-[#888]">
-                    {(form.merchantName || form.merchant).slice(0, 2).toUpperCase()}
+              {/* Recipient row — hide when request context card already shows the address */}
+              {!requestPreview && (
+                form.merchantName || form.merchant ? (
+                  <div className="flex items-center gap-3 mb-4 pb-4 border-b border-[#1e2230]">
+                    <div className="w-9 h-9 rounded-xl bg-[#1e2230] flex items-center justify-center text-xs font-bold text-[#888]">
+                      {(form.merchantName || form.merchant).slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white">{form.merchantName || `${form.merchant.slice(0, 6)}…${form.merchant.slice(-4)}`}</div>
+                      {form.merchantName && <div className="text-[11px] text-[#555] font-mono">{form.merchant ? `${form.merchant.slice(0, 10)}…${form.merchant.slice(-6)}` : "—"}</div>}
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-sm font-semibold text-white">{form.merchantName || "Unnamed"}</div>
-                    <div className="text-[11px] text-[#555] font-mono">{form.merchant ? `${form.merchant.slice(0, 10)}…${form.merchant.slice(-6)}` : "—"}</div>
+                ) : (
+                  <div className="text-[#555] text-sm mb-4 pb-4 border-b border-[#1e2230]">No recipient selected</div>
+                )
+              )}
+
+              {/* Payment request context rows */}
+              {requestPreview && (
+                <div className="mb-4 pb-4 border-b border-[#1e2230] space-y-2 text-sm">
+                  {requestPreview.title && (
+                    <div className="flex justify-between gap-3">
+                      <span className="text-[#555] shrink-0">For</span>
+                      <span className="text-white font-semibold truncate text-right">{requestPreview.title}</span>
+                    </div>
+                  )}
+                  {requestPreview.note && (
+                    <div className="flex justify-between gap-3">
+                      <span className="text-[#555] shrink-0">Note</span>
+                      <span className="text-[#888] truncate text-right">{requestPreview.note}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Requested</span>
+                    <span className="text-[#DDE048] font-bold">{requestPreview.amount.toFixed(2)} USDC</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Pay by</span>
+                    <span className="text-white font-semibold">{new Date(requestPreview.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#555]">Days left</span>
+                    <span className="text-amber-400 font-semibold">{Math.ceil((new Date(requestPreview.deadline).getTime() - Date.now()) / 86400000)}d</span>
                   </div>
                 </div>
-              ) : (
-                <div className="text-[#555] text-sm mb-4 pb-4 border-b border-[#1e2230]">No recipient selected</div>
               )}
 
               <div className="space-y-2.5 text-sm mb-4">
@@ -547,6 +720,35 @@ export default function NewTransfer() {
         <button onClick={back} className="flex items-center gap-1.5 text-[#888] text-sm mb-5 bg-transparent border-0 cursor-pointer p-0">
           <ArrowLeft size={16} color="#888" /> Back
         </button>
+        {requestPreview && !showPreview && (
+          <div className="relative rounded-2xl p-4 mb-4 overflow-hidden"
+            style={{ background: "linear-gradient(135deg, #1B1E16 0%, #11141A 55%, #0e1012 100%)", border: "1px solid #1F2127" }}>
+            <div className="absolute -right-4 -top-4 opacity-[0.06] pointer-events-none select-none">
+              <Image src="/logo.png" alt="" width={90} height={90} style={{ objectFit: "contain", filter: "grayscale(1)" }} />
+            </div>
+            <div className="relative">
+              <div className="flex items-center gap-1.5 mb-2">
+                <FileText size={11} color="#DDE048" />
+                <span className="text-[10px] text-[#DDE048] tracking-[1.5px] font-semibold">PAYMENT REQUEST</span>
+              </div>
+              {requestPreview.title && <div className="text-white font-bold text-sm truncate mb-1">{requestPreview.title}</div>}
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <div className="text-[10px] text-[#555] mb-0.5">Amount due</div>
+                  <div className="text-[#DDE048] font-extrabold">{requestPreview.amount.toFixed(2)} <span className="text-xs font-normal text-[#888]">USDC</span></div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-[#555] mb-0.5">Deadline</div>
+                  <div className="text-white text-sm font-semibold">{new Date(requestPreview.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-[#555] mb-0.5">Days left</div>
+                  <div className="text-amber-400 font-bold">{Math.ceil((new Date(requestPreview.deadline).getTime() - Date.now()) / 86400000)}d</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="text-[11px] text-[#888] tracking-[1px] mb-2">STEP {step + 1} OF 4 · {STEPS[step].toUpperCase()}</div>
         <div className="flex gap-1 mb-[22px]">
           {STEPS.map((_, i) => (
@@ -585,7 +787,9 @@ export default function NewTransfer() {
               <Check size={16} color="#DDE048" />
             </div>
             <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Total Amount (USDC)</label>
-            <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block" type="number" placeholder="e.g. 248.50" value={form.totalAmount}
+            <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block disabled:opacity-70" type="number" placeholder="e.g. 248.50"
+              disabled={lockedFields.has("totalAmount")}
+              value={form.totalAmount}
               onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} />
             {form.totalAmount && <div className="text-xs text-[#888] -mt-2.5 mb-3.5">= {fmt(total)}</div>}
             {/* Pay in full toggle — mobile */}
@@ -739,6 +943,7 @@ export default function NewTransfer() {
 
   return (
     <>
+      {RequestPreviewScreen}
       {DesktopNewTransfer}
       {MobileNewTransfer}
     </>
