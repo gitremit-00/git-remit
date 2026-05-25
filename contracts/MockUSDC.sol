@@ -2,7 +2,8 @@
 pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-    
+
+contract MockUSDC is ERC20 {
     /// @notice Maximum tokens mintable per faucet() call — keeps test numbers sane.
     uint256 public constant MAX_FAUCET = 100_000 * 10 ** 6; // 100k USDC
 

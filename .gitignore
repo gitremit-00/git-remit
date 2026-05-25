@@ -8,6 +8,15 @@ cache/
 artifacts/
 node_modules/
 
+# Coverage
+coverage/
+coverage.json
+
+# Foundry
+lib/
+out/
+cache_forge/
+
 # Deployments with sensitive data
 # (keep deployments/ tracked so M2/M3 get the addresses)
 

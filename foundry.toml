@@ -1,0 +1,8 @@
+[profile.default]
+src = "contracts"
+test = "test-foundry"
+libs = ["node_modules", "lib"]
+solc = "0.8.24"
+
+[fuzz]
+runs = 1000
