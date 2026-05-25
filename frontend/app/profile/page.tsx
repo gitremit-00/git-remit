@@ -5,34 +5,41 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
-import { Copy, LogOut, ShieldCheck, ArrowRight, Users, BadgeCheck } from "lucide-react";
+import { Copy, LogOut, ShieldCheck, ArrowRight, Users, BadgeCheck, Store, FileText } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
+import { useRole } from "../../context/RoleContext";
 import CircularScore from "../../components/CircularScore";
 import { useCurrency } from "../../context/CurrencyContext";
 
 interface RepState { score: number; onTime: number; late: number; defaults: number; total: number; }
-interface PledgeCounts { pending: number; completed: number; defaulted: number; cancelled: number; }
+interface SenderCounts { pending: number; completed: number; defaulted: number; cancelled: number; }
+interface MerchantCounts { pending: number; completed: number; defaulted: number; totalReceived: number; }
 
 export default function Profile() {
   const { account, connect, disconnect, pledgeRead, usdcRead, walletLoading } = useWallet();
+  const { role } = useRole();
   const { fmt } = useCurrency();
+  const isMerchant = role === "merchant";
+
   const [rep, setRep] = useState<RepState | null>(null);
-  const [maxActive, setMaxActive] = useState<number | null>(null);
-  const [reqPct, setReqPct] = useState<number | null>(null);
   const [balance, setBalance] = useState<string | null>(null);
-  const [activePledges, setActivePledges] = useState<number>(0);
-  const [counts, setCounts] = useState<PledgeCounts | null>(null);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => { if (account) loadAll(); }, [account]);
+  // Sender-only state
+  const [maxActive, setMaxActive] = useState<number | null>(null);
+  const [reqPct, setReqPct] = useState<number | null>(null);
+  const [activePledges, setActivePledges] = useState<number>(0);
+  const [senderCounts, setSenderCounts] = useState<SenderCounts | null>(null);
+
+  // Merchant-only state
+  const [merchantCounts, setMerchantCounts] = useState<MerchantCounts | null>(null);
+
+  useEffect(() => { if (account) loadAll(); }, [account, role]);
 
   async function loadAll() {
-    const [repData, max, pct, bal, ids] = await Promise.all([
+    const [repData, bal] = await Promise.all([
       pledgeRead.getReputation(account),
-      pledgeRead.getMaxActivePledges(account),
-      pledgeRead.getRequiredDepositPct(account),
       usdcRead.balanceOf(account),
-      pledgeRead.getSenderPledges(account),
     ]);
     setRep({
       score: Math.round(Number(repData.basisPoints) / 100),
@@ -41,19 +48,38 @@ export default function Profile() {
       defaults: Number(repData.defaultCount),
       total: Number(repData.totalCount),
     });
-    setMaxActive(Number(max));
-    setReqPct(Number(pct));
     setBalance(ethers.formatUnits(bal, 6));
-    const pledgeList = await Promise.all((ids as bigint[]).map((id) => pledgeRead.getPledge(id)));
-    const c = { pending: 0, completed: 0, defaulted: 0, cancelled: 0 };
-    for (const p of pledgeList as { status: number }[]) {
-      if (p.status === 0) c.pending++;
-      else if (p.status === 1) c.completed++;
-      else if (p.status === 2) c.defaulted++;
-      else if (p.status === 3) c.cancelled++;
+
+    if (isMerchant) {
+      const ids = await pledgeRead.getMerchantPledges(account) as bigint[];
+      const pledgeList = await Promise.all(ids.map((id) => pledgeRead.getPledge(id))) as { status: number; totalAmount: bigint }[];
+      let pending = 0, completed = 0, defaulted = 0, totalReceived = 0;
+      for (const p of pledgeList) {
+        const s = Number(p.status);
+        if (s === 0) pending++;
+        else if (s === 1) { completed++; totalReceived += parseFloat(ethers.formatUnits(p.totalAmount, 6)); }
+        else if (s === 2) defaulted++;
+      }
+      setMerchantCounts({ pending, completed, defaulted, totalReceived });
+    } else {
+      const [max, pct, ids] = await Promise.all([
+        pledgeRead.getMaxActivePledges(account),
+        pledgeRead.getRequiredDepositPct(account),
+        pledgeRead.getSenderPledges(account),
+      ]);
+      setMaxActive(Number(max));
+      setReqPct(Number(pct));
+      const pledgeList = await Promise.all((ids as bigint[]).map((id) => pledgeRead.getPledge(id)));
+      const c = { pending: 0, completed: 0, defaulted: 0, cancelled: 0 };
+      for (const p of pledgeList as { status: number }[]) {
+        if (Number(p.status) === 0) c.pending++;
+        else if (Number(p.status) === 1) c.completed++;
+        else if (Number(p.status) === 2) c.defaulted++;
+        else if (Number(p.status) === 3) c.cancelled++;
+      }
+      setActivePledges(c.pending);
+      setSenderCounts(c);
     }
-    setActivePledges(c.pending);
-    setCounts(c);
   }
 
   function copyAddress() {
@@ -70,20 +96,18 @@ export default function Profile() {
 
   if (!account) return (
     <>
-      {/* Desktop not connected */}
       <div className="hidden md:flex flex-col items-center justify-center min-h-[80vh] gap-5">
         <Image src="/logo.png" alt="RemitSafe" width={80} height={80} priority style={{ objectFit: "contain" }} />
         <div className="text-center">
           <h2 className="text-2xl font-bold text-white mb-2">Your Profile</h2>
-          <p className="text-[#555] text-sm">Connect your wallet to view your trust score and limits</p>
+          <p className="text-[#555] text-sm">Connect your wallet to view your profile</p>
         </div>
         <button className="bg-[#DDE048] text-black font-bold rounded-xl px-10 py-3 text-sm" onClick={connect}>Connect MetaMask</button>
       </div>
-      {/* Mobile not connected */}
       <div className="md:hidden flex flex-col items-center justify-center min-h-screen p-8">
         <Image src="/logo.png" alt="RemitSafe" width={80} height={80} priority style={{ objectFit: "contain", marginBottom: 24 }} />
         <h2 className="text-2xl font-bold mb-2.5">Your Profile</h2>
-        <p className="text-[#888] mb-10 text-sm leading-relaxed max-w-[280px] text-center">Connect your wallet to view your trust score and limits</p>
+        <p className="text-[#888] mb-10 text-sm leading-relaxed max-w-[280px] text-center">Connect your wallet to view your profile</p>
         <button className="bg-[#DDE048] text-black border-0 rounded-[14px] px-12 py-4 text-base font-bold cursor-pointer" onClick={connect}>Connect MetaMask</button>
       </div>
     </>
@@ -94,8 +118,12 @@ export default function Profile() {
     <div className="hidden md:block p-8">
       <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-extrabold text-white mb-1">Profile · Trust</h1>
-          <p className="text-[#555] text-sm">Your on-chain reputation and transfer limits.</p>
+          <h1 className="text-3xl font-extrabold text-white mb-1">
+            {isMerchant ? "Merchant Profile" : "Profile · Trust"}
+          </h1>
+          <p className="text-[#555] text-sm">
+            {isMerchant ? "Your merchant identity and incoming transfer stats." : "Your on-chain reputation and transfer limits."}
+          </p>
         </div>
         <button
           onClick={disconnect}
@@ -108,7 +136,7 @@ export default function Profile() {
       <div className="grid grid-cols-[1fr_320px] gap-6">
         {/* Left column */}
         <div className="space-y-5">
-          {/* Trust score hero */}
+          {/* Identity hero */}
           <div className="bg-gradient-to-r from-[#1B1E16] to-[#13161c] border border-[#1e2230] rounded-2xl p-7 relative overflow-hidden">
             <Image src="/logo.png" alt="" width={120} height={120}
               style={{ position: "absolute", right: 24, top: "50%", transform: "translateY(-50%)", opacity: 0.05, filter: "grayscale(1)", objectFit: "contain", pointerEvents: "none" }}
@@ -116,15 +144,19 @@ export default function Profile() {
             <div className="flex items-center gap-8 relative">
               {rep && <CircularScore score={rep.score} size={120} />}
               <div>
-                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">TRUST SCORE</div>
+                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">
+                  {isMerchant ? "MERCHANT RATING" : "TRUST SCORE"}
+                </div>
                 {rep && (
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-sm font-bold px-3 py-1 rounded-full" style={{ color: scoreBg(rep.score), background: scoreBg(rep.score) + "22" }}>
                       {scoreLabel(rep.score)}
                     </span>
                     <div className="flex items-center gap-1.5">
-                      <BadgeCheck size={15} color="#DDE048" />
-                      <span className="text-[#DDE048] text-xs font-semibold">Verified OFW</span>
+                      {isMerchant
+                        ? <><Store size={13} color="#DDE048" /><span className="text-[#DDE048] text-xs font-semibold">Verified Merchant</span></>
+                        : <><BadgeCheck size={15} color="#DDE048" /><span className="text-[#DDE048] text-xs font-semibold">Verified OFW</span></>
+                      }
                     </div>
                   </div>
                 )}
@@ -137,15 +169,42 @@ export default function Profile() {
           </div>
 
           {/* Stats grid */}
-          <div className="grid grid-cols-4 gap-3">
-            <StatCard label="USDC BALANCE" value={balance ? `${parseFloat(balance).toFixed(2)}` : "–"} sub={balance ? fmt(parseFloat(balance)) : undefined} />
-            <StatCard label="ACTIVE TRANSFERS" value={`${activePledges}`} sub={maxActive !== null ? `of ${maxActive} max` : undefined} highlight />
-            <StatCard label="MAX ACTIVE" value={maxActive !== null ? `${maxActive}` : "–"} sub="pledge cap" />
-            <StatCard label="DEPOSIT REQUIRED" value={reqPct !== null ? `${reqPct}%` : "–"} sub="upfront" />
-          </div>
+          {isMerchant ? (
+            <div className="grid grid-cols-3 gap-3">
+              <StatCard label="USDC BALANCE" value={balance ? `${parseFloat(balance).toFixed(2)}` : "–"} sub={balance ? fmt(parseFloat(balance)) : undefined} />
+              <StatCard label="PENDING TRANSFERS" value={`${merchantCounts?.pending ?? "–"}`} sub="awaiting deposit" highlight />
+              <StatCard label="COMPLETED" value={`${merchantCounts?.completed ?? "–"}`} sub="fully fulfilled" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-3">
+              <StatCard label="USDC BALANCE" value={balance ? `${parseFloat(balance).toFixed(2)}` : "–"} sub={balance ? fmt(parseFloat(balance)) : undefined} />
+              <StatCard label="ACTIVE TRANSFERS" value={`${activePledges}`} sub={maxActive !== null ? `of ${maxActive} max` : undefined} highlight />
+              <StatCard label="MAX ACTIVE" value={maxActive !== null ? `${maxActive}` : "–"} sub="pledge cap" />
+              <StatCard label="DEPOSIT REQUIRED" value={reqPct !== null ? `${reqPct}%` : "–"} sub="upfront" />
+            </div>
+          )}
 
-          {/* Pledge history */}
-          {counts && (
+          {/* History */}
+          {isMerchant ? merchantCounts && (
+            <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
+              <div className="flex items-center justify-between mb-5">
+                <div className="text-[11px] text-[#555] tracking-[1.5px]">INCOMING TRANSFER HISTORY</div>
+                <Link href="/merchant/transfers" className="flex items-center gap-1 text-[#DDE048] text-xs font-semibold hover:underline">
+                  See all <ArrowRight size={12} />
+                </Link>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <HistoryCard label="Pending" value={merchantCounts.pending} color="#f59e0b" />
+                <HistoryCard label="Completed" value={merchantCounts.completed} color="#22c55e" />
+                <HistoryCard label="Defaulted" value={merchantCounts.defaulted} color="#ef4444" />
+              </div>
+              <div className="mt-4 bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
+                <div className="text-[11px] text-[#555] tracking-[1px] mb-1">TOTAL RECEIVED</div>
+                <div className="text-2xl font-extrabold text-[#DDE048]">{merchantCounts.totalReceived.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
+                <div className="text-xs text-[#555] mt-0.5">≈ {fmt(merchantCounts.totalReceived)}</div>
+              </div>
+            </div>
+          ) : senderCounts && (
             <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
               <div className="flex items-center justify-between mb-5">
                 <div className="text-[11px] text-[#555] tracking-[1.5px]">PLEDGE HISTORY</div>
@@ -154,10 +213,10 @@ export default function Profile() {
                 </Link>
               </div>
               <div className="grid grid-cols-4 gap-3">
-                <HistoryCard label="Pending" value={counts.pending} color="#f59e0b" />
-                <HistoryCard label="Completed" value={counts.completed} color="#22c55e" />
-                <HistoryCard label="Defaulted" value={counts.defaulted} color="#ef4444" />
-                <HistoryCard label="Cancelled" value={counts.cancelled} color="#888" />
+                <HistoryCard label="Pending" value={senderCounts.pending} color="#f59e0b" />
+                <HistoryCard label="Completed" value={senderCounts.completed} color="#22c55e" />
+                <HistoryCard label="Defaulted" value={senderCounts.defaulted} color="#ef4444" />
+                <HistoryCard label="Cancelled" value={senderCounts.cancelled} color="#888" />
               </div>
             </div>
           )}
@@ -178,48 +237,91 @@ export default function Profile() {
 
         {/* Right column */}
         <div className="space-y-5">
-          {/* Limits */}
-          <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <ShieldCheck size={15} color="#DDE048" />
-              <div className="text-[11px] text-[#555] tracking-[1.5px]">YOUR LIMITS</div>
-            </div>
-            <div className="space-y-0">
-              <LimitRow label="Max active pledges" value={maxActive !== null ? `${maxActive}` : "–"} />
-              <LimitRow label="Required deposit" value={reqPct !== null ? `${reqPct}% upfront` : "–"} />
-            </div>
-            <p className="text-[11px] text-[#555] mt-4 leading-relaxed">
-              Limits improve automatically as your trust score rises. Complete pledges on time to increase your score.
-            </p>
-          </div>
-
-          {/* Recipients shortcut */}
-          <Link href="/recipients" className="bg-[#13161c] border border-[#1e2230] rounded-2xl px-5 py-4 flex items-center justify-between hover:border-[#333] transition-colors no-underline text-inherit">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-[#1e2230] flex items-center justify-center">
-                <Users size={16} color="#DDE048" />
+          {isMerchant ? (
+            <>
+              {/* Merchant quick links */}
+              <Link href="/merchant/transfers" className="bg-[#13161c] border border-[#1e2230] rounded-2xl px-5 py-4 flex items-center justify-between hover:border-[#333] transition-colors no-underline text-inherit">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#1e2230] flex items-center justify-center">
+                    <FileText size={16} color="#DDE048" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white text-sm">Incoming Transfers</div>
+                    <div className="text-[11px] text-[#555]">View all pledges sent to you</div>
+                  </div>
+                </div>
+                <ArrowRight size={16} color="#333" />
+              </Link>
+              <Link href="/wallet" className="bg-[#13161c] border border-[#1e2230] rounded-2xl px-5 py-4 flex items-center justify-between hover:border-[#333] transition-colors no-underline text-inherit">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#1e2230] flex items-center justify-center">
+                    <ShieldCheck size={16} color="#DDE048" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white text-sm">Wallet</div>
+                    <div className="text-[11px] text-[#555]">USDC balance & allowance</div>
+                  </div>
+                </div>
+                <ArrowRight size={16} color="#333" />
+              </Link>
+              {/* How merchant rating works */}
+              <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5">
+                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">HOW MERCHANT RATING WORKS</div>
+                <div className="space-y-3 text-xs text-[#555] leading-relaxed">
+                  <p>Your merchant rating is calculated from fulfilled transfers and sender reputation. A higher rating builds sender confidence.</p>
+                  <div className="space-y-1.5">
+                    <TrustTier score="90–100" label="Excellent" color="#22c55e" desc="Top-tier merchant" />
+                    <TrustTier score="75–89" label="Good" color="#DDE048" desc="Trusted merchant" />
+                    <TrustTier score="50–74" label="Fair" color="#f59e0b" desc="Growing reputation" />
+                    <TrustTier score="0–49" label="Low" color="#ef4444" desc="Needs improvement" />
+                  </div>
+                </div>
               </div>
-              <div>
-                <div className="font-semibold text-white text-sm">Recipients</div>
-                <div className="text-[11px] text-[#555]">Saved merchants & addresses</div>
+            </>
+          ) : (
+            <>
+              {/* Sender limits */}
+              <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <ShieldCheck size={15} color="#DDE048" />
+                  <div className="text-[11px] text-[#555] tracking-[1.5px]">YOUR LIMITS</div>
+                </div>
+                <div className="space-y-0">
+                  <LimitRow label="Max active pledges" value={maxActive !== null ? `${maxActive}` : "–"} />
+                  <LimitRow label="Required deposit" value={reqPct !== null ? `${reqPct}% upfront` : "–"} />
+                </div>
+                <p className="text-[11px] text-[#555] mt-4 leading-relaxed">
+                  Limits improve automatically as your trust score rises. Complete pledges on time to increase your score.
+                </p>
               </div>
-            </div>
-            <ArrowRight size={16} color="#333" />
-          </Link>
-
-          {/* How trust works */}
-          <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5">
-            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">HOW TRUST WORKS</div>
-            <div className="space-y-3 text-xs text-[#555] leading-relaxed">
-              <p>Your trust score is calculated on-chain from your pledge history. Higher score = higher active pledge cap and lower required deposit.</p>
-              <div className="space-y-1.5">
-                <TrustTier score="90–100" label="Excellent" color="#22c55e" desc="5 active · 10% deposit" />
-                <TrustTier score="75–89" label="Good" color="#DDE048" desc="3 active · 20% deposit" />
-                <TrustTier score="50–74" label="Fair" color="#f59e0b" desc="2 active · 30% deposit" />
-                <TrustTier score="0–49" label="Low" color="#ef4444" desc="1 active · 50% deposit" />
+              {/* Recipients shortcut */}
+              <Link href="/recipients" className="bg-[#13161c] border border-[#1e2230] rounded-2xl px-5 py-4 flex items-center justify-between hover:border-[#333] transition-colors no-underline text-inherit">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#1e2230] flex items-center justify-center">
+                    <Users size={16} color="#DDE048" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white text-sm">Recipients</div>
+                    <div className="text-[11px] text-[#555]">Saved merchants & addresses</div>
+                  </div>
+                </div>
+                <ArrowRight size={16} color="#333" />
+              </Link>
+              {/* How trust works */}
+              <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5">
+                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">HOW TRUST WORKS</div>
+                <div className="space-y-3 text-xs text-[#555] leading-relaxed">
+                  <p>Your trust score is calculated on-chain from your pledge history. Higher score = higher active pledge cap and lower required deposit.</p>
+                  <div className="space-y-1.5">
+                    <TrustTier score="90–100" label="Excellent" color="#22c55e" desc="5 active · 10% deposit" />
+                    <TrustTier score="75–89" label="Good" color="#DDE048" desc="3 active · 20% deposit" />
+                    <TrustTier score="50–74" label="Fair" color="#f59e0b" desc="2 active · 30% deposit" />
+                    <TrustTier score="0–49" label="Low" color="#ef4444" desc="1 active · 50% deposit" />
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -231,7 +333,7 @@ export default function Profile() {
       <Header title="Profile" />
       <div className="px-4 pt-5 pb-24">
         <div className="mb-3">
-          <div className="text-[#888] text-[13px]">Your wallet,</div>
+          <div className="text-[#888] text-[13px]">{isMerchant ? "Merchant wallet," : "Your wallet,"}</div>
           <div className="font-bold text-2xl">{account.slice(0, 6)}...{account.slice(-4)}</div>
         </div>
         <div className="inline-flex items-center bg-[#1e1e1e] border border-[#1F2127] rounded-[20px] px-3 py-[5px] text-[13px] text-[#ccc] mb-4 cursor-pointer" onClick={copyAddress}>
@@ -239,71 +341,130 @@ export default function Profile() {
           <Copy size={12} color={copied ? "#DDE048" : "#666"} className="ml-1.5" />
         </div>
 
+        {/* Trust score card */}
         <div className="bg-gradient-to-r from-[#1B1E16] to-[#11141A] border border-[#2a2a2a] rounded-2xl p-5 mb-3.5 relative overflow-hidden">
           <Image src="/logo.png" alt="" width={90} height={90}
             style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", opacity: 0.06, filter: "grayscale(1)", objectFit: "contain", pointerEvents: "none" }}
           />
           <div className="flex justify-between items-start relative">
             <div>
-              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-1.5">TRUST SCORE</div>
+              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-1.5">
+                {isMerchant ? "MERCHANT RATING" : "TRUST SCORE"}
+              </div>
               <div className="text-[38px] font-extrabold leading-none text-[#DDE048]">
                 {rep?.score ?? "–"}<span className="text-base font-normal text-[#888]"> / 100</span>
               </div>
               {rep && <div className="text-[#DDE048] text-[11px] font-bold mt-1.5">{scoreLabel(rep.score)}</div>}
+              <div className="flex items-center gap-1 mt-2">
+                {isMerchant
+                  ? <><Store size={11} color="#DDE048" /><span className="text-[#DDE048] text-[10px] font-semibold">Verified Merchant</span></>
+                  : <><BadgeCheck size={11} color="#DDE048" /><span className="text-[#DDE048] text-[10px] font-semibold">Verified OFW</span></>
+                }
+              </div>
             </div>
             {rep && <CircularScore score={rep.score} size={90} />}
           </div>
         </div>
 
-        <div className="flex gap-3 mb-3.5">
-          <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
-            <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">USDC BALANCE</div>
-            <div className="text-[28px] font-extrabold leading-none">{balance ? parseFloat(balance).toFixed(2) : "–"}</div>
-            {balance && <div className="text-[11px] text-[#888] mt-1">{fmt(parseFloat(balance))}</div>}
-          </div>
-          <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
-            <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">ACTIVE CAP</div>
-            <div className="text-[28px] font-extrabold">{activePledges}<span className="text-[#888] font-normal text-lg"> / {maxActive ?? "–"}</span></div>
-            <div className="h-[3px] bg-[#2a2a2a] rounded mt-2.5">
-              <div className="h-full bg-[#DDE048] rounded transition-all" style={{ width: maxActive ? `${(activePledges / maxActive) * 100}%` : "0%" }} />
+        {/* Stats row */}
+        {isMerchant ? (
+          <div className="flex gap-3 mb-3.5">
+            <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
+              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">USDC BALANCE</div>
+              <div className="text-[28px] font-extrabold leading-none">{balance ? parseFloat(balance).toFixed(2) : "–"}</div>
+              {balance && <div className="text-[11px] text-[#888] mt-1">{fmt(parseFloat(balance))}</div>}
+            </div>
+            <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
+              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">PENDING</div>
+              <div className="text-[28px] font-extrabold text-[#f59e0b]">{merchantCounts?.pending ?? "–"}</div>
+              <div className="text-[10px] text-[#888] mt-1">incoming transfers</div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex gap-3 mb-3.5">
+            <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
+              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">USDC BALANCE</div>
+              <div className="text-[28px] font-extrabold leading-none">{balance ? parseFloat(balance).toFixed(2) : "–"}</div>
+              {balance && <div className="text-[11px] text-[#888] mt-1">{fmt(parseFloat(balance))}</div>}
+            </div>
+            <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
+              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">ACTIVE CAP</div>
+              <div className="text-[28px] font-extrabold">{activePledges}<span className="text-[#888] font-normal text-lg"> / {maxActive ?? "–"}</span></div>
+              <div className="h-[3px] bg-[#2a2a2a] rounded mt-2.5">
+                <div className="h-full bg-[#DDE048] rounded transition-all" style={{ width: maxActive ? `${(activePledges / maxActive) * 100}%` : "0%" }} />
+              </div>
+            </div>
+          </div>
+        )}
 
-        {counts && (
+        {/* History */}
+        {isMerchant ? merchantCounts && (
+          <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-3.5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-[10px] text-[#888] tracking-[1.5px]">TRANSFER HISTORY</div>
+              <Link href="/merchant/transfers" className="flex items-center gap-1 text-[#DDE048] text-[13px] font-semibold">See all <ArrowRight size={13} color="#DDE048" /></Link>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <HistoryStat label="Pending" value={merchantCounts.pending} color="#f59e0b" />
+              <HistoryStat label="Completed" value={merchantCounts.completed} color="#22c55e" />
+              <HistoryStat label="Defaulted" value={merchantCounts.defaulted} color="#ef4444" />
+            </div>
+            <div className="bg-[#0d0f13] border border-[#1F2127] rounded-xl p-3">
+              <div className="text-[10px] text-[#888] mb-1">TOTAL RECEIVED</div>
+              <div className="text-xl font-extrabold text-[#DDE048]">{merchantCounts.totalReceived.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
+            </div>
+          </div>
+        ) : senderCounts && (
           <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-3.5">
             <div className="flex items-center justify-between mb-4">
               <div className="text-[10px] text-[#888] tracking-[1.5px]">PLEDGE HISTORY</div>
               <Link href="/pledges" className="flex items-center gap-1 text-[#DDE048] text-[13px] font-semibold">See all <ArrowRight size={13} color="#DDE048" /></Link>
             </div>
             <div className="grid grid-cols-4 gap-2">
-              <HistoryStat label="Pending" value={counts.pending} color="#f59e0b" />
-              <HistoryStat label="Completed" value={counts.completed} color="#22c55e" />
-              <HistoryStat label="Defaulted" value={counts.defaulted} color="#ef4444" />
-              <HistoryStat label="Cancelled" value={counts.cancelled} color="#888" />
+              <HistoryStat label="Pending" value={senderCounts.pending} color="#f59e0b" />
+              <HistoryStat label="Completed" value={senderCounts.completed} color="#22c55e" />
+              <HistoryStat label="Defaulted" value={senderCounts.defaulted} color="#ef4444" />
+              <HistoryStat label="Cancelled" value={senderCounts.cancelled} color="#888" />
             </div>
           </div>
         )}
 
-        <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-4">
-          <div className="flex items-center gap-2 mb-3">
-            <ShieldCheck size={15} color="#DDE048" />
-            <div className="text-[10px] text-[#888] tracking-[1.5px]">YOUR LIMITS</div>
-          </div>
-          <div className="flex justify-between py-2.5 border-b border-[#1F2127] text-sm"><span className="text-[#888]">Max active pledges</span><span className="font-extrabold text-[#DDE048]">{maxActive ?? "–"}</span></div>
-          <div className="flex justify-between py-2.5 border-b border-[#1F2127] text-sm"><span className="text-[#888]">Required deposit</span><span className="font-extrabold text-[#DDE048]">{reqPct ?? "–"}% upfront</span></div>
-        </div>
-
-        <Link href="/recipients" className="w-full bg-[#11141A] border border-[#1F2127] rounded-2xl px-5 py-4 flex items-center justify-between mb-4 no-underline text-inherit">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center"><Users size={16} color="#DDE048" /></div>
-            <div>
-              <div className="font-semibold text-sm">Recipients</div>
-              <div className="text-[11px] text-[#555]">Saved merchants & addresses</div>
+        {/* Limits (sender only) */}
+        {!isMerchant && (
+          <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck size={15} color="#DDE048" />
+              <div className="text-[10px] text-[#888] tracking-[1.5px]">YOUR LIMITS</div>
             </div>
+            <div className="flex justify-between py-2.5 border-b border-[#1F2127] text-sm"><span className="text-[#888]">Max active pledges</span><span className="font-extrabold text-[#DDE048]">{maxActive ?? "–"}</span></div>
+            <div className="flex justify-between py-2.5 text-sm"><span className="text-[#888]">Required deposit</span><span className="font-extrabold text-[#DDE048]">{reqPct ?? "–"}% upfront</span></div>
           </div>
-          <ArrowRight size={16} color="#555" />
-        </Link>
+        )}
+
+        {/* Quick link */}
+        {isMerchant ? (
+          <Link href="/merchant/transfers" className="w-full bg-[#11141A] border border-[#1F2127] rounded-2xl px-5 py-4 flex items-center justify-between mb-4 no-underline text-inherit">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center"><FileText size={16} color="#DDE048" /></div>
+              <div>
+                <div className="font-semibold text-sm">Incoming Transfers</div>
+                <div className="text-[11px] text-[#555]">View all pledges sent to you</div>
+              </div>
+            </div>
+            <ArrowRight size={16} color="#555" />
+          </Link>
+        ) : (
+          <Link href="/recipients" className="w-full bg-[#11141A] border border-[#1F2127] rounded-2xl px-5 py-4 flex items-center justify-between mb-4 no-underline text-inherit">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center"><Users size={16} color="#DDE048" /></div>
+              <div>
+                <div className="font-semibold text-sm">Recipients</div>
+                <div className="text-[11px] text-[#555]">Saved merchants & addresses</div>
+              </div>
+            </div>
+            <ArrowRight size={16} color="#555" />
+          </Link>
+        )}
 
         <button type="button" className="w-full bg-[#11141A] border border-[#2a2a2a] text-red-400 rounded-[14px] py-[14px] text-[15px] font-semibold flex items-center justify-center gap-2 cursor-pointer" onClick={disconnect}>
           <LogOut size={15} /> Disconnect Wallet

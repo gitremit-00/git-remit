@@ -115,7 +115,12 @@ export default function Home() {
       {/* Stats row: Trust Score wide + 2 cards */}
       <div className="grid grid-cols-[1fr_1fr_1fr] gap-4 mb-8">
         {/* Trust Score */}
-        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5 col-span-1">
+        <div className="relative overflow-hidden border border-[#1F2127] rounded-2xl p-5 col-span-1"
+          style={{ background: "linear-gradient(135deg, #1B1E16 0%, #11141A 55%, #0e1012 100%)" }}>
+          <div className="absolute -right-4 -top-4 opacity-[0.06] pointer-events-none select-none">
+            <Image src="/logo.png" alt="" width={110} height={110} style={{ objectFit: "contain", filter: "grayscale(1)" }} />
+          </div>
+          <div className="relative">
           <div className="text-[11px] text-[#555] tracking-[1.5px] mb-4">TRUST SCORE</div>
           <div className="flex items-start gap-4">
             <CircularScore score={rep?.score ?? 0} size={76} />
@@ -137,6 +142,7 @@ export default function Home() {
                 </>
               ) : <div className="text-[#555] text-sm">Loading…</div>}
             </div>
+          </div>
           </div>
         </div>
 

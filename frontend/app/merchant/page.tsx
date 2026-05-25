@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Download, Share2, Search, ExternalLink, Clock, CheckCircle2, AlertCircle, Copy } from "lucide-react";
+import { Download, Share2, Search, ExternalLink, Clock, CheckCircle2, AlertCircle, Copy, Store, BadgeCheck, ShieldCheck, Dot, FileText } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import CircularScore from "../../components/CircularScore";
@@ -62,17 +62,17 @@ export default function MerchantDashboard() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const pending = pledges.filter((p) => p.status === 0);
-  const completed = pledges.filter((p) => p.status === 1);
+  const pending = pledges.filter((p) => Number(p.status) === 0);
+  const completed = pledges.filter((p) => Number(p.status) === 1);
   const claimable = pledges.filter((p) => {
-    if (p.status !== 0) return false;
+    if (Number(p.status) !== 0) return false;
     return Date.now() / 1000 > Number(p.commitmentDate) + 3 * 86400;
   });
   const totalLocked = pledges.reduce((s, p) => s + parseFloat(ethers.formatUnits(p.depositedAmount, 6)), 0);
   const totalCommitted = pledges.reduce((s, p) => s + parseFloat(ethers.formatUnits(p.totalAmount, 6)), 0);
 
   const filtered = pledges.filter((p) => {
-    const statusMatch = filter === "ALL" || STATUS[p.status] === filter || (filter === "CLAIMABLE" && claimable.includes(p));
+    const statusMatch = filter === "ALL" || STATUS[Number(p.status)] === filter || (filter === "CLAIMABLE" && claimable.includes(p));
     const searchMatch = !search || p.sender.toLowerCase().includes(search.toLowerCase()) || p.id.toString().includes(search);
     return statusMatch && searchMatch;
   });
@@ -95,7 +95,7 @@ export default function MerchantDashboard() {
         <div>
           <div className="text-[#555] text-sm mb-1">Merchant dashboard</div>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center text-xl">🏫</div>
+            <div className="w-10 h-10 rounded-xl bg-[#DDE048]/10 flex items-center justify-center"><Store size={20} color="#DDE048" /></div>
             <h1 className="text-4xl font-extrabold text-white">{shortAddr(account)}</h1>
           </div>
           <div className="flex items-center gap-3 mt-2">
@@ -105,13 +105,16 @@ export default function MerchantDashboard() {
               <Copy size={11} color={copied ? "#DDE048" : "#555"} />
             </button>
             <span className="text-[#444]">·</span>
-            <span className="text-[12px] text-green-400 font-semibold">✓ verified registrar</span>
+            <span className="flex items-center gap-1 text-[12px] text-green-400 font-semibold"><BadgeCheck size={13} /> verified registrar</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
           <button className="flex items-center gap-2 bg-[#13161c] border border-[#1e2230] text-white text-sm font-semibold rounded-xl px-4 py-2.5 hover:border-[#333] transition-colors">
             <Download size={14} /> Export CSV
           </button>
+          <Link href="/merchant/requests" className="flex items-center gap-2 bg-[#13161c] border border-[#1e2230] text-white text-sm font-semibold rounded-xl px-4 py-2.5 hover:border-[#333] transition-colors">
+            <FileText size={14} /> Payment Requests
+          </Link>
           <button className="flex items-center gap-2 bg-[#DDE048] text-black text-sm font-bold rounded-xl px-5 py-2.5 hover:bg-[#c8ce30] transition-colors">
             <Share2 size={14} /> Share receive link
           </button>
@@ -223,7 +226,7 @@ export default function MerchantDashboard() {
                   {/* Status */}
                   <td className="px-5 py-4">
                     <span className="text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ color: STATUS_COLOR[status], background: STATUS_BG[status] }}>
-                      {status === "COMPLETED" ? "✓" : "●"} {status}
+                      {status === "COMPLETED" ? <CheckCircle2 size={12} /> : <Dot size={14} />} {status}
                     </span>
                   </td>
                   {/* Due */}
@@ -263,7 +266,7 @@ export default function MerchantDashboard() {
       <div className="grid grid-cols-2 gap-5">
         <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-lg">🔒</span>
+            <ShieldCheck size={20} color="#DDE048" />
             <h3 className="font-bold text-white">Every transfer is verifiable</h3>
           </div>
           <p className="text-[#555] text-sm leading-relaxed">Each transfer above is backed by a smart contract. You can verify any pledge on-chain using the Pledge ID.</p>
@@ -316,6 +319,14 @@ export default function MerchantDashboard() {
             <span className="text-red-400 text-xs">grace period ended</span>
           </div>
         )}
+
+        <Link href="/merchant/requests" className="w-full flex items-center justify-between bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-3 mb-4 text-inherit">
+          <div className="flex items-center gap-2.5">
+            <FileText size={16} color="#DDE048" />
+            <span className="font-semibold text-sm text-white">Payment Requests</span>
+          </div>
+          <span className="text-xs text-[#555]">Create &amp; share →</span>
+        </Link>
 
         <div className="text-[10px] text-[#888] tracking-[1.5px] mb-3">INCOMING TRANSFERS · {pledges.length}</div>
 
