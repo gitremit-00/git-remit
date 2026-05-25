@@ -421,21 +421,26 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Cap + Balance row */}
         <div className="flex gap-3 mb-[22px]">
           <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
-            <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">CAP</div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <TrendingUp size={11} color="#DDE048" />
+              <div className="text-[10px] text-[#888] tracking-[1.5px]">ACTIVE CAP</div>
+            </div>
             <div className="text-[28px] font-extrabold">{activePledges.length}<span className="text-[#888] font-normal text-lg"> / {maxActive ?? "–"}</span></div>
-            <div className="h-[3px] bg-[#2a2a2a] rounded mt-2.5">
+            <div className="h-[3px] bg-[#2a2a2a] rounded mt-2.5 mb-1.5">
               <div className="h-full bg-[#DDE048] rounded" style={{ width: maxActive ? `${(activePledges.length / maxActive) * 100}%` : "0%" }} />
             </div>
+            <div className="text-[11px] text-[#555]">{maxActive ? maxActive - activePledges.length : "–"} slot{(maxActive ?? 0) - activePledges.length !== 1 ? "s" : ""} left</div>
           </div>
           <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
-            <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">TRUST</div>
-            <div className="flex items-baseline gap-1.5">
-              <div className="text-[28px] font-extrabold text-[#DDE048]">{rep?.score ?? "–"}</div>
-              {rep && <div className="text-[#DDE048] text-[11px] font-bold">{scoreLabel(rep.score).toUpperCase()}</div>}
+            <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">USDC BALANCE</div>
+            <div className="text-[22px] font-extrabold leading-tight">
+              {loading ? "–" : balance ? parseFloat(balance).toFixed(2) : "0.00"}
             </div>
-            {rep && <div className="text-[11px] text-[#888] mt-1">{rep.onTime} / {rep.total} on time</div>}
+            <div className="text-[11px] text-[#555] mb-2">≈ {balance ? fmtAlt(parseFloat(balance)) : "–"}</div>
+            <Link href="/wallet" className="text-[11px] font-bold text-[#DDE048]">Top up →</Link>
           </div>
         </div>
 
@@ -499,8 +504,11 @@ export default function Home() {
 
         {/* Recent Activity */}
         <div className="mt-2 mb-1 flex items-center justify-between">
-          <span className="text-xs font-bold tracking-[1px] text-[#ccc]">RECENT ACTIVITY</span>
-          <Link href="/notifications" className="text-[#DDE048] text-[13px] font-semibold">See all</Link>
+          <div>
+            <span className="text-sm font-bold text-white">Recent Activity</span>
+            <div className="text-[11px] text-[#555] mt-0.5">Latest on-chain events on your transfers</div>
+          </div>
+          <Link href="/notifications" className="text-[#DDE048] text-[13px] font-semibold">See all →</Link>
         </div>
 
         <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl mb-4">
@@ -552,8 +560,11 @@ export default function Home() {
 
         {/* Completed */}
         <div className="mb-1 flex items-center justify-between">
-          <span className="text-xs font-bold tracking-[1px] text-[#ccc]">COMPLETED <span className="text-[#888]">•</span> {completedPledges.length}</span>
-          <Link href="/pledges" className="text-[#DDE048] text-[13px] font-semibold">See all</Link>
+          <div>
+            <span className="text-sm font-bold text-white">Completed</span>
+            <div className="text-[11px] text-[#555] mt-0.5">{completedPledges.length} on-time release{completedPledges.length !== 1 ? "s" : ""}</div>
+          </div>
+          <Link href="/pledges" className="text-[#DDE048] text-[13px] font-semibold">See all →</Link>
         </div>
 
         {completedPledges.length === 0 && !loading && (

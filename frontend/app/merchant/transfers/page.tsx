@@ -2,10 +2,9 @@
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Search, ArrowLeft, Clock, CheckCircle2, AlertCircle, XCircle, ChevronRight } from "lucide-react";
+import { Search, ArrowLeft, Clock, CheckCircle2, AlertCircle, XCircle, ChevronRight, ShieldCheck } from "lucide-react";
 import Header from "../../../components/Header";
 import LoadingSpinner from "../../../components/LoadingSpinner";
-import CircularScore from "../../../components/CircularScore";
 import { useWallet } from "../../../context/WalletContext";
 import { useCurrency } from "../../../context/CurrencyContext";
 import { getPledgeMeta } from "../../../lib/pledgeMeta";
@@ -158,7 +157,7 @@ export default function MerchantTransfers() {
                         </div>
                         <div>
                           <div className="font-semibold text-white text-xs">{meta?.name || shortAddr(p.sender)}</div>
-                          {rep && <div className="flex items-center gap-1 mt-0.5"><CircularScore score={rep.score} size={14} /><span className="text-[10px] text-[#555]">{rep.score}</span></div>}
+                          {rep && <div className="flex items-center gap-1 mt-0.5"><ShieldCheck size={11} color="#DDE048" /><span className="text-[10px] text-[#555]">{rep.score}/100</span></div>}
                         </div>
                       </div>
                     </td>

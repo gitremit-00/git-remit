@@ -8,7 +8,7 @@ import TxGuard from "../../../components/TxGuard";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { useWallet } from "../../../context/WalletContext";
 import ProgressBar from "../../../components/ProgressBar";
-import { CONTRACTS } from "../../../contracts/addresses";
+import { CONTRACTS, PHP_PER_USDC } from "../../../contracts/addresses";
 import { useCurrency } from "../../../context/CurrencyContext";
 import { getPledgeMeta } from "../../../lib/pledgeMeta";
 import Link from "next/link";

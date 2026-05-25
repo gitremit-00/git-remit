@@ -211,29 +211,114 @@ export default function Wallet() {
   const MobileWallet = (
     <div className="md:hidden">
       <Header title="Wallet" />
-      <div className="px-4 pt-5">
+      <div className="px-4 pt-5 pb-28 space-y-4">
         {walletLoading ? <LoadingSpinner fullScreen /> : !account ? (
           <MetaMaskGate>{null}</MetaMaskGate>
         ) : (
           <>
-            <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-4">
-              <div className="text-[11px] text-[#888] tracking-[1px] mb-1.5">USDC BALANCE</div>
-              <div className="text-[36px] font-bold">
-                {balance ? (currency === "PHP" ? fmt(parseFloat(balance)) : parseFloat(balance).toFixed(2)) : "–"}{" "}
-                <span className="text-lg text-[#888]">{currency === "PHP" ? "PHP" : "USDC"}</span>
+            {/* Balance */}
+            <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-5 h-5 rounded-full bg-[#DDE048]/10 flex items-center justify-center text-[10px] text-[#DDE048] font-bold">$</div>
+                <span className="text-[11px] text-[#888] tracking-[1px]">USDC BALANCE</span>
               </div>
-              {balance && <div className="text-[13px] text-[#888] mt-1.5">≈ {fmtAlt(parseFloat(balance))}</div>}
+              <div className="text-[36px] font-extrabold leading-none mb-1">
+                {balance ? (currency === "PHP" ? fmt(parseFloat(balance)) : parseFloat(balance).toFixed(2)) : "–"}
+                <span className="text-lg text-[#888] font-normal ml-1.5">{currency === "PHP" ? "PHP" : "USDC"}</span>
+              </div>
+              {balance && <div className="text-[13px] text-[#888] mb-4">≈ {fmtAlt(parseFloat(balance))}</div>}
+              <div className="flex gap-2">
+                <button onClick={mintFaucet} disabled={loading}
+                  className="flex-1 flex items-center justify-center gap-2 bg-[#DDE048] text-black text-sm font-bold rounded-xl py-3 disabled:opacity-50">
+                  <ArrowDownLeft size={14} />{loading ? "Minting…" : "Top up"}
+                </button>
+                <button disabled className="flex-1 flex items-center justify-center gap-2 bg-[#1e1e1e] text-[#555] text-sm font-semibold rounded-xl py-3 border border-[#1F2127] cursor-not-allowed">
+                  <ArrowUpRight size={14} />Withdraw
+                </button>
+                <button disabled className="flex-1 flex items-center justify-center gap-2 bg-[#1e1e1e] text-[#555] text-sm font-semibold rounded-xl py-3 border border-[#1F2127] cursor-not-allowed">
+                  <ArrowLeftRight size={14} />Swap
+                </button>
+              </div>
+              {status && <p className="text-[#DDE048] text-[13px] mt-3">{status}</p>}
             </div>
-            <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5 mb-4">
-              <div className="flex items-center gap-2 mb-1.5">
-                <Droplets size={18} color="#DDE048" />
-                <div className="font-bold text-base">Testnet Faucet</div>
+
+            {/* Spending allowance */}
+            <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-1">
+                <div className="font-bold text-sm">USDC Spending Allowance</div>
+                <button onClick={approveAllowance} disabled={approving}
+                  className="text-[12px] font-bold text-[#DDE048] border border-[#DDE048]/30 bg-[#DDE048]/10 rounded-lg px-3 py-1.5 disabled:opacity-50">
+                  {approving ? "Approving…" : "+ Approve"}
+                </button>
               </div>
-              <p className="text-[#888] text-[13px] mb-3.5">Get free test USDC to start sending transfers.</p>
-              <button className="w-full bg-[#DDE048] text-black border-0 rounded-xl py-[14px] text-[15px] font-bold cursor-pointer" onClick={mintFaucet} disabled={loading}>
-                {loading ? "Minting..." : "Mint 1000 USDC"}
+              <p className="text-[#555] text-xs mb-4">Required for each transfer — lets the contract move USDC on your behalf.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-[#0d0f13] border border-[#1F2127] rounded-xl p-3">
+                  <div className="text-[10px] text-[#555] tracking-[1px] mb-1.5">CURRENT</div>
+                  <div className="text-lg font-extrabold text-white">{allowNum.toFixed(2)}</div>
+                  <div className="text-[10px] text-[#555]">USDC</div>
+                </div>
+                <div className="bg-[#0d0f13] border border-[#1F2127] rounded-xl p-3">
+                  <div className="text-[10px] text-[#555] tracking-[1px] mb-1.5">AVAILABLE</div>
+                  <div className="text-lg font-extrabold text-[#DDE048]">{allowNum.toFixed(2)}</div>
+                  <div className="text-[10px] text-[#555]">USDC</div>
+                </div>
+              </div>
+            </div>
+
+            {/* MetaMask connection */}
+            <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-orange-500/10 flex items-center justify-center p-1.5">
+                    <Image src="/MetaMask.png" alt="MetaMask" width={24} height={24} style={{ objectFit: "contain" }} />
+                  </div>
+                  <div>
+                    <div className="font-bold text-sm text-white">MetaMask</div>
+                    <div className="flex items-center gap-1.5 text-[11px] text-green-400"><span className="w-1.5 h-1.5 rounded-full bg-green-400" />Connected</div>
+                  </div>
+                </div>
+                <button onClick={disconnect} className="text-[12px] font-semibold text-[#888] border border-[#1F2127] rounded-lg px-3 py-1.5 hover:text-white transition-colors">
+                  Disconnect
+                </button>
+              </div>
+              <button onClick={copyAddress}
+                className="w-full flex items-center gap-2 bg-[#0d0f13] border border-[#1F2127] rounded-xl px-3 py-2.5 text-sm font-mono text-[#ccc] hover:border-[#333] transition-colors">
+                <span className="w-3 h-3 rounded-sm bg-[#DDE048]/20 border border-[#DDE048]/40 shrink-0" />
+                {copied ? <span className="text-[#DDE048]">Copied!</span> : account.slice(0, 10) + "…" + account.slice(-8)}
+                <Copy size={12} color="#555" className="ml-auto" />
               </button>
-              {status && <p className="text-[#DDE048] text-[13px] mt-2.5">{status}</p>}
+            </div>
+
+            {/* Corridor */}
+            <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl font-extrabold text-white">US</span>
+                    <ArrowLeftRight size={14} color="#555" />
+                    <span className="text-xl font-extrabold text-white">PH</span>
+                  </div>
+                  <div>
+                    <div className="font-semibold text-sm text-white">USA → Philippines</div>
+                    <div className="text-[11px] text-[#555]">1 USDC ≈ ₱{rate.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                  </div>
+                </div>
+                <button disabled className="text-[11px] text-[#555] border border-[#1F2127] rounded-lg px-3 py-1.5 cursor-not-allowed">Change</button>
+              </div>
+            </div>
+
+            {/* Testnet faucet */}
+            <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5">
+              <div className="flex items-center gap-2 mb-1.5">
+                <Droplets size={16} color="#DDE048" />
+                <div className="font-bold text-sm">Testnet Faucet</div>
+              </div>
+              <p className="text-[#555] text-[13px] mb-4">Get free test USDC to start making transfers on RemitSafe.</p>
+              <button onClick={mintFaucet} disabled={loading}
+                className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 disabled:opacity-50">
+                {loading ? "Minting…" : "Mint 1,000 USDC"}
+              </button>
             </div>
           </>
         )}

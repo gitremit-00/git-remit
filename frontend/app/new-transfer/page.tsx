@@ -12,7 +12,7 @@ import { CONTRACTS } from "../../contracts/addresses";
 import { useCurrency } from "../../context/CurrencyContext";
 import ProgressBar from "../../components/ProgressBar";
 import { savePledgeMeta, getPledgeMeta } from "../../lib/pledgeMeta";
-import { getPaymentRequest, type PaymentRequest, markNotificationRead } from "../../lib/supabase";
+import { getPaymentRequest, type PaymentRequest, markNotificationRead, updatePaymentRequestStatus } from "../../lib/supabase";
 import Link from "next/link";
 
 const STEPS = ["Recipient", "Amount", "Commitment", "Review"];
@@ -67,7 +67,12 @@ export default function NewTransfer() {
   const [txError, setTxError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function back() { if (step > 0) setStep(step - 1); else router.push("/"); }
+  function back() {
+    if (step === 3 && (payInFull || requestPreview)) { setStep(1); return; }
+    if (step === 3 && !payInFull && !requestPreview) { setStep(2); return; }
+    if (step > 0) setStep(step - 1);
+    else router.push("/");
+  }
 
   async function nextStep() {
     if (step === 0 && form.merchant) {
@@ -75,8 +80,8 @@ export default function NewTransfer() {
       setStep(1);
     } else if (step === 1 && form.totalAmount) {
       if (!form.initialDeposit) setForm({ ...form, initialDeposit: ((parseFloat(form.totalAmount) * 1.01 * requiredPct) / 100).toFixed(2) });
-      // Skip commitment date step if paying in full — no remaining balance to schedule
-      setStep(payInFull ? 3 : 2);
+      // Skip commitment date step if paying in full or deadline is locked by a payment request
+      setStep(payInFull || requestPreview ? 3 : 2);
     } else if (step === 2 && form.commitmentDate) {
       setStep(3);
     }
@@ -117,6 +122,7 @@ export default function NewTransfer() {
       const createTx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
       await createTx.wait();
       savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note });
+      if (requestId) updatePaymentRequestStatus(requestId, "fulfilled");
       setTxStatus("done");
       setTimeout(() => router.push("/pledges"), 1800);
     } catch (err: unknown) {
@@ -150,7 +156,8 @@ export default function NewTransfer() {
     if (!requestPreview) return;
     const req = requestPreview;
     const known = getPledgeMeta(req.merchant_address);
-    const d = new Date(req.deadline);
+    // Supabase may return timestamps with a space instead of "T"; normalize before parsing
+    const d = new Date(req.deadline.replace(" ", "T"));
     const localDt = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     setForm((f) => ({
       ...f,
@@ -194,6 +201,8 @@ export default function NewTransfer() {
   const fee = parseFloat((total * 0.01).toFixed(6));
   const merchantReceives = total; // fee is added on top (gross = total × 1.01), merchant gets the full pledge amount
   const deadline = form.commitmentDate ? new Date(form.commitmentDate) : null;
+  // Normalize Supabase timestamp (may use space instead of "T") before parsing
+  const reqDeadline = requestPreview ? new Date(requestPreview.deadline.replace(" ", "T")) : null;
   const daysLeft = deadline ? Math.ceil((deadline.getTime() - Date.now()) / 86400000) : 0;
   const canNext = (step === 0 && !!form.merchant) || (step === 1 && !!form.totalAmount && !!form.initialDeposit) || (step === 2 && !!form.commitmentDate) || (step === 3);
 
@@ -233,11 +242,11 @@ export default function NewTransfer() {
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-[#555]">Deadline</span>
-            <span className="text-white font-semibold">{new Date(requestPreview.deadline).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
+            <span className="text-white font-semibold">{reqDeadline!.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-[#555]">Days left</span>
-            <span className="text-amber-400 font-semibold">{Math.ceil((new Date(requestPreview.deadline).getTime() - Date.now()) / 86400000)}d</span>
+            <span className="text-amber-400 font-semibold">{Math.ceil((reqDeadline!.getTime() - Date.now()) / 86400000)}d</span>
           </div>
         </div>
         {/* Actions */}
@@ -481,36 +490,36 @@ export default function NewTransfer() {
           </div>
 
           {/* Step 2 — Commitment date */}
-          <div className={`bg-[#13161c] border rounded-2xl overflow-hidden transition-colors ${step === 2 ? "border-[#DDE048]/40" : step > 2 ? "border-[#1e2230]" : "border-[#1e2230] opacity-50"}`}>
+          <div className={`bg-[#13161c] border rounded-2xl overflow-hidden transition-colors ${
+            requestPreview
+              ? "border-[#1e2230] opacity-60"
+              : step === 2 ? "border-[#DDE048]/40" : step > 2 ? "border-[#1e2230]" : "border-[#1e2230] opacity-50"
+          }`}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#1e2230]">
               <div className="flex items-center gap-3">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${step > 2 ? "bg-[#DDE048] text-black" : "bg-[#1e2230] text-[#888]"}`}>
-                  {step > 2 ? <Check size={12} strokeWidth={3} /> : "3"}
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${(step > 2 || requestPreview) ? "bg-[#DDE048] text-black" : "bg-[#1e2230] text-[#888]"}`}>
+                  {(step > 2 || requestPreview) ? <Check size={12} strokeWidth={3} /> : "3"}
                 </div>
-                <span className={`font-semibold ${step === 2 ? "text-[#DDE048]" : step > 2 ? "text-white" : "text-[#555]"}`}>Commitment date</span>
+                <span className={`font-semibold ${step === 2 && !requestPreview ? "text-[#DDE048]" : (step > 2 || requestPreview) ? "text-white" : "text-[#555]"}`}>Commitment date</span>
               </div>
-              {step > 2 && deadline && (
+              {(step > 2 || requestPreview) && deadline && (
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-white">{deadline.toLocaleDateString()}</span>
-                  <button onClick={() => setStep(2)} className="text-[12px] text-[#DDE048] hover:underline">Change</button>
+                  {!requestPreview && <button onClick={() => setStep(2)} className="text-[12px] text-[#DDE048] hover:underline">Change</button>}
+                  {requestPreview && <span className="text-[10px] text-[#555] bg-[#1e2230] px-2 py-0.5 rounded-full">Set by merchant</span>}
                 </div>
               )}
-              {step === 2 && <span className="text-[11px] text-[#DDE048] font-bold tracking-[1px]">EDITING</span>}
+              {step === 2 && !requestPreview && <span className="text-[11px] text-[#DDE048] font-bold tracking-[1px]">EDITING</span>}
             </div>
-            {step === 2 && (
+            {step === 2 && !requestPreview && (
               <div className="px-5 py-5 space-y-4">
-                {lockedFields.has("commitmentDate") && (
-                  <div className="flex items-center gap-2 text-xs text-[#DDE048] bg-[#DDE048]/10 border border-[#DDE048]/20 rounded-xl px-3 py-2">
-                    <FileText size={12} /> Deadline set by merchant — cannot be changed
-                  </div>
-                )}
-                <DateTimePicker value={form.commitmentDate} onChange={(val) => { if (!lockedFields.has("commitmentDate")) setForm({ ...form, commitmentDate: val }); }} />
+                <DateTimePicker value={form.commitmentDate} onChange={(val) => setForm({ ...form, commitmentDate: val })} />
                 <div className="flex gap-2 flex-wrap">
-                  <button onClick={setPayday} disabled={lockedFields.has("commitmentDate")} className={`rounded-xl px-4 py-2 text-[13px] font-semibold border ${deadline && (deadline.getDate() === 15 || deadline.getDate() === new Date(deadline.getFullYear(), deadline.getMonth() + 1, 0).getDate()) ? "bg-[#DDE048] border-[#DDE048] text-black" : "bg-[#0e1014] border-[#1e2230] text-[#888]"}`}>Payday</button>
+                  <button onClick={setPayday} className={`rounded-xl px-4 py-2 text-[13px] font-semibold border ${deadline && (deadline.getDate() === 15 || deadline.getDate() === new Date(deadline.getFullYear(), deadline.getMonth() + 1, 0).getDate()) ? "bg-[#DDE048] border-[#DDE048] text-black" : "bg-[#0e1014] border-[#1e2230] text-[#888]"}`}>Payday</button>
                   {[{ label: "15d", days: 15 }, { label: "30d", days: 30 }, { label: "60d", days: 60 }].map(({ label, days }) => {
                     const isActive = deadline && Math.ceil((deadline.getTime() - Date.now()) / 86400000) === days;
                     return (
-                      <button key={label} disabled={lockedFields.has("commitmentDate")} onClick={() => setQuickDate(days)} className={`rounded-xl px-4 py-2 text-[13px] font-semibold border disabled:opacity-40 ${isActive ? "bg-[#DDE048] border-[#DDE048] text-black" : "bg-[#0e1014] border-[#1e2230] text-[#888]"}`}>{label}</button>
+                      <button key={label} onClick={() => setQuickDate(days)} className={`rounded-xl px-4 py-2 text-[13px] font-semibold border ${isActive ? "bg-[#DDE048] border-[#DDE048] text-black" : "bg-[#0e1014] border-[#1e2230] text-[#888]"}`}>{label}</button>
                     );
                   })}
                 </div>
@@ -595,11 +604,11 @@ export default function NewTransfer() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#555]">Deadline</span>
-                    <span className="text-white">{new Date(requestPreview.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                    <span className="text-white">{reqDeadline!.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#555]">Days left</span>
-                    <span className="text-amber-400 font-semibold">{Math.ceil((new Date(requestPreview.deadline).getTime() - Date.now()) / 86400000)}d</span>
+                    <span className="text-amber-400 font-semibold">{Math.ceil((reqDeadline!.getTime() - Date.now()) / 86400000)}d</span>
                   </div>
                 </div>
               </div>
@@ -648,11 +657,11 @@ export default function NewTransfer() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#555]">Pay by</span>
-                    <span className="text-white font-semibold">{new Date(requestPreview.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                    <span className="text-white font-semibold">{reqDeadline!.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#555]">Days left</span>
-                    <span className="text-amber-400 font-semibold">{Math.ceil((new Date(requestPreview.deadline).getTime() - Date.now()) / 86400000)}d</span>
+                    <span className="text-amber-400 font-semibold">{Math.ceil((reqDeadline!.getTime() - Date.now()) / 86400000)}d</span>
                   </div>
                 </div>
               )}
@@ -739,11 +748,11 @@ export default function NewTransfer() {
                 </div>
                 <div>
                   <div className="text-[10px] text-[#555] mb-0.5">Deadline</div>
-                  <div className="text-white text-sm font-semibold">{new Date(requestPreview.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                  <div className="text-white text-sm font-semibold">{reqDeadline!.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[#555] mb-0.5">Days left</div>
-                  <div className="text-amber-400 font-bold">{Math.ceil((new Date(requestPreview.deadline).getTime() - Date.now()) / 86400000)}d</div>
+                  <div className="text-amber-400 font-bold">{Math.ceil((reqDeadline!.getTime() - Date.now()) / 86400000)}d</div>
                 </div>
               </div>
             </div>
@@ -823,7 +832,7 @@ export default function NewTransfer() {
           </div>
         )}
 
-        {step === 2 && (
+        {step === 2 && !requestPreview && (
           <div>
             <h2 className="text-2xl font-extrabold mb-5">When can you commit?</h2>
             <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-3 flex items-center justify-between mb-3">
