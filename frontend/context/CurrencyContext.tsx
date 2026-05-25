@@ -9,10 +9,10 @@ interface CurrencyContextValue {
   currency: DisplayCurrency;
   rate: number;
   toggle: () => void;
-  fmt: (usdc: number) => string;
-  fmtSub: (usdc: number) => string;
+  fmt: (amount: number) => string;
+  fmtSub: (amount: number) => string;
   /** Always returns the opposite currency label — the subtitle conversion */
-  fmtAlt: (usdc: number) => string;
+  fmtAlt: (amount: number, tokenSymbol?: string) => string;
 }
 
 const CurrencyContext = createContext<CurrencyContextValue>({
@@ -21,7 +21,7 @@ const CurrencyContext = createContext<CurrencyContextValue>({
   toggle: () => {},
   fmt: (u) => `₱${(u * FALLBACK_RATE).toLocaleString()}`,
   fmtSub: (u) => `₱${(u * FALLBACK_RATE).toLocaleString()} PHP`,
-  fmtAlt: (u) => `${u.toFixed(2)} USDC`,
+  fmtAlt: (u, sym = "USD") => `${u.toFixed(2)} ${sym}`,
 });
 
 export function CurrencyProvider({ children }: { children: React.ReactNode }) {
@@ -74,9 +74,9 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
     return `$${usdc.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
   }
 
-  function fmtAlt(usdc: number): string {
-    if (currency === "PHP") return `${usdc.toFixed(2)} USDC`;
-    return `${toPhp(usdc)} PHP`;
+  function fmtAlt(amount: number, tokenSymbol = "USD"): string {
+    if (currency === "PHP") return `${amount.toFixed(2)} ${tokenSymbol}`;
+    return `${toPhp(amount)} PHP`;
   }
 
   return (

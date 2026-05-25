@@ -17,14 +17,15 @@ interface SenderCounts { pending: number; completed: number; defaulted: number; 
 interface MerchantCounts { pending: number; completed: number; defaulted: number; totalReceived: number; }
 
 export default function Profile() {
-  const { account, connect, disconnect, pledgeRead, usdcRead, walletLoading } = useWallet();
+  const { account, connect, disconnect, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
   const { role, displayName, setDisplayName, setAvatarUrl } = useRole();
   const { fmt } = useCurrency();
   const isMerchant = role === "merchant";
 
   const [rep, setRep] = useState<RepState | null>(null);
   const [showTrustTooltip, setShowTrustTooltip] = useState(false);
-  const [balance, setBalance] = useState<string | null>(null);
+  const [usdcBal, setUsdcBal] = useState<string | null>(null);
+  const [usdtBal, setUsdtBal] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Profile card state
@@ -55,9 +56,10 @@ export default function Profile() {
   }, [account, role]);
 
   async function loadAll() {
-    const [repData, bal] = await Promise.all([
+    const [repData, uBal, tBal] = await Promise.all([
       pledgeRead.getReputation(account),
       usdcRead.balanceOf(account),
+      usdtRead.balanceOf(account),
     ]);
     setRep({
       score: Math.round(Number(repData.basisPoints) / 100),
@@ -66,7 +68,8 @@ export default function Profile() {
       defaults: Number(repData.defaultCount),
       total: Number(repData.totalCount),
     });
-    setBalance(ethers.formatUnits(bal, 6));
+    setUsdcBal(ethers.formatUnits(uBal, 6));
+    setUsdtBal(ethers.formatUnits(tBal, 6));
 
     if (isMerchant) {
       const ids = await pledgeRead.getMerchantPledges(account) as bigint[];
@@ -320,13 +323,13 @@ export default function Profile() {
           {/* Stats grid */}
           {isMerchant ? (
             <div className="grid grid-cols-3 gap-3">
-              <StatCard label="USDC BALANCE" value={balance ? `${parseFloat(balance).toFixed(2)}` : "–"} sub={balance ? fmt(parseFloat(balance)) : undefined} />
+              <StatCard label="TOKEN BALANCE" value={usdcBal && usdtBal ? `${(parseFloat(usdcBal) + parseFloat(usdtBal)).toFixed(2)}` : "–"} sub={usdcBal && usdtBal ? fmt(parseFloat(usdcBal) + parseFloat(usdtBal)) : undefined} />
               <StatCard label="PENDING TRANSFERS" value={`${merchantCounts?.pending ?? "–"}`} sub="awaiting deposit" highlight />
               <StatCard label="COMPLETED" value={`${merchantCounts?.completed ?? "–"}`} sub="fully fulfilled" />
             </div>
           ) : (
             <div className="grid grid-cols-4 gap-3">
-              <StatCard label="USDC BALANCE" value={balance ? `${parseFloat(balance).toFixed(2)}` : "–"} sub={balance ? fmt(parseFloat(balance)) : undefined} />
+              <StatCard label="TOKEN BALANCE" value={usdcBal && usdtBal ? `${(parseFloat(usdcBal) + parseFloat(usdtBal)).toFixed(2)}` : "–"} sub={usdcBal && usdtBal ? fmt(parseFloat(usdcBal) + parseFloat(usdtBal)) : undefined} />
               <StatCard label="ACTIVE TRANSFERS" value={`${activePledges}`} sub={maxActive !== null ? `of ${maxActive} max` : undefined} highlight />
               <StatCard label="MAX ACTIVE" value={maxActive !== null ? `${maxActive}` : "–"} sub="pledge cap" />
               <StatCard label="DEPOSIT REQUIRED" value={reqPct !== null ? `${reqPct}%` : "–"} sub="upfront" />
@@ -349,7 +352,7 @@ export default function Profile() {
               </div>
               <div className="mt-4 bg-[#0e1014] border border-[#1e2230] rounded-xl p-4">
                 <div className="text-[11px] text-[#555] tracking-[1px] mb-1">TOTAL RECEIVED</div>
-                <div className="text-2xl font-extrabold text-[#DDE048]">{merchantCounts.totalReceived.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
+                <div className="text-2xl font-extrabold text-[#DDE048]">{merchantCounts.totalReceived.toFixed(2)} <span className="text-sm text-[#555] font-normal">tokens</span></div>
                 <div className="text-xs text-[#555] mt-0.5">≈ {fmt(merchantCounts.totalReceived)}</div>
               </div>
             </div>
@@ -408,7 +411,7 @@ export default function Profile() {
                   </div>
                   <div>
                     <div className="font-semibold text-white text-sm">Wallet</div>
-                    <div className="text-[11px] text-[#555]">USDC balance & allowance</div>
+                    <div className="text-[11px] text-[#555]">USDC & USDT balance</div>
                   </div>
                 </div>
                 <ArrowRight size={16} color="#333" />
@@ -572,8 +575,8 @@ export default function Profile() {
           <Image src="/logo.png" alt="" width={90} height={90}
             style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", opacity: 0.06, filter: "grayscale(1)", objectFit: "contain", pointerEvents: "none" }}
           />
-          <div className="flex justify-between items-start relative">
-            <div>
+          <div className="flex items-center gap-3 relative">
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <div className="text-[10px] text-[#888] tracking-[1.5px]">
                   {isMerchant ? "MERCHANT RATING" : "TRUST SCORE"}
@@ -595,7 +598,7 @@ export default function Profile() {
                 }
               </div>
             </div>
-            {rep && <CircularScore score={rep.score} size={90} />}
+            {rep && <div className="shrink-0"><CircularScore score={rep.score} size={80} /></div>}
           </div>
         </div>
 
@@ -603,9 +606,9 @@ export default function Profile() {
         {isMerchant ? (
           <div className="flex gap-3 mb-3.5">
             <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
-              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">USDC BALANCE</div>
-              <div className="text-[28px] font-extrabold leading-none">{balance ? parseFloat(balance).toFixed(2) : "–"}</div>
-              {balance && <div className="text-[11px] text-[#888] mt-1">{fmt(parseFloat(balance))}</div>}
+              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">TOKEN BALANCE</div>
+              <div className="text-[28px] font-extrabold leading-none">{usdcBal && usdtBal ? (parseFloat(usdcBal) + parseFloat(usdtBal)).toFixed(2) : "–"}</div>
+              {usdcBal && usdtBal && <div className="text-[11px] text-[#888] mt-1">{fmt(parseFloat(usdcBal) + parseFloat(usdtBal))}</div>}
             </div>
             <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
               <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">PENDING</div>
@@ -616,9 +619,9 @@ export default function Profile() {
         ) : (
           <div className="flex gap-3 mb-3.5">
             <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
-              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">USDC BALANCE</div>
-              <div className="text-[28px] font-extrabold leading-none">{balance ? parseFloat(balance).toFixed(2) : "–"}</div>
-              {balance && <div className="text-[11px] text-[#888] mt-1">{fmt(parseFloat(balance))}</div>}
+              <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">TOKEN BALANCE</div>
+              <div className="text-[28px] font-extrabold leading-none">{usdcBal && usdtBal ? (parseFloat(usdcBal) + parseFloat(usdtBal)).toFixed(2) : "–"}</div>
+              {usdcBal && usdtBal && <div className="text-[11px] text-[#888] mt-1">{fmt(parseFloat(usdcBal) + parseFloat(usdtBal))}</div>}
             </div>
             <div className="flex-1 bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-[14px]">
               <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">ACTIVE CAP</div>
@@ -644,7 +647,7 @@ export default function Profile() {
             </div>
             <div className="bg-[#0d0f13] border border-[#1F2127] rounded-xl p-3">
               <div className="text-[10px] text-[#888] mb-1">TOTAL RECEIVED</div>
-              <div className="text-xl font-extrabold text-[#DDE048]">{merchantCounts.totalReceived.toFixed(2)} <span className="text-sm text-[#555] font-normal">USDC</span></div>
+              <div className="text-xl font-extrabold text-[#DDE048]">{merchantCounts.totalReceived.toFixed(2)} <span className="text-sm text-[#555] font-normal">tokens</span></div>
             </div>
           </div>
         ) : senderCounts && (

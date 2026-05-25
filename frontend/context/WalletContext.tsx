@@ -14,8 +14,10 @@ interface WalletContextType {
   connect: () => Promise<void>;
   disconnect: () => void;
   usdcRead: Contract;
+  usdtRead: Contract;
   pledgeRead: Contract;
   usdcWrite: Contract | null;
+  usdtWrite: Contract | null;
   pledgeWrite: Contract | null;
 }
 
@@ -85,8 +87,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const contracts = useMemo(() => ({
     usdcRead: new Contract(CONTRACTS.MOCK_USDC, MockUSDCABI, readProvider),
+    usdtRead: new Contract(CONTRACTS.MOCK_USDT, MockUSDCABI, readProvider),
     pledgeRead: new Contract(CONTRACTS.REMITTANCE_PLEDGE, RemittancePledgeABI, readProvider),
     usdcWrite: signer ? new Contract(CONTRACTS.MOCK_USDC, MockUSDCABI, signer) : null,
+    usdtWrite: signer ? new Contract(CONTRACTS.MOCK_USDT, MockUSDCABI, signer) : null,
     pledgeWrite: signer ? new Contract(CONTRACTS.REMITTANCE_PLEDGE, RemittancePledgeABI, signer) : null,
   }), [signer, readProvider]);
 

@@ -29,7 +29,7 @@ interface FormState {
 export default function NewTransfer() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { account, signer, pledgeRead, pledgeWrite, usdcRead, usdcWrite } = useWallet();
+  const { account, signer, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();
   const { fmt } = useCurrency();
 
   useEffect(() => {
@@ -62,6 +62,10 @@ export default function NewTransfer() {
   const [showPreview, setShowPreview] = useState(false);
   const [lockedFields, setLockedFields] = useState<Set<string>>(new Set());
   const [requiredPct, setRequiredPct] = useState(20);
+  const [feeBps, setFeeBps] = useState(100);
+  const [selectedToken, setSelectedToken] = useState<"USDC" | "USDT">("USDC");
+  const [usdcBalance, setUsdcBalance] = useState<string>("—");
+  const [usdtBalance, setUsdtBalance] = useState<string>("—");
   const [payInFull, setPayInFull] = useState(false);
   const [txStatus, setTxStatus] = useState("");
   const [txError, setTxError] = useState("");
@@ -76,10 +80,21 @@ export default function NewTransfer() {
 
   async function nextStep() {
     if (step === 0 && form.merchant) {
-      if (account) { const pct = await pledgeRead.getRequiredDepositPct(account); setRequiredPct(Number(pct)); }
+      if (account) {
+        const [pct, bps, uBal, tBal] = await Promise.all([
+          pledgeRead.getRequiredDepositPct(account),
+          pledgeRead.getServiceFeeBps(account),
+          usdcRead.balanceOf(account),
+          usdtRead.balanceOf(account),
+        ]);
+        setRequiredPct(Number(pct));
+        setFeeBps(Number(bps));
+        setUsdcBalance(parseFloat(ethers.formatUnits(uBal as bigint, 6)).toFixed(2));
+        setUsdtBalance(parseFloat(ethers.formatUnits(tBal as bigint, 6)).toFixed(2));
+      }
       setStep(1);
     } else if (step === 1 && form.totalAmount) {
-      if (!form.initialDeposit) setForm({ ...form, initialDeposit: ((parseFloat(form.totalAmount) * 1.01 * requiredPct) / 100).toFixed(2) });
+      if (!form.initialDeposit) setForm({ ...form, initialDeposit: ((parseFloat(form.totalAmount) * (1 + feeBps / 10000) * requiredPct) / 100).toFixed(2) });
       // Skip commitment date step if paying in full or deadline is locked by a payment request
       setStep(payInFull || requestPreview ? 3 : 2);
     } else if (step === 2 && form.commitmentDate) {
@@ -88,7 +103,10 @@ export default function NewTransfer() {
   }
 
   async function submit() {
-    if (!pledgeWrite || !usdcWrite || !signer) return;
+    const tokenRead = selectedToken === "USDC" ? usdcRead : usdtRead;
+    const tokenWrite = selectedToken === "USDC" ? usdcWrite : usdtWrite;
+    const tokenAddress = selectedToken === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
+    if (!pledgeWrite || !tokenWrite || !signer) return;
     const totalAmt = ethers.parseUnits(form.totalAmount, 6);
     const initDeposit = ethers.parseUnits(form.initialDeposit, 6);
     const commitTs = Math.floor(new Date(form.commitmentDate).getTime() / 1000);
@@ -96,29 +114,29 @@ export default function NewTransfer() {
     setLoading(true); setTxError("");
 
     try {
-      // Check balance
-      const balance: bigint = await usdcRead.balanceOf(account);
+      // Check balance of selected token
+      const balance: bigint = await tokenRead.balanceOf(account);
       if (balance < initDeposit) {
         const has = parseFloat(ethers.formatUnits(balance, 6)).toFixed(2);
         const needs = parseFloat(ethers.formatUnits(initDeposit, 6)).toFixed(2);
-        setTxError(`Insufficient USDC balance. You have ${has} USDC but need ${needs} USDC.`);
+        setTxError(`Insufficient ${selectedToken} balance. You have ${has} ${selectedToken} but need ${needs} ${selectedToken}.`);
         setLoading(false);
         return;
       }
 
       // Only approve if current allowance is less than the deposit needed
-      const allowance: bigint = await usdcRead.allowance(account, CONTRACTS.REMITTANCE_PLEDGE);
+      const allowance: bigint = await tokenRead.allowance(account, CONTRACTS.REMITTANCE_PLEDGE);
       if (allowance < initDeposit) {
         setTxStatus("approving");
-        const approveData = usdcWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, initDeposit]);
-        const approveTx = await signer.sendTransaction({ to: CONTRACTS.MOCK_USDC, data: approveData });
+        const approveData = tokenWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, initDeposit]);
+        const approveTx = await signer.sendTransaction({ to: tokenAddress, data: approveData });
         await approveTx.wait();
       } else {
         setTxStatus("approving"); // show as done immediately
       }
 
       setTxStatus("creating");
-      const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [form.merchant, totalAmt, initDeposit, commitTs]);
+      const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [tokenAddress, form.merchant, totalAmt, initDeposit, commitTs]);
       const createTx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
       await createTx.wait();
       savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note });
@@ -141,7 +159,7 @@ export default function NewTransfer() {
       d.setHours(9, 0, 0, 0);
       setForm((f) => ({
         ...f,
-        initialDeposit: parseFloat((parseFloat(f.totalAmount || "0") * 1.01).toFixed(6)).toFixed(2),
+        initialDeposit: parseFloat((parseFloat(f.totalAmount || "0") * (1 + feeBps / 10000)).toFixed(6)).toFixed(2),
         commitmentDate: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`,
       }));
     } else {
@@ -195,11 +213,11 @@ export default function NewTransfer() {
   }
 
   const total = parseFloat(form.totalAmount) || 0;
-  const gross = parseFloat((total * 1.01).toFixed(6));
+  const gross = parseFloat((total * (1 + feeBps / 10000)).toFixed(6));
   const deposit = parseFloat(form.initialDeposit) || 0;
   const remaining = Math.max(0, parseFloat((gross - deposit).toFixed(6)));
-  const fee = parseFloat((total * 0.01).toFixed(6));
-  const merchantReceives = total; // fee is added on top (gross = total × 1.01), merchant gets the full pledge amount
+  const fee = parseFloat((total * (feeBps / 10000)).toFixed(6));
+  const merchantReceives = total;
   const deadline = form.commitmentDate ? new Date(form.commitmentDate) : null;
   // Normalize Supabase timestamp (may use space instead of "T") before parsing
   const reqDeadline = requestPreview ? new Date(requestPreview.deadline.replace(" ", "T")) : null;
@@ -385,6 +403,39 @@ export default function NewTransfer() {
             </div>
             {step === 1 && (
               <div className="px-5 py-5 space-y-4">
+                {/* Token selector */}
+                <div>
+                  <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">TOKEN</label>
+                  <div className="flex gap-2">
+                    {(["USDC", "USDT"] as const).map((t) => {
+                      const bal = t === "USDC" ? usdcBalance : usdtBalance;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => setSelectedToken(t)}
+                          className={`flex-1 py-2.5 px-3 rounded-xl border text-sm font-bold transition-colors text-left ${selectedToken === t ? "bg-[#DDE048]/10 border-[#DDE048] text-[#DDE048]" : "bg-[#0e1014] border-[#1e2230] text-[#555] hover:border-[#333]"}`}
+                        >
+                          <div>{t}</div>
+                          <div className={`text-[11px] font-normal mt-0.5 ${selectedToken === t ? "text-[#DDE048]/70" : "text-[#444]"}`}>
+                            {bal} available
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* Fee tier badge */}
+                <div className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-[13px] border ${feeBps === 75 ? "bg-[#1a1e14] border-[#DDE048]/20 text-[#ccc]" : "bg-[#13161c] border-[#1e2230] text-[#888]"}`}>
+                  {feeBps === 75 ? <span className="text-base">⭐</span> : <Info size={13} color="#555" />}
+                  <div>
+                    <span className={feeBps === 75 ? "text-[#DDE048] font-bold" : "text-[#888]"}>
+                      {feeBps === 75 ? "Loyalty rate · 0.75%" : "Standard rate · 1%"}
+                    </span>
+                    <span className="text-[#555] ml-1.5 text-xs">
+                      {feeBps === 75 ? "— your trust score qualifies for a reduced fee" : "— reach 80%+ trust score for 0.75%"}
+                    </span>
+                  </div>
+                </div>
                 <div>
                   <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">TOTAL AMOUNT</label>
                   <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-4">
@@ -395,11 +446,11 @@ export default function NewTransfer() {
                       value={form.totalAmount}
                       onChange={(e) => {
                         const v = e.target.value;
-                        const g = parseFloat((parseFloat(v || "0") * 1.01).toFixed(6));
+                        const g = parseFloat((parseFloat(v || "0") * (1 + feeBps / 10000)).toFixed(6));
                         setForm({ ...form, totalAmount: v, initialDeposit: payInFull ? g.toFixed(2) : form.initialDeposit });
                       }}
                     />
-                    {form.totalAmount && <div className="text-xs text-[#555] mt-1">≈ {fmt(total)}</div>}
+                    {form.totalAmount && <div className="text-xs text-[#555] mt-1">{selectedToken} · ≈ {fmt(total)}</div>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 bg-[#1a1e14] border border-[#DDE048]/20 rounded-xl px-4 py-2.5 text-[13px] text-[#ccc]">
@@ -557,12 +608,13 @@ export default function NewTransfer() {
                     {form.merchantName && <ReviewRow label="To" value={form.merchantName} />}
                     <ReviewRow label="Wallet" value={`${form.merchant.slice(0, 10)}…${form.merchant.slice(-6)}`} />
                     {form.note && <ReviewRow label="Note" value={form.note} />}
-                    <ReviewRow label="Pledge amount" value={`${total.toFixed(2)} USDC`} />
-                    <ReviewRow label="Service fee (1%)" value={`${fee.toFixed(2)} USDC`} />
-                    <ReviewRow label="Total you pay" value={`${gross.toFixed(2)} USDC`} />
-                    <ReviewRow label="Lock now" value={`${deposit.toFixed(2)} USDC`} accent />
-                    <ReviewRow label="Remaining" value={remaining > 0 ? `${remaining.toFixed(2)} USDC` : "None"} />
-                    <ReviewRow label="Merchant receives" value={`${merchantReceives.toFixed(2)} USDC`} />
+                    <ReviewRow label="Token" value={selectedToken} />
+                    <ReviewRow label="Pledge amount" value={`${total.toFixed(2)} ${selectedToken}`} />
+                    <ReviewRow label={`Service fee (${feeBps / 100}%)`} value={`${fee.toFixed(2)} ${selectedToken}`} />
+                    <ReviewRow label="Total you pay" value={`${gross.toFixed(2)} ${selectedToken}`} />
+                    <ReviewRow label="Lock now" value={`${deposit.toFixed(2)} ${selectedToken}`} accent />
+                    <ReviewRow label="Remaining" value={remaining > 0 ? `${remaining.toFixed(2)} ${selectedToken}` : "None"} />
+                    <ReviewRow label="Merchant receives" value={`${merchantReceives.toFixed(2)} ${selectedToken}`} />
                     <ReviewRow label="Deadline" value={deadline ? deadline.toLocaleString() : "–"} last />
                   </div>
                 )}
@@ -667,15 +719,16 @@ export default function NewTransfer() {
               )}
 
               <div className="space-y-2.5 text-sm mb-4">
-                <SummaryRow label="Pledge amount" value={total > 0 ? `${total.toFixed(2)} USDC` : "—"} />
-                <SummaryRow label="Service fee (1%)" value={total > 0 ? `+ ${fee.toFixed(2)} USDC` : "—"} />
+                <SummaryRow label="Token" value={selectedToken} />
+                <SummaryRow label="Pledge amount" value={total > 0 ? `${total.toFixed(2)} ${selectedToken}` : "—"} />
+                <SummaryRow label={`Service fee (${feeBps / 100}%)`} value={total > 0 ? `+ ${fee.toFixed(2)} ${selectedToken}` : "—"} />
                 <div className="pt-2 border-t border-[#1e2230] pb-2">
-                  <SummaryRow label="Total you pay" value={gross > 0 ? `${gross.toFixed(2)} USDC` : "—"} bold />
+                  <SummaryRow label="Total you pay" value={gross > 0 ? `${gross.toFixed(2)} ${selectedToken}` : "—"} bold />
                 </div>
-                <SummaryRow label="Lock now" value={deposit > 0 ? `${deposit.toFixed(2)} USDC` : "—"} accent />
-                <SummaryRow label={`Due ${deadlineStr}`} value={remaining > 0 ? `${remaining.toFixed(2)} USDC` : (deposit > 0 ? "None" : "—")} />
+                <SummaryRow label="Lock now" value={deposit > 0 ? `${deposit.toFixed(2)} ${selectedToken}` : "—"} accent />
+                <SummaryRow label={`Due ${deadlineStr}`} value={remaining > 0 ? `${remaining.toFixed(2)} ${selectedToken}` : (deposit > 0 ? "None" : "—")} />
                 <div className="pt-2 border-t border-[#1e2230]">
-                  <SummaryRow label="Merchant receives" value={merchantReceives > 0 ? `${merchantReceives.toFixed(2)} USDC` : "—"} />
+                  <SummaryRow label="Merchant receives" value={merchantReceives > 0 ? `${merchantReceives.toFixed(2)} ${selectedToken}` : "—"} />
                 </div>
               </div>
 
@@ -788,6 +841,37 @@ export default function NewTransfer() {
         {step === 1 && (
           <div>
             <h2 className="text-2xl font-extrabold mb-[22px]">How much are you sending?</h2>
+            {/* Token selector — mobile */}
+            <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Token</label>
+            <div className="flex gap-2 mb-3.5">
+              {(["USDC", "USDT"] as const).map((t) => {
+                const bal = t === "USDC" ? usdcBalance : usdtBalance;
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setSelectedToken(t)}
+                    className={`flex-1 py-3 px-3 rounded-[14px] border text-sm font-bold transition-colors text-left ${selectedToken === t ? "bg-[#DDE048]/10 border-[#DDE048] text-[#DDE048]" : "bg-[#11141A] border-[#1F2127] text-[#555]"}`}
+                  >
+                    <div>{t}</div>
+                    <div className={`text-[11px] font-normal mt-0.5 ${selectedToken === t ? "text-[#DDE048]/70" : "text-[#444]"}`}>
+                      {bal} available
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Fee tier badge — mobile */}
+            <div className={`flex items-center gap-2 rounded-[14px] px-4 py-3 mb-3.5 border text-[13px] ${feeBps === 75 ? "bg-[#1a1e14] border-[#DDE048]/20" : "bg-[#11141A] border-[#1F2127]"}`}>
+              {feeBps === 75 ? <span>⭐</span> : <Info size={13} color="#555" />}
+              <div>
+                <span className={feeBps === 75 ? "text-[#DDE048] font-bold" : "text-[#888]"}>
+                  {feeBps === 75 ? "Loyalty rate · 0.75%" : "Standard rate · 1%"}
+                </span>
+                <div className="text-[11px] text-[#555] mt-0.5">
+                  {feeBps === 75 ? "Your trust score qualifies for a reduced fee" : "Reach 80%+ trust score for 0.75%"}
+                </div>
+              </div>
+            </div>
             <div className="bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-3 flex justify-between items-center mb-[18px]">
               <div>
                 {form.merchantName && <div className="font-semibold text-sm">{form.merchantName}</div>}
@@ -909,12 +993,13 @@ export default function NewTransfer() {
               {form.merchantName && <ReviewRow label="To" value={form.merchantName} />}
               <ReviewRow label="Wallet" value={`${form.merchant.slice(0, 10)}...${form.merchant.slice(-6)}`} />
               {form.note && <ReviewRow label="Note" value={form.note} />}
-              <ReviewRow label="Pledge amount" value={`${total.toFixed(2)} USDC`} />
-              <ReviewRow label="Service fee (1%)" value={`${fee.toFixed(2)} USDC`} />
-              <ReviewRow label="Total you pay" value={`${gross.toFixed(2)} USDC`} />
-              <ReviewRow label="Lock now" value={`${deposit.toFixed(2)} USDC`} accent />
-              <ReviewRow label="Remaining" value={remaining > 0 ? `${remaining.toFixed(2)} USDC` : "None"} />
-              <ReviewRow label="Merchant receives" value={`${merchantReceives.toFixed(2)} USDC`} />
+              <ReviewRow label="Token" value={selectedToken} />
+              <ReviewRow label="Pledge amount" value={`${total.toFixed(2)} ${selectedToken}`} />
+              <ReviewRow label={`Service fee (${feeBps / 100}%)`} value={`${fee.toFixed(2)} ${selectedToken}`} />
+              <ReviewRow label="Total you pay" value={`${gross.toFixed(2)} ${selectedToken}`} />
+              <ReviewRow label="Lock now" value={`${deposit.toFixed(2)} ${selectedToken}`} accent />
+              <ReviewRow label="Remaining" value={remaining > 0 ? `${remaining.toFixed(2)} ${selectedToken}` : "None"} />
+              <ReviewRow label="Merchant receives" value={`${merchantReceives.toFixed(2)} ${selectedToken}`} />
               <ReviewRow label="Deadline" value={deadline ? deadline.toLocaleString() : "–"} />
               <ReviewRow label="Equiv. value" value={fmt(total)} last />
             </div>

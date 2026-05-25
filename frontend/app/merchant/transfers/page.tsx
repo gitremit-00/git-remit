@@ -8,8 +8,14 @@ import LoadingSpinner from "../../../components/LoadingSpinner";
 import { useWallet } from "../../../context/WalletContext";
 import { useCurrency } from "../../../context/CurrencyContext";
 import { getPledgeMeta } from "../../../lib/pledgeMeta";
+import { CONTRACTS } from "../../../contracts/addresses";
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
+interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
+
+function tokenSymbol(addr: string): string {
+  if (addr?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
+  return "USDC";
+}
 interface SenderRep { score: number; total: number; defaults: number; }
 
 const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
@@ -142,9 +148,11 @@ export default function MerchantTransfers() {
             <tbody>
               {filtered.map((p) => {
                 const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
-                const gross = total * 1.01;
                 const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
+                const feeBps = Number(p.appliedFeeBps);
+                const gross = total * (1 + feeBps / 10000);
                 const remaining = Math.max(0, parseFloat((gross - locked).toFixed(6)));
+                const sym = tokenSymbol(p.token);
                 const status = STATUS[p.status];
                 const rep = senderReps[p.sender.toLowerCase()];
                 const meta = getPledgeMeta(p.sender);
@@ -162,7 +170,7 @@ export default function MerchantTransfers() {
                       </div>
                     </td>
                     <td className="px-5 py-4 font-mono text-[#555] text-xs">#{p.id.toString()}</td>
-                    <td className="px-5 py-4 font-bold text-white">{total.toFixed(2)} <span className="text-[#555] text-xs font-normal">USDC</span></td>
+                    <td className="px-5 py-4 font-bold text-white">{total.toFixed(2)} <span className="text-[#555] text-xs font-normal">{sym}</span></td>
                     <td className="px-5 py-4 text-[#888]">{locked.toFixed(2)}</td>
                     <td className="px-5 py-4 text-[#888]">{remaining.toFixed(2)}</td>
                     <td className="px-5 py-4">
@@ -233,6 +241,7 @@ export default function MerchantTransfers() {
         {filtered.map((p) => {
           const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
           const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
+          const sym = tokenSymbol(p.token);
           const status = STATUS[p.status];
           const rep = senderReps[p.sender.toLowerCase()];
           const meta = getPledgeMeta(p.sender);
@@ -255,8 +264,8 @@ export default function MerchantTransfers() {
                 </div>
                 <div className="flex justify-between items-end">
                   <div>
-                    <div className="text-xl font-extrabold text-white">{total.toFixed(2)} <span className="text-sm text-[#888] font-normal">USDC</span></div>
-                    <div className="text-xs text-[#666] mt-0.5">Locked: {locked.toFixed(2)} USDC · Due {fmtDate(p.commitmentDate)}</div>
+                    <div className="text-xl font-extrabold text-white">{total.toFixed(2)} <span className="text-sm text-[#888] font-normal">{sym}</span></div>
+                    <div className="text-xs text-[#666] mt-0.5">Locked: {locked.toFixed(2)} {sym} · Due {fmtDate(p.commitmentDate)}</div>
                   </div>
                   <span className="flex items-center gap-0.5 text-[#DDE048] text-xs font-semibold">View <ChevronRight size={13} /></span>
                 </div>

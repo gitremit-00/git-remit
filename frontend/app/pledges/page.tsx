@@ -9,6 +9,13 @@ import { useWallet } from "../../context/WalletContext";
 import ProgressBar from "../../components/ProgressBar";
 import { useCurrency } from "../../context/CurrencyContext";
 import { getPledgeMeta } from "../../lib/pledgeMeta";
+import { CONTRACTS } from "../../contracts/addresses";
+
+function tokenSymbol(addr: string) {
+  if (addr.toLowerCase() === CONTRACTS.MOCK_USDC.toLowerCase()) return "USDC";
+  if (addr.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
+  return "TOKEN";
+}
 
 const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
 const STATUS_COLOR: Record<string, string> = { PENDING: "#f59e0b", COMPLETED: "#22c55e", DEFAULTED: "#ef4444", CANCELLED: "#888" };
@@ -23,7 +30,7 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
 const TABS = ["All", "Sent", "Received"] as const;
 type Tab = typeof TABS[number];
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
+interface PledgeRaw { id: bigint; sender: string; merchant: string; token: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; }
 
 function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
@@ -111,8 +118,10 @@ export default function Pledges() {
                 const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
                 const rawLocked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
                 const locked = Number(p.status) === 1 ? total : rawLocked;
-                const gross = total * 1.01;
+                const feeBps = Number(p.appliedFeeBps);
+                const gross = total * (1 + feeBps / 10000);
                 const status = STATUS[p.status];
+                const sym = tokenSymbol(p.token);
                 const isSent = account?.toLowerCase() === p.sender.toLowerCase();
                 const counterparty = isSent ? p.merchant : p.sender;
                 const meta = getPledgeMeta(counterparty);
@@ -126,7 +135,7 @@ export default function Pledges() {
                     </td>
                     <td className="px-5 py-4 font-mono text-[#555] text-xs">#{p.id.toString()}</td>
                     <td className="px-5 py-4">
-                      <div className="font-bold text-white">{total.toFixed(2)} <span className="text-[#555] text-xs font-normal">USDC</span></div>
+                      <div className="font-bold text-white">{total.toFixed(2)} <span className="text-[#555] text-xs font-normal">{sym}</span></div>
                       <div className="text-[10px] text-[#555]">{fmt(total)}</div>
                     </td>
                     <td className="px-5 py-4 text-[#DDE048] font-semibold">{locked.toFixed(2)}</td>
@@ -197,6 +206,7 @@ export default function Pledges() {
           const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
           const locked = Number(p.status) === 1 ? total : parseFloat(ethers.formatUnits(p.depositedAmount, 6));
           const status = STATUS[p.status];
+          const sym = tokenSymbol(p.token);
           const days = daysLeft(p.commitmentDate);
           const deadline = new Date(Number(p.commitmentDate) * 1000);
           const isSent = account?.toLowerCase() === p.sender.toLowerCase();
@@ -214,7 +224,7 @@ export default function Pledges() {
                   {status}
                 </span>
               </div>
-              <div className="text-[26px] font-extrabold mb-0.5">{total.toFixed(2)} <span className="text-sm text-[#888]">USDC</span></div>
+              <div className="text-[26px] font-extrabold mb-0.5">{total.toFixed(2)} <span className="text-sm text-[#888]">{sym}</span></div>
               <div className="text-xs text-[#888] mb-2">= {fmt(total)}</div>
               <ProgressBar locked={locked} total={total} />
               <div className="flex justify-between text-[11px] text-[#888] mt-0.5">
