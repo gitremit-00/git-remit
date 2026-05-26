@@ -13,6 +13,8 @@ const GRACE_PERIOD = 3 * 24 * 60 * 60;
 const CLAIM_WINDOW = 30 * 24 * 60 * 60;
 const TIME_BUFFER = 15 * 60;
 const DAY = 24 * 60 * 60;
+const INTERVAL_30D = 30 * DAY;
+const INTERVAL_7D  = 7 * DAY;
 
 describe("RemittancePledge", function () {
   let usdc, usdt, pledge;
@@ -35,6 +37,40 @@ describe("RemittancePledge", function () {
       ]
     );
     return merchant.signMessage(ethers.getBytes(hash));
+  }
+
+  // Helper: merchant signs a recurring cancellation approval
+  async function signCancelRecurring(recurringId, sigExpiry, nonce) {
+    const hash = ethers.solidityPackedKeccak256(
+      ["uint256", "address", "string", "uint256", "uint256", "uint256"],
+      [
+        (await ethers.provider.getNetwork()).chainId,
+        pledgeAddr,
+        "cancelRecurring",
+        recurringId,
+        sigExpiry,
+        nonce,
+      ]
+    );
+    return merchant.signMessage(ethers.getBytes(hash));
+  }
+
+  // Helper: create a standard recurring pledge (100/month, 30d interval, 3 periods)
+  async function createStandardRecurring(periods = 3, amountPerPeriod = 100) {
+    const amount = UNITS(amountPerPeriod);
+    const firstDueDate = (await time.latest()) + INTERVAL_30D;
+    await pledge
+      .connect(sender)
+      .createRecurringPledge(usdcAddr, merchant.address, amount, INTERVAL_30D, periods, firstDueDate);
+    return { amount, firstDueDate, periods };
+  }
+
+  // Helper: approve and pay one installment
+  async function payInstallment(recurringId, amount) {
+    const feeBps = (await pledge.recurringPledges(recurringId)).appliedFeeBps;
+    const gross = amount + (amount * feeBps) / 10000n;
+    await usdc.connect(sender).approve(pledgeAddr, gross);
+    await pledge.connect(sender).payInstallment(recurringId);
   }
 
   // Helper: merchant signs a cancellation approval
@@ -790,6 +826,552 @@ describe("RemittancePledge", function () {
       const maxFaucet = await usdc.MAX_FAUCET();
       await expect(usdc.faucet(sender.address, maxFaucet + 1n))
         .to.be.revertedWith("Faucet: amount too large");
+    });
+  });
+
+  // ── createRecurringPledge ─────────────────────────────────────────────────────
+  describe("createRecurringPledge", function () {
+    it("creates a recurring pledge and stores correct state", async function () {
+      const { amount, firstDueDate, periods } = await createStandardRecurring();
+      const rp = await pledge.getRecurringPledge(1);
+      expect(rp.sender).to.equal(sender.address);
+      expect(rp.merchant).to.equal(merchant.address);
+      expect(rp.token).to.equal(usdcAddr);
+      expect(rp.amountPerPeriod).to.equal(amount);
+      expect(rp.totalPeriods).to.equal(periods);
+      expect(rp.periodsCompleted).to.equal(0);
+      expect(rp.missedCount).to.equal(0);
+      expect(rp.totalMissedDebt).to.equal(0);
+      expect(rp.nextDueDate).to.equal(firstDueDate);
+      expect(rp.status).to.equal(0); // ACTIVE
+    });
+
+    it("increments activePledgeCount", async function () {
+      await createStandardRecurring();
+      expect(await pledge.activePledgeCount(sender.address)).to.equal(1);
+    });
+
+    it("emits RecurringPledgeCreated", async function () {
+      const amount = UNITS(100);
+      const firstDueDate = (await time.latest()) + INTERVAL_30D;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(usdcAddr, merchant.address, amount, INTERVAL_30D, 3, firstDueDate)
+      ).to.emit(pledge, "RecurringPledgeCreated");
+    });
+
+    it("reverts on unsupported token", async function () {
+      const rogue = await (await ethers.getContractFactory("MockUSDC")).deploy();
+      const firstDueDate = (await time.latest()) + INTERVAL_30D;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(await rogue.getAddress(), merchant.address, UNITS(100), INTERVAL_30D, 3, firstDueDate)
+      ).to.be.revertedWith("Token not supported");
+    });
+
+    it("reverts on zero merchant address", async function () {
+      const firstDueDate = (await time.latest()) + INTERVAL_30D;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(usdcAddr, ethers.ZeroAddress, UNITS(100), INTERVAL_30D, 3, firstDueDate)
+      ).to.be.revertedWith("Invalid merchant address");
+    });
+
+    it("reverts when sender is the merchant", async function () {
+      const firstDueDate = (await time.latest()) + INTERVAL_30D;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(usdcAddr, sender.address, UNITS(100), INTERVAL_30D, 3, firstDueDate)
+      ).to.be.revertedWith("Sender cannot be merchant");
+    });
+
+    it("reverts when amount is below minimum", async function () {
+      const firstDueDate = (await time.latest()) + INTERVAL_30D;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(usdcAddr, merchant.address, UNITS(0.5), INTERVAL_30D, 3, firstDueDate)
+      ).to.be.revertedWith("Amount below minimum");
+    });
+
+    it("reverts when interval is below 7 days", async function () {
+      const firstDueDate = (await time.latest()) + INTERVAL_30D;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(usdcAddr, merchant.address, UNITS(100), INTERVAL_7D - 1, 3, firstDueDate)
+      ).to.be.revertedWith("Interval too short");
+    });
+
+    it("reverts when totalPeriods is zero", async function () {
+      const firstDueDate = (await time.latest()) + INTERVAL_30D;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(usdcAddr, merchant.address, UNITS(100), INTERVAL_30D, 0, firstDueDate)
+      ).to.be.revertedWith("Invalid period count");
+    });
+
+    it("reverts when totalPeriods exceeds 12", async function () {
+      const firstDueDate = (await time.latest()) + INTERVAL_30D;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(usdcAddr, merchant.address, UNITS(100), INTERVAL_30D, 13, firstDueDate)
+      ).to.be.revertedWith("Invalid period count");
+    });
+
+    it("reverts when firstDueDate is in the past", async function () {
+      const past = (await time.latest()) - DAY;
+      await expect(
+        pledge.connect(sender).createRecurringPledge(usdcAddr, merchant.address, UNITS(100), INTERVAL_30D, 3, past)
+      ).to.be.revertedWith("First due date must be in future");
+    });
+
+    it("reverts when active pledge limit is reached", async function () {
+      await createStandardRecurring();
+      await createStandardRecurring();
+      await expect(createStandardRecurring())
+        .to.be.revertedWith("Active pledge limit reached for your trust tier");
+    });
+
+    it("getRecurringPledge reverts on nonexistent id", async function () {
+      await expect(pledge.getRecurringPledge(999)).to.be.revertedWith("Recurring pledge does not exist");
+    });
+  });
+
+  // ── payInstallment ────────────────────────────────────────────────────────────
+  describe("payInstallment", function () {
+    it("pays the first installment and releases to merchant", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate);
+      const before = await usdc.balanceOf(merchant.address);
+      await payInstallment(1, amount);
+      expect(await usdc.balanceOf(merchant.address) - before).to.equal(amount);
+    });
+
+    it("increments periodsCompleted and advances nextDueDate", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate);
+      await payInstallment(1, amount);
+      const rp = await pledge.recurringPledges(1);
+      expect(rp.periodsCompleted).to.equal(1);
+      expect(rp.nextDueDate).to.equal(BigInt(firstDueDate) + BigInt(INTERVAL_30D));
+    });
+
+    it("emits InstallmentPaid", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate);
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await expect(pledge.connect(sender).payInstallment(1))
+        .to.emit(pledge, "InstallmentPaid")
+        .withArgs(1, sender.address, 1, amount);
+    });
+
+    it("allows early payment before the due date", async function () {
+      const { amount } = await createStandardRecurring();
+      // pay before firstDueDate — should succeed
+      await payInstallment(1, amount);
+      const rp = await pledge.recurringPledges(1);
+      expect(rp.periodsCompleted).to.equal(1);
+    });
+
+    it("marks late when paid after due date but within grace", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate + DAY);
+      await payInstallment(1, amount);
+      const rep = await pledge.getReputation(sender.address);
+      expect(rep.lateCount).to.equal(1);
+    });
+
+    it("collects fee on each installment", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate);
+      const before = await usdc.balanceOf(feeRecipient.address);
+      await payInstallment(1, amount);
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const expectedFee = (amount * feeBps) / 10000n;
+      expect(await usdc.balanceOf(feeRecipient.address) - before).to.equal(expectedFee);
+    });
+
+    it("auto-completes when last period is paid with no missed debt", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring(2);
+      await time.increaseTo(firstDueDate);
+      await payInstallment(1, amount);
+      await time.increase(INTERVAL_30D);
+      await payInstallment(1, amount);
+      const rp = await pledge.recurringPledges(1);
+      expect(rp.status).to.equal(2); // COMPLETED
+    });
+
+    it("moves to PENDING_SETTLEMENT when last period is paid but debt exists", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring(2);
+      // miss period 1
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      // pay period 2 — land on the due date, not past grace
+      await time.increaseTo(firstDueDate + INTERVAL_30D);
+      await payInstallment(1, amount);
+      const rp = await pledge.recurringPledges(1);
+      expect(rp.status).to.equal(1); // PENDING_SETTLEMENT
+    });
+
+    it("reverts after grace period ends", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await expect(pledge.connect(sender).payInstallment(1))
+        .to.be.revertedWith("Grace period has ended - use markMissedInstallment");
+    });
+
+    it("reverts when called by non-sender", async function () {
+      await createStandardRecurring();
+      await expect(pledge.connect(outsider).payInstallment(1))
+        .to.be.revertedWith("Only sender can pay");
+    });
+
+    it("reverts on nonexistent recurring pledge", async function () {
+      await expect(pledge.connect(sender).payInstallment(999))
+        .to.be.revertedWith("Recurring pledge does not exist");
+    });
+
+    it("reverts when pledge is no longer active", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring(1);
+      await time.increaseTo(firstDueDate);
+      await payInstallment(1, amount);
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await expect(pledge.connect(sender).payInstallment(1))
+        .to.be.revertedWith("Pledge not active");
+    });
+  });
+
+  // ── markMissedInstallment ─────────────────────────────────────────────────────
+  describe("markMissedInstallment", function () {
+    it("records missed installment and advances schedule", async function () {
+      const { firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      const rp = await pledge.recurringPledges(1);
+      expect(rp.missedCount).to.equal(1);
+      expect(rp.totalMissedDebt).to.equal(UNITS(100));
+      expect(rp.nextDueDate).to.equal(BigInt(firstDueDate) + BigInt(INTERVAL_30D));
+    });
+
+    it("records a default against sender reputation", async function () {
+      const { firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      const rep = await pledge.getReputation(sender.address);
+      expect(rep.defaultCount).to.equal(1);
+    });
+
+    it("emits InstallmentMissed", async function () {
+      const { firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await expect(pledge.connect(merchant).markMissedInstallment(1))
+        .to.emit(pledge, "InstallmentMissed")
+        .withArgs(1, 1, UNITS(100));
+    });
+
+    it("only defaults that period — schedule continues for next period", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring(3);
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      // pay period 2 — land on its due date, not past grace
+      await time.increaseTo(firstDueDate + INTERVAL_30D);
+      await payInstallment(1, amount);
+      const rp = await pledge.recurringPledges(1);
+      expect(rp.periodsCompleted).to.equal(1);
+      expect(rp.missedCount).to.equal(1);
+      expect(rp.status).to.equal(0); // still ACTIVE
+    });
+
+    it("moves to PENDING_SETTLEMENT when last period is missed", async function () {
+      const { firstDueDate } = await createStandardRecurring(1);
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      const rp = await pledge.recurringPledges(1);
+      expect(rp.status).to.equal(1); // PENDING_SETTLEMENT
+    });
+
+    it("reverts before grace period ends", async function () {
+      const { firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate + DAY);
+      await expect(pledge.connect(merchant).markMissedInstallment(1))
+        .to.be.revertedWith("Grace period not over yet");
+    });
+
+    it("reverts when called by non-merchant", async function () {
+      const { firstDueDate } = await createStandardRecurring();
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await expect(pledge.connect(outsider).markMissedInstallment(1))
+        .to.be.revertedWith("Only merchant can mark missed");
+    });
+
+    it("reverts on nonexistent recurring pledge", async function () {
+      await expect(pledge.connect(merchant).markMissedInstallment(999))
+        .to.be.revertedWith("Recurring pledge does not exist");
+    });
+
+    it("reverts when pledge is no longer active", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring(1);
+      await time.increaseTo(firstDueDate);
+      await payInstallment(1, amount);
+      await expect(pledge.connect(merchant).markMissedInstallment(1))
+        .to.be.revertedWith("Pledge not active");
+    });
+  });
+
+  // ── settleDebt ────────────────────────────────────────────────────────────────
+  describe("settleDebt", function () {
+    // Helper: create a pledge with one missed installment ready for settlement
+    async function createPendingSettlement() {
+      const { amount, firstDueDate } = await createStandardRecurring(1);
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      return { amount };
+    }
+
+    it("settles debt and releases full amount to merchant", async function () {
+      const { amount } = await createPendingSettlement();
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      const before = await usdc.balanceOf(merchant.address);
+      await pledge.connect(sender).settleDebt(1);
+      expect(await usdc.balanceOf(merchant.address) - before).to.equal(amount);
+    });
+
+    it("marks the pledge as COMPLETED after settlement", async function () {
+      const { amount } = await createPendingSettlement();
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await pledge.connect(sender).settleDebt(1);
+      expect((await pledge.recurringPledges(1)).status).to.equal(2); // COMPLETED
+    });
+
+    it("clears totalMissedDebt after settlement", async function () {
+      const { amount } = await createPendingSettlement();
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await pledge.connect(sender).settleDebt(1);
+      expect((await pledge.recurringPledges(1)).totalMissedDebt).to.equal(0);
+    });
+
+    it("emits DebtSettled and RecurringPledgeCompleted", async function () {
+      const { amount } = await createPendingSettlement();
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await expect(pledge.connect(sender).settleDebt(1))
+        .to.emit(pledge, "DebtSettled")
+        .and.to.emit(pledge, "RecurringPledgeCompleted");
+    });
+
+    it("decrements activePledgeCount after settlement", async function () {
+      const { amount } = await createPendingSettlement();
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await pledge.connect(sender).settleDebt(1);
+      expect(await pledge.activePledgeCount(sender.address)).to.equal(0);
+    });
+
+    it("collects fee on settlement", async function () {
+      const { amount } = await createPendingSettlement();
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      const expectedFee = (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      const before = await usdc.balanceOf(feeRecipient.address);
+      await pledge.connect(sender).settleDebt(1);
+      expect(await usdc.balanceOf(feeRecipient.address) - before).to.equal(expectedFee);
+    });
+
+    it("reverts when called by non-sender", async function () {
+      await createPendingSettlement();
+      await expect(pledge.connect(outsider).settleDebt(1))
+        .to.be.revertedWith("Only sender can settle");
+    });
+
+    it("reverts when status is not PENDING_SETTLEMENT", async function () {
+      await createStandardRecurring();
+      await expect(pledge.connect(sender).settleDebt(1))
+        .to.be.revertedWith("No debt to settle");
+    });
+
+    it("reverts on nonexistent recurring pledge", async function () {
+      await expect(pledge.connect(sender).settleDebt(999))
+        .to.be.revertedWith("Recurring pledge does not exist");
+    });
+  });
+
+  // ── cancelRecurring ───────────────────────────────────────────────────────────
+  describe("cancelRecurring", function () {
+    it("cancels with a valid merchant signature", async function () {
+      await createStandardRecurring();
+      const sigExpiry = (await time.latest()) + DAY;
+      const sig = await signCancelRecurring(1, sigExpiry, 0);
+      await pledge.connect(sender).cancelRecurring(1, sigExpiry, sig);
+      expect((await pledge.recurringPledges(1)).status).to.equal(3); // CANCELLED
+    });
+
+    it("forgives missed debt on cancellation", async function () {
+      const { firstDueDate } = await createStandardRecurring(3);
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      const sigExpiry = (await time.latest()) + DAY;
+      const sig = await signCancelRecurring(1, sigExpiry, 0);
+      await pledge.connect(sender).cancelRecurring(1, sigExpiry, sig);
+      expect((await pledge.recurringPledges(1)).totalMissedDebt).to.equal(0);
+      expect((await pledge.recurringPledges(1)).status).to.equal(3); // CANCELLED
+    });
+
+    it("decrements activePledgeCount on cancellation", async function () {
+      await createStandardRecurring();
+      const sigExpiry = (await time.latest()) + DAY;
+      const sig = await signCancelRecurring(1, sigExpiry, 0);
+      await pledge.connect(sender).cancelRecurring(1, sigExpiry, sig);
+      expect(await pledge.activePledgeCount(sender.address)).to.equal(0);
+    });
+
+    it("can cancel a PENDING_SETTLEMENT pledge", async function () {
+      const { firstDueDate } = await createStandardRecurring(1);
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      expect((await pledge.recurringPledges(1)).status).to.equal(1); // PENDING_SETTLEMENT
+      const sigExpiry = (await time.latest()) + DAY;
+      const sig = await signCancelRecurring(1, sigExpiry, 0);
+      await pledge.connect(sender).cancelRecurring(1, sigExpiry, sig);
+      expect((await pledge.recurringPledges(1)).status).to.equal(3); // CANCELLED
+    });
+
+    it("emits RecurringPledgeCancelled", async function () {
+      await createStandardRecurring();
+      const sigExpiry = (await time.latest()) + DAY;
+      const sig = await signCancelRecurring(1, sigExpiry, 0);
+      await expect(pledge.connect(sender).cancelRecurring(1, sigExpiry, sig))
+        .to.emit(pledge, "RecurringPledgeCancelled");
+    });
+
+    it("reverts with an invalid signature", async function () {
+      await createStandardRecurring();
+      const sigExpiry = (await time.latest()) + DAY;
+      const hash = ethers.solidityPackedKeccak256(
+        ["uint256", "address", "string", "uint256", "uint256", "uint256"],
+        [(await ethers.provider.getNetwork()).chainId, pledgeAddr, "cancelRecurring", 1, sigExpiry, 0]
+      );
+      const badSig = await outsider.signMessage(ethers.getBytes(hash));
+      await expect(pledge.connect(sender).cancelRecurring(1, sigExpiry, badSig))
+        .to.be.revertedWith("Invalid merchant signature");
+    });
+
+    it("reverts when signature has expired", async function () {
+      await createStandardRecurring();
+      const sigExpiry = (await time.latest()) - 1;
+      const sig = await signCancelRecurring(1, sigExpiry, 0);
+      await expect(pledge.connect(sender).cancelRecurring(1, sigExpiry, sig))
+        .to.be.revertedWith("Signature expired");
+    });
+
+    it("reverts when called by non-sender", async function () {
+      await createStandardRecurring();
+      const sigExpiry = (await time.latest()) + DAY;
+      const sig = await signCancelRecurring(1, sigExpiry, 0);
+      await expect(pledge.connect(outsider).cancelRecurring(1, sigExpiry, sig))
+        .to.be.revertedWith("Only sender can cancel");
+    });
+
+    it("reverts when already cancelled", async function () {
+      await createStandardRecurring();
+      const sigExpiry = (await time.latest()) + DAY;
+      const sig = await signCancelRecurring(1, sigExpiry, 0);
+      await pledge.connect(sender).cancelRecurring(1, sigExpiry, sig);
+      const sig2 = await signCancelRecurring(1, sigExpiry, 1);
+      await expect(pledge.connect(sender).cancelRecurring(1, sigExpiry, sig2))
+        .to.be.revertedWith("Pledge not cancellable");
+    });
+
+    it("reverts on nonexistent recurring pledge", async function () {
+      const sigExpiry = (await time.latest()) + DAY;
+      const sig = await signCancelRecurring(999, sigExpiry, 0);
+      await expect(pledge.connect(sender).cancelRecurring(999, sigExpiry, sig))
+        .to.be.revertedWith("Recurring pledge does not exist");
+    });
+  });
+
+  // ── Recurring reputation ──────────────────────────────────────────────────────
+  describe("recurring pledge reputation", function () {
+    it("builds partial reputation per on-time installment", async function () {
+      const { amount } = await createStandardRecurring(3);
+      // pay early — guaranteed before due date so onTimeCount increments
+      await payInstallment(1, amount);
+      const rep = await pledge.getReputation(sender.address);
+      expect(rep.onTimeCount).to.equal(1);
+    });
+
+    it("grants completion bonus when all periods paid with no debt", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring(2);
+      await time.increaseTo(firstDueDate);
+      await payInstallment(1, amount);
+      await time.increase(INTERVAL_30D);
+      await payInstallment(1, amount);
+      // Trust score should be above 0 after full completion
+      expect(await pledge.getTrustScore(sender.address)).to.be.gt(0);
+    });
+
+    it("no completion bonus until settleDebt is called on a missed pledge", async function () {
+      const { amount, firstDueDate } = await createStandardRecurring(2);
+      // miss period 1
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      // pay period 2 — land on its due date, moves to PENDING_SETTLEMENT
+      await time.increaseTo(firstDueDate + INTERVAL_30D);
+      await payInstallment(1, amount);
+      const scoreBefore = await pledge.getTrustScore(sender.address);
+      // settle
+      const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
+      const gross = amount + (amount * feeBps) / 10000n;
+      await usdc.connect(sender).approve(pledgeAddr, gross);
+      await pledge.connect(sender).settleDebt(1);
+      const scoreAfter = await pledge.getTrustScore(sender.address);
+      expect(scoreAfter).to.be.gte(scoreBefore);
+    });
+
+    it("missed installments record defaults that reduce trust score", async function () {
+      const { firstDueDate } = await createStandardRecurring(3);
+      await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
+      await pledge.connect(merchant).markMissedInstallment(1);
+      const rep = await pledge.getReputation(sender.address);
+      expect(rep.defaultCount).to.equal(1);
+    });
+  });
+
+  // ── Recurring view functions ──────────────────────────────────────────────────
+  describe("recurring view functions", function () {
+    it("getSenderRecurringPledges returns correct ids", async function () {
+      await createStandardRecurring();
+      const ids = await pledge.getSenderRecurringPledges(sender.address);
+      expect(ids.length).to.equal(1);
+      expect(ids[0]).to.equal(1n);
+    });
+
+    it("getMerchantRecurringPledges returns correct ids", async function () {
+      await createStandardRecurring();
+      const ids = await pledge.getMerchantRecurringPledges(merchant.address);
+      expect(ids.length).to.equal(1);
+      expect(ids[0]).to.equal(1n);
+    });
+
+    it("getSenderRecurringPledgesPaginated returns correct slice", async function () {
+      await createStandardRecurring();
+      await createStandardRecurring();
+      const [page, total] = await pledge.getSenderRecurringPledgesPaginated(sender.address, 0, 1);
+      expect(total).to.equal(2);
+      expect(page.length).to.equal(1);
+    });
+
+    it("getMerchantRecurringPledgesPaginated handles offset beyond range", async function () {
+      await createStandardRecurring();
+      const [page, total] = await pledge.getMerchantRecurringPledgesPaginated(merchant.address, 5, 10);
+      expect(total).to.equal(1);
+      expect(page.length).to.equal(0);
     });
   });
 });

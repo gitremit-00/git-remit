@@ -2,7 +2,7 @@
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, ReactNode } from "react";
 import { ethers, Contract, JsonRpcProvider, BrowserProvider, Signer } from "ethers";
 import { MORPH_TESTNET, CONTRACTS } from "../contracts/addresses";
-import MockUSDCABI from "../contracts/MockUSDC.json";
+import MockUSDCABI from "../contracts/MockTokens.json";
 import RemittancePledgeABI from "../contracts/RemittancePledge.json";
 
 interface WalletContextType {

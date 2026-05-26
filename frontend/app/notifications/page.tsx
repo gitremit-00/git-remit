@@ -8,7 +8,7 @@ import { useWallet } from "../../context/WalletContext";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { CONTRACTS } from "../../contracts/addresses";
 import RemittancePledgeABI from "../../contracts/RemittancePledge.json";
-import MockUSDCABI from "../../contracts/MockUSDC.json";
+import MockUSDCABI from "../../contracts/MockTokens.json";
 import { getSenderNotifications, markNotificationRead, type PaymentRequestNotification } from "../../lib/supabase";
 
 interface ActivityItem {

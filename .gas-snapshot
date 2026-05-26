@@ -1,0 +1,6 @@
+RemittancePledgeFuzzTest:testFuzz_completionConservesMoney(uint256) (runs: 1000, μ: 881198, ~: 881428)
+RemittancePledgeFuzzTest:testFuzz_depositPctAlwaysValidTier(address) (runs: 1000, μ: 10992, ~: 10992)
+RemittancePledgeFuzzTest:testFuzz_escrowBalanceMatchesDeposit(uint256,uint256) (runs: 1000, μ: 749215, ~: 747213)
+RemittancePledgeFuzzTest:testFuzz_feeBpsAlwaysValidTier(address) (runs: 1000, μ: 11839, ~: 11839)
+RemittancePledgeFuzzTest:testFuzz_grossNeverBelowNet(uint256) (runs: 1000, μ: 18177, ~: 18407)
+RemittancePledgeFuzzTest:testFuzz_grossNoOverflow(uint256) (runs: 1000, μ: 16847, ~: 17077)

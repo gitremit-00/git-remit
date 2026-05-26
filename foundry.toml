@@ -1,8 +1,13 @@
 [profile.default]
 src = "contracts"
-test = "test-foundry"
+test = "test/foundry"
 libs = ["node_modules", "lib"]
 solc = "0.8.24"
+via_ir = true
 
 [fuzz]
 runs = 1000
+
+[invariant]
+runs = 64
+depth = 30

@@ -1,0 +1,633 @@
+'npx hardhat clean' running (wd: C:\Users\new user\git-remit)
+'npx hardhat clean --global' running (wd: C:\Users\new user\git-remit)
+'npx hardhat compile --force' running (wd: C:\Users\new user\git-remit)
+INFO:Printers:
+Contract Ownable
++----------------------+-------------------------+--------------------------+
+| Function             | State variables written | Conditions on msg.sender |
++----------------------+-------------------------+--------------------------+
+| _msgSender           | []                      | []                       |
+| _msgData             | []                      | []                       |
+| _contextSuffixLength | []                      | []                       |
+| constructor          | ['_owner']              | []                       |
+| owner                | []                      | []                       |
+| _checkOwner          | []                      | []                       |
+| renounceOwnership    | ['_owner']              | []                       |
+| transferOwnership    | ['_owner']              | []                       |
+| _transferOwnership   | ['_owner']              | []                       |
++----------------------+-------------------------+--------------------------+
+
+Contract Ownable2Step
++----------------------+-----------------------------+--------------------------+
+| Function             | State variables written     | Conditions on msg.sender |
++----------------------+-----------------------------+--------------------------+
+| constructor          | ['_owner', '_pendingOwner'] | []                       |
+| owner                | []                          | []                       |
+| _checkOwner          | []                          | []                       |
+| renounceOwnership    | ['_owner', '_pendingOwner'] | []                       |
+| transferOwnership    | ['_owner', '_pendingOwner'] | []                       |
+| _transferOwnership   | ['_owner']                  | []                       |
+| _msgSender           | []                          | []                       |
+| _msgData             | []                          | []                       |
+| _contextSuffixLength | []                          | []                       |
+| pendingOwner         | []                          | []                       |
+| transferOwnership    | ['_pendingOwner']           | []                       |
+| _transferOwnership   | ['_owner', '_pendingOwner'] | []                       |
+| acceptOwnership      | ['_owner', '_pendingOwner'] | []                       |
++----------------------+-----------------------------+--------------------------+
+
+Contract IERC1363
++---------------------+-------------------------+--------------------------+
+| Function            | State variables written | Conditions on msg.sender |
++---------------------+-------------------------+--------------------------+
+| supportsInterface   | []                      | []                       |
+| totalSupply         | []                      | []                       |
+| balanceOf           | []                      | []                       |
+| transfer            | []                      | []                       |
+| allowance           | []                      | []                       |
+| approve             | []                      | []                       |
+| transferFrom        | []                      | []                       |
+| transferAndCall     | []                      | []                       |
+| transferAndCall     | []                      | []                       |
+| transferFromAndCall | []                      | []                       |
+| transferFromAndCall | []                      | []                       |
+| approveAndCall      | []                      | []                       |
+| approveAndCall      | []                      | []                       |
++---------------------+-------------------------+--------------------------+
+
+Contract IERC20Errors
++----------+-------------------------+--------------------------+
+| Function | State variables written | Conditions on msg.sender |
++----------+-------------------------+--------------------------+
++----------+-------------------------+--------------------------+
+
+Contract IERC721Errors
++----------+-------------------------+--------------------------+
+| Function | State variables written | Conditions on msg.sender |
++----------+-------------------------+--------------------------+
++----------+-------------------------+--------------------------+
+
+Contract IERC1155Errors
++----------+-------------------------+--------------------------+
+| Function | State variables written | Conditions on msg.sender |
++----------+-------------------------+--------------------------+
++----------+-------------------------+--------------------------+
+
+Contract ERC20
++----------------------+----------------------------------------------+--------------------------+
+| Function             | State variables written                      | Conditions on msg.sender |
++----------------------+----------------------------------------------+--------------------------+
+| name                 | []                                           | []                       |
+| symbol               | []                                           | []                       |
+| decimals             | []                                           | []                       |
+| totalSupply          | []                                           | []                       |
+| balanceOf            | []                                           | []                       |
+| transfer             | []                                           | []                       |
+| allowance            | []                                           | []                       |
+| approve              | []                                           | []                       |
+| transferFrom         | []                                           | []                       |
+| _msgSender           | []                                           | []                       |
+| _msgData             | []                                           | []                       |
+| _contextSuffixLength | []                                           | []                       |
+| constructor          | ['_name', '_symbol']                         | []                       |
+| name                 | []                                           | []                       |
+| symbol               | []                                           | []                       |
+| decimals             | []                                           | []                       |
+| totalSupply          | []                                           | []                       |
+| balanceOf            | []                                           | []                       |
+| transfer             | ['_balances', '_totalSupply']                | []                       |
+| allowance            | []                                           | []                       |
+| approve              | ['_allowances']                              | []                       |
+| transferFrom         | ['_allowances', '_balances', '_totalSupply'] | []                       |
+| _transfer            | ['_balances', '_totalSupply']                | []                       |
+| _update              | ['_balances', '_totalSupply']                | []                       |
+| _mint                | ['_balances', '_totalSupply']                | []                       |
+| _burn                | ['_balances', '_totalSupply']                | []                       |
+| _approve             | ['_allowances']                              | []                       |
+| _approve             | ['_allowances']                              | []                       |
+| _spendAllowance      | ['_allowances']                              | []                       |
++----------------------+----------------------------------------------+--------------------------+
+
+Contract IERC20
++--------------+-------------------------+--------------------------+
+| Function     | State variables written | Conditions on msg.sender |
++--------------+-------------------------+--------------------------+
+| totalSupply  | []                      | []                       |
+| balanceOf    | []                      | []                       |
+| transfer     | []                      | []                       |
+| allowance    | []                      | []                       |
+| approve      | []                      | []                       |
+| transferFrom | []                      | []                       |
++--------------+-------------------------+--------------------------+
+
+Contract IERC20Metadata
++--------------+-------------------------+--------------------------+
+| Function     | State variables written | Conditions on msg.sender |
++--------------+-------------------------+--------------------------+
+| totalSupply  | []                      | []                       |
+| balanceOf    | []                      | []                       |
+| transfer     | []                      | []                       |
+| allowance    | []                      | []                       |
+| approve      | []                      | []                       |
+| transferFrom | []                      | []                       |
+| name         | []                      | []                       |
+| symbol       | []                      | []                       |
+| decimals     | []                      | []                       |
++--------------+-------------------------+--------------------------+
+
+Contract SafeERC20
++----------------------------+-------------------------+--------------------------+
+| Function                   | State variables written | Conditions on msg.sender |
++----------------------------+-------------------------+--------------------------+
+| safeTransfer               | []                      | []                       |
+| safeTransferFrom           | []                      | []                       |
+| trySafeTransfer            | []                      | []                       |
+| trySafeTransferFrom        | []                      | []                       |
+| safeIncreaseAllowance      | []                      | []                       |
+| safeDecreaseAllowance      | []                      | []                       |
+| forceApprove               | []                      | []                       |
+| transferAndCallRelaxed     | []                      | []                       |
+| transferFromAndCallRelaxed | []                      | []                       |
+| approveAndCallRelaxed      | []                      | []                       |
+| _safeTransfer              | []                      | []                       |
+| _safeTransferFrom          | []                      | []                       |
+| _safeApprove               | []                      | []                       |
++----------------------------+-------------------------+--------------------------+
+
+Contract Bytes
++------------------------+-------------------------+--------------------------+
+| Function               | State variables written | Conditions on msg.sender |
++------------------------+-------------------------+--------------------------+
+| indexOf                | []                      | []                       |
+| indexOf                | []                      | []                       |
+| lastIndexOf            | []                      | []                       |
+| lastIndexOf            | []                      | []                       |
+| slice                  | []                      | []                       |
+| slice                  | []                      | []                       |
+| splice                 | []                      | []                       |
+| splice                 | []                      | []                       |
+| replace                | []                      | []                       |
+| replace                | []                      | []                       |
+| concat                 | []                      | []                       |
+| toNibbles              | []                      | []                       |
+| equal                  | []                      | []                       |
+| reverseBytes32         | []                      | []                       |
+| reverseBytes16         | []                      | []                       |
+| reverseBytes8          | []                      | []                       |
+| reverseBytes4          | []                      | []                       |
+| reverseBytes2          | []                      | []                       |
+| clz                    | []                      | []                       |
+| _unsafeReadBytesOffset | []                      | []                       |
++------------------------+-------------------------+--------------------------+
+
+Contract Context
++----------------------+-------------------------+--------------------------+
+| Function             | State variables written | Conditions on msg.sender |
++----------------------+-------------------------+--------------------------+
+| _msgSender           | []                      | []                       |
+| _msgData             | []                      | []                       |
+| _contextSuffixLength | []                      | []                       |
++----------------------+-------------------------+--------------------------+
+
+Contract Panic
++-------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------+
+| Function                            | State variables written                                                                                                                                                                                 | Conditions on msg.sender |
++-------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------+
+| panic                               | []                                                                                                                                                                                                      | []                       |
+| slitherConstructorConstantVariables | ['ARRAY_OUT_OF_BOUNDS', 'ASSERT', 'DIVISION_BY_ZERO', 'EMPTY_ARRAY_POP', 'ENUM_CONVERSION_ERROR', 'GENERIC', 'INVALID_INTERNAL_FUNCTION', 'RESOURCE_ERROR', 'STORAGE_ENCODING_ERROR', 'UNDER_OVERFLOW'] | []                       |
++-------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------+
+
+Contract Pausable
++----------------------+-------------------------+--------------------------+
+| Function             | State variables written | Conditions on msg.sender |
++----------------------+-------------------------+--------------------------+
+| _msgSender           | []                      | []                       |
+| _msgData             | []                      | []                       |
+| _contextSuffixLength | []                      | []                       |
+| paused               | []                      | []                       |
+| _requireNotPaused    | []                      | []                       |
+| _requirePaused       | []                      | []                       |
+| _pause               | ['_paused']             | []                       |
+| _unpause             | ['_paused']             | []                       |
++----------------------+-------------------------+--------------------------+
+
+Contract ReentrancyGuard
++-------------------------------------+--------------------------------------------------------+--------------------------+
+| Function                            | State variables written                                | Conditions on msg.sender |
++-------------------------------------+--------------------------------------------------------+--------------------------+
+| constructor                         | []                                                     | []                       |
+| _nonReentrantBeforeView             | []                                                     | []                       |
+| _nonReentrantBefore                 | []                                                     | []                       |
+| _nonReentrantAfter                  | []                                                     | []                       |
+| _reentrancyGuardEntered             | []                                                     | []                       |
+| _reentrancyGuardStorageSlot         | []                                                     | []                       |
+| slitherConstructorConstantVariables | ['ENTERED', 'NOT_ENTERED', 'REENTRANCY_GUARD_STORAGE'] | []                       |
++-------------------------------------+--------------------------------------------------------+--------------------------+
+
+Contract StorageSlot
++----------------+-------------------------+--------------------------+
+| Function       | State variables written | Conditions on msg.sender |
++----------------+-------------------------+--------------------------+
+| getAddressSlot | []                      | []                       |
+| getBooleanSlot | []                      | []                       |
+| getBytes32Slot | []                      | []                       |
+| getUint256Slot | []                      | []                       |
+| getInt256Slot  | []                      | []                       |
+| getStringSlot  | []                      | []                       |
+| getStringSlot  | []                      | []                       |
+| getBytesSlot   | []                      | []                       |
+| getBytesSlot   | []                      | []                       |
++----------------+-------------------------+--------------------------+
+
+Contract Strings
++-------------------------------------+----------------------------------------------------------------------------+--------------------------+
+| Function                            | State variables written                                                    | Conditions on msg.sender |
++-------------------------------------+----------------------------------------------------------------------------+--------------------------+
+| toString                            | []                                                                         | []                       |
+| toStringSigned                      | []                                                                         | []                       |
+| toHexString                         | []                                                                         | []                       |
+| toHexString                         | []                                                                         | []                       |
+| toHexString                         | []                                                                         | []                       |
+| toChecksumHexString                 | []                                                                         | []                       |
+| toHexString                         | []                                                                         | []                       |
+| equal                               | []                                                                         | []                       |
+| parseUint                           | []                                                                         | []                       |
+| parseUint                           | []                                                                         | []                       |
+| tryParseUint                        | []                                                                         | []                       |
+| tryParseUint                        | []                                                                         | []                       |
+| _tryParseUintUncheckedBounds        | []                                                                         | []                       |
+| parseInt                            | []                                                                         | []                       |
+| parseInt                            | []                                                                         | []                       |
+| tryParseInt                         | []                                                                         | []                       |
+| tryParseInt                         | []                                                                         | []                       |
+| _tryParseIntUncheckedBounds         | []                                                                         | []                       |
+| parseHexUint                        | []                                                                         | []                       |
+| parseHexUint                        | []                                                                         | []                       |
+| tryParseHexUint                     | []                                                                         | []                       |
+| tryParseHexUint                     | []                                                                         | []                       |
+| _tryParseHexUintUncheckedBounds     | []                                                                         | []                       |
+| parseAddress                        | []                                                                         | []                       |
+| parseAddress                        | []                                                                         | []                       |
+| tryParseAddress                     | []                                                                         | []                       |
+| tryParseAddress                     | []                                                                         | []                       |
+| _tryParseChr                        | []                                                                         | []                       |
+| escapeJSON                          | []                                                                         | []                       |
+| _unsafeReadBytesOffset              | []                                                                         | []                       |
+| _unsafeWriteBytesOffset             | []                                                                         | []                       |
+| slitherConstructorConstantVariables | ['ABS_MIN_INT256', 'ADDRESS_LENGTH', 'HEX_DIGITS', 'SPECIAL_CHARS_LOOKUP'] | []                       |
++-------------------------------------+----------------------------------------------------------------------------+--------------------------+
+
+Contract ECDSA
++--------------------+-------------------------+--------------------------+
+| Function           | State variables written | Conditions on msg.sender |
++--------------------+-------------------------+--------------------------+
+| tryRecover         | []                      | []                       |
+| tryRecoverCalldata | []                      | []                       |
+| recover            | []                      | []                       |
+| recoverCalldata    | []                      | []                       |
+| tryRecover         | []                      | []                       |
+| recover            | []                      | []                       |
+| tryRecover         | []                      | []                       |
+| recover            | []                      | []                       |
+| parse              | []                      | []                       |
+| parseCalldata      | []                      | []                       |
+| _throwError        | []                      | []                       |
++--------------------+-------------------------+--------------------------+
+
+Contract MessageHashUtils
++---------------------------------+-------------------------+--------------------------+
+| Function                        | State variables written | Conditions on msg.sender |
++---------------------------------+-------------------------+--------------------------+
+| toEthSignedMessageHash          | []                      | []                       |
+| toEthSignedMessageHash          | []                      | []                       |
+| toDataWithIntendedValidatorHash | []                      | []                       |
+| toDataWithIntendedValidatorHash | []                      | []                       |
+| toTypedDataHash                 | []                      | []                       |
+| toDomainSeparator               | []                      | []                       |
+| toDomainSeparator               | []                      | []                       |
+| toDomainTypeHash                | []                      | []                       |
++---------------------------------+-------------------------+--------------------------+
+
+Contract IERC165
++-------------------+-------------------------+--------------------------+
+| Function          | State variables written | Conditions on msg.sender |
++-------------------+-------------------------+--------------------------+
+| supportsInterface | []                      | []                       |
++-------------------+-------------------------+--------------------------+
+
+Contract Math
++------------------+-------------------------+--------------------------+
+| Function         | State variables written | Conditions on msg.sender |
++------------------+-------------------------+--------------------------+
+| add512           | []                      | []                       |
+| mul512           | []                      | []                       |
+| tryAdd           | []                      | []                       |
+| trySub           | []                      | []                       |
+| tryMul           | []                      | []                       |
+| tryDiv           | []                      | []                       |
+| tryMod           | []                      | []                       |
+| saturatingAdd    | []                      | []                       |
+| saturatingSub    | []                      | []                       |
+| saturatingMul    | []                      | []                       |
+| ternary          | []                      | []                       |
+| max              | []                      | []                       |
+| min              | []                      | []                       |
+| average          | []                      | []                       |
+| ceilDiv          | []                      | []                       |
+| mulDiv           | []                      | []                       |
+| mulDiv           | []                      | []                       |
+| mulShr           | []                      | []                       |
+| mulShr           | []                      | []                       |
+| invMod           | []                      | []                       |
+| invModPrime      | []                      | []                       |
+| modExp           | []                      | []                       |
+| tryModExp        | []                      | []                       |
+| modExp           | []                      | []                       |
+| tryModExp        | []                      | []                       |
+| _zeroBytes       | []                      | []                       |
+| sqrt             | []                      | []                       |
+| sqrt             | []                      | []                       |
+| log2             | []                      | []                       |
+| log2             | []                      | []                       |
+| log10            | []                      | []                       |
+| log10            | []                      | []                       |
+| log256           | []                      | []                       |
+| log256           | []                      | []                       |
+| unsignedRoundsUp | []                      | []                       |
+| clz              | []                      | []                       |
++------------------+-------------------------+--------------------------+
+
+Contract SafeCast
++-----------+-------------------------+--------------------------+
+| Function  | State variables written | Conditions on msg.sender |
++-----------+-------------------------+--------------------------+
+| toUint248 | []                      | []                       |
+| toUint240 | []                      | []                       |
+| toUint232 | []                      | []                       |
+| toUint224 | []                      | []                       |
+| toUint216 | []                      | []                       |
+| toUint208 | []                      | []                       |
+| toUint200 | []                      | []                       |
+| toUint192 | []                      | []                       |
+| toUint184 | []                      | []                       |
+| toUint176 | []                      | []                       |
+| toUint168 | []                      | []                       |
+| toUint160 | []                      | []                       |
+| toUint152 | []                      | []                       |
+| toUint144 | []                      | []                       |
+| toUint136 | []                      | []                       |
+| toUint128 | []                      | []                       |
+| toUint120 | []                      | []                       |
+| toUint112 | []                      | []                       |
+| toUint104 | []                      | []                       |
+| toUint96  | []                      | []                       |
+| toUint88  | []                      | []                       |
+| toUint80  | []                      | []                       |
+| toUint72  | []                      | []                       |
+| toUint64  | []                      | []                       |
+| toUint56  | []                      | []                       |
+| toUint48  | []                      | []                       |
+| toUint40  | []                      | []                       |
+| toUint32  | []                      | []                       |
+| toUint24  | []                      | []                       |
+| toUint16  | []                      | []                       |
+| toUint8   | []                      | []                       |
+| toUint256 | []                      | []                       |
+| toInt248  | []                      | []                       |
+| toInt240  | []                      | []                       |
+| toInt232  | []                      | []                       |
+| toInt224  | []                      | []                       |
+| toInt216  | []                      | []                       |
+| toInt208  | []                      | []                       |
+| toInt200  | []                      | []                       |
+| toInt192  | []                      | []                       |
+| toInt184  | []                      | []                       |
+| toInt176  | []                      | []                       |
+| toInt168  | []                      | []                       |
+| toInt160  | []                      | []                       |
+| toInt152  | []                      | []                       |
+| toInt144  | []                      | []                       |
+| toInt136  | []                      | []                       |
+| toInt128  | []                      | []                       |
+| toInt120  | []                      | []                       |
+| toInt112  | []                      | []                       |
+| toInt104  | []                      | []                       |
+| toInt96   | []                      | []                       |
+| toInt88   | []                      | []                       |
+| toInt80   | []                      | []                       |
+| toInt72   | []                      | []                       |
+| toInt64   | []                      | []                       |
+| toInt56   | []                      | []                       |
+| toInt48   | []                      | []                       |
+| toInt40   | []                      | []                       |
+| toInt32   | []                      | []                       |
+| toInt24   | []                      | []                       |
+| toInt16   | []                      | []                       |
+| toInt8    | []                      | []                       |
+| toInt256  | []                      | []                       |
+| toUint    | []                      | []                       |
++-----------+-------------------------+--------------------------+
+
+Contract SignedMath
++----------+-------------------------+--------------------------+
+| Function | State variables written | Conditions on msg.sender |
++----------+-------------------------+--------------------------+
+| ternary  | []                      | []                       |
+| max      | []                      | []                       |
+| min      | []                      | []                       |
+| average  | []                      | []                       |
+| abs      | []                      | []                       |
++----------+-------------------------+--------------------------+
+
+Contract MockERC20
++-------------------------------------+---------------------------------------------------+--------------------------+
+| Function                            | State variables written                           | Conditions on msg.sender |
++-------------------------------------+---------------------------------------------------+--------------------------+
+| constructor                         | ['_name', '_symbol']                              | []                       |
+| name                                | []                                                | []                       |
+| symbol                              | []                                                | []                       |
+| decimals                            | []                                                | []                       |
+| totalSupply                         | []                                                | []                       |
+| balanceOf                           | []                                                | []                       |
+| transfer                            | ['_balances', '_totalSupply']                     | []                       |
+| allowance                           | []                                                | []                       |
+| approve                             | ['_allowances']                                   | []                       |
+| transferFrom                        | ['_allowances', '_balances', '_totalSupply']      | []                       |
+| _transfer                           | ['_balances', '_totalSupply']                     | []                       |
+| _update                             | ['_balances', '_totalSupply']                     | []                       |
+| _mint                               | ['_balances', '_totalSupply']                     | []                       |
+| _burn                               | ['_balances', '_totalSupply']                     | []                       |
+| _approve                            | ['_allowances']                                   | []                       |
+| _approve                            | ['_allowances']                                   | []                       |
+| _spendAllowance                     | ['_allowances']                                   | []                       |
+| name                                | []                                                | []                       |
+| symbol                              | []                                                | []                       |
+| decimals                            | []                                                | []                       |
+| totalSupply                         | []                                                | []                       |
+| balanceOf                           | []                                                | []                       |
+| transfer                            | []                                                | []                       |
+| allowance                           | []                                                | []                       |
+| approve                             | []                                                | []                       |
+| transferFrom                        | []                                                | []                       |
+| _msgSender                          | []                                                | []                       |
+| _msgData                            | []                                                | []                       |
+| _contextSuffixLength                | []                                                | []                       |
+| constructor                         | ['_balances', '_name', '_symbol', '_totalSupply'] | []                       |
+| faucet                              | ['_balances', '_totalSupply']                     | []                       |
+| decimals                            | []                                                | []                       |
+| slitherConstructorConstantVariables | ['MAX_FAUCET']                                    | []                       |
++-------------------------------------+---------------------------------------------------+--------------------------+
+
+Contract MockUSDC
++-------------------------------------+---------------------------------------------------+--------------------------+
+| Function                            | State variables written                           | Conditions on msg.sender |
++-------------------------------------+---------------------------------------------------+--------------------------+
+| constructor                         | ['_balances', '_name', '_symbol', '_totalSupply'] | []                       |
+| faucet                              | ['_balances', '_totalSupply']                     | []                       |
+| decimals                            | []                                                | []                       |
+| constructor                         | ['_name', '_symbol']                              | []                       |
+| name                                | []                                                | []                       |
+| symbol                              | []                                                | []                       |
+| decimals                            | []                                                | []                       |
+| totalSupply                         | []                                                | []                       |
+| balanceOf                           | []                                                | []                       |
+| transfer                            | ['_balances', '_totalSupply']                     | []                       |
+| allowance                           | []                                                | []                       |
+| approve                             | ['_allowances']                                   | []                       |
+| transferFrom                        | ['_allowances', '_balances', '_totalSupply']      | []                       |
+| _transfer                           | ['_balances', '_totalSupply']                     | []                       |
+| _update                             | ['_balances', '_totalSupply']                     | []                       |
+| _mint                               | ['_balances', '_totalSupply']                     | []                       |
+| _burn                               | ['_balances', '_totalSupply']                     | []                       |
+| _approve                            | ['_allowances']                                   | []                       |
+| _approve                            | ['_allowances']                                   | []                       |
+| _spendAllowance                     | ['_allowances']                                   | []                       |
+| name                                | []                                                | []                       |
+| symbol                              | []                                                | []                       |
+| decimals                            | []                                                | []                       |
+| totalSupply                         | []                                                | []                       |
+| balanceOf                           | []                                                | []                       |
+| transfer                            | []                                                | []                       |
+| allowance                           | []                                                | []                       |
+| approve                             | []                                                | []                       |
+| transferFrom                        | []                                                | []                       |
+| _msgSender                          | []                                                | []                       |
+| _msgData                            | []                                                | []                       |
+| _contextSuffixLength                | []                                                | []                       |
+| constructor                         | ['_balances', '_name', '_symbol', '_totalSupply'] | []                       |
+| slitherConstructorConstantVariables | ['MAX_FAUCET']                                    | []                       |
++-------------------------------------+---------------------------------------------------+--------------------------+
+
+Contract MockUSDT
++-------------------------------------+---------------------------------------------------+--------------------------+
+| Function                            | State variables written                           | Conditions on msg.sender |
++-------------------------------------+---------------------------------------------------+--------------------------+
+| constructor                         | ['_balances', '_name', '_symbol', '_totalSupply'] | []                       |
+| faucet                              | ['_balances', '_totalSupply']                     | []                       |
+| decimals                            | []                                                | []                       |
+| constructor                         | ['_name', '_symbol']                              | []                       |
+| name                                | []                                                | []                       |
+| symbol                              | []                                                | []                       |
+| decimals                            | []                                                | []                       |
+| totalSupply                         | []                                                | []                       |
+| balanceOf                           | []                                                | []                       |
+| transfer                            | ['_balances', '_totalSupply']                     | []                       |
+| allowance                           | []                                                | []                       |
+| approve                             | ['_allowances']                                   | []                       |
+| transferFrom                        | ['_allowances', '_balances', '_totalSupply']      | []                       |
+| _transfer                           | ['_balances', '_totalSupply']                     | []                       |
+| _update                             | ['_balances', '_totalSupply']                     | []                       |
+| _mint                               | ['_balances', '_totalSupply']                     | []                       |
+| _burn                               | ['_balances', '_totalSupply']                     | []                       |
+| _approve                            | ['_allowances']                                   | []                       |
+| _approve                            | ['_allowances']                                   | []                       |
+| _spendAllowance                     | ['_allowances']                                   | []                       |
+| name                                | []                                                | []                       |
+| symbol                              | []                                                | []                       |
+| decimals                            | []                                                | []                       |
+| totalSupply                         | []                                                | []                       |
+| balanceOf                           | []                                                | []                       |
+| transfer                            | []                                                | []                       |
+| allowance                           | []                                                | []                       |
+| approve                             | []                                                | []                       |
+| transferFrom                        | []                                                | []                       |
+| _msgSender                          | []                                                | []                       |
+| _msgData                            | []                                                | []                       |
+| _contextSuffixLength                | []                                                | []                       |
+| constructor                         | ['_balances', '_name', '_symbol', '_totalSupply'] | []                       |
+| slitherConstructorConstantVariables | ['MAX_FAUCET']                                    | []                       |
++-------------------------------------+---------------------------------------------------+--------------------------+
+
+Contract RemittancePledge
++--------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Function                             | State variables written                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Conditions on msg.sender                                                                                                                                                                      |
++--------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| pendingOwner                         | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| transferOwnership                    | ['_pendingOwner']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | []                                                                                                                                                                                            |
+| _transferOwnership                   | ['_owner', '_pendingOwner']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| acceptOwnership                      | ['_owner', '_pendingOwner']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| constructor                          | ['_owner', '_pendingOwner']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| owner                                | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _checkOwner                          | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| renounceOwnership                    | ['_owner', '_pendingOwner']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| transferOwnership                    | ['_owner', '_pendingOwner']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| _transferOwnership                   | ['_owner']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | []                                                                                                                                                                                            |
+| _msgSender                           | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _msgData                             | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _contextSuffixLength                 | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| paused                               | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _requireNotPaused                    | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _requirePaused                       | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _pause                               | ['_paused']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| _unpause                             | ['_paused']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| constructor                          | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _nonReentrantBeforeView              | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _nonReentrantBefore                  | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _nonReentrantAfter                   | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _reentrancyGuardEntered              | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _reentrancyGuardStorageSlot          | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| constructor                          | ['_owner', 'allowedTokens', 'feeRecipient']                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| createPledge                         | ['activePledgeCount', 'merchantPledgeIds', 'pledgeCounter', 'pledges', 'reputations', 'senderPledgeIds']                                                                                                                                                                                                                                                                                                                                                                                                        | ['require(bool,string)(activePledgeCount[msg.sender] < maxActive,Active pledge limit reached for your trust tier)', 'require(bool,string)(merchant != msg.sender,Sender cannot be merchant)'] |
+| depositRemaining                     | ['activePledgeCount', 'pledges', 'reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | ['require(bool,string)(msg.sender == pledge.sender,Only sender can deposit)']                                                                                                                 |
+| claimDefaultedDeposit                | ['activePledgeCount', 'pledges', 'reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | ['require(bool,string)(msg.sender == pledge.merchant,Only merchant can claim)']                                                                                                               |
+| reclaimDeposit                       | ['activePledgeCount', 'pledges', 'reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | ['require(bool,string)(msg.sender == pledge.sender,Only sender can reclaim)']                                                                                                                 |
+| extendDeadline                       | ['extensionNonces', 'pledges']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | ['require(bool,string)(msg.sender == pledge.sender,Only sender can extend)']                                                                                                                  |
+| cancelPledge                         | ['activePledgeCount', 'cancelNonces', 'pledges']                                                                                                                                                                                                                                                                                                                                                                                                                                                                | ['require(bool,string)(msg.sender == pledge.sender,Only sender can cancel)']                                                                                                                  |
+| createRecurringPledge                | ['activePledgeCount', 'merchantRecurringIds', 'recurringCounter', 'recurringPledges', 'senderRecurringIds']                                                                                                                                                                                                                                                                                                                                                                                                     | ['require(bool,string)(activePledgeCount[msg.sender] < maxActive,Active pledge limit reached for your trust tier)', 'require(bool,string)(merchant != msg.sender,Sender cannot be merchant)'] |
+| payInstallment                       | ['activePledgeCount', 'recurringPledges', 'reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                        | ['require(bool,string)(msg.sender == rp.sender,Only sender can pay)']                                                                                                                         |
+| markMissedInstallment                | ['activePledgeCount', 'recurringPledges', 'reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                        | ['require(bool,string)(msg.sender == rp.merchant,Only merchant can mark missed)']                                                                                                             |
+| settleDebt                           | ['activePledgeCount', 'recurringPledges', 'reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                        | ['require(bool,string)(msg.sender == rp.sender,Only sender can settle)']                                                                                                                      |
+| cancelRecurring                      | ['activePledgeCount', 'recurringCancelNonces', 'recurringPledges']                                                                                                                                                                                                                                                                                                                                                                                                                                              | ['require(bool,string)(msg.sender == rp.sender,Only sender can cancel)']                                                                                                                      |
+| _finalizeRecurring                   | ['activePledgeCount', 'recurringPledges', 'reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                        | []                                                                                                                                                                                            |
+| _applyCompletionBonus                | ['reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | []                                                                                                                                                                                            |
+| _releaseFunds                        | ['activePledgeCount', 'pledges', 'reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | []                                                                                                                                                                                            |
+| _recordDefault                       | ['reputations']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | []                                                                                                                                                                                            |
+| _decrementActive                     | ['activePledgeCount']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | []                                                                                                                                                                                            |
+| setTokenAllowed                      | ['allowedTokens']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | []                                                                                                                                                                                            |
+| pause                                | ['_paused']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| unpause                              | ['_paused']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | []                                                                                                                                                                                            |
+| setFeeRecipient                      | ['feeRecipient']                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | []                                                                                                                                                                                            |
+| getServiceFeeBps                     | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _grossWithFee                        | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| quoteGrossAmount                     | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| grossAmountForPledge                 | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _trustScore                          | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getTrustScore                        | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getReputation                        | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getPledge                            | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getRecurringPledge                   | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getSenderRecurringPledges            | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getMerchantRecurringPledges          | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getSenderRecurringPledgesPaginated   | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getMerchantRecurringPledgesPaginated | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getSenderPledges                     | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getMerchantPledges                   | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getSenderPledgesPaginated            | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getMerchantPledgesPaginated          | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| _paginate                            | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getMaxActivePledges                  | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| getRequiredDepositPct                | []                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | []                                                                                                                                                                                            |
+| slitherConstructorConstantVariables  | ['CLAIM_WINDOW', 'DEFAULT_LOCKOUT_THRESHOLD', 'DEPOSIT_TIER_HIGH', 'DEPOSIT_TIER_LOW', 'DEPOSIT_TIER_MID', 'DEPOSIT_TIER_RISK', 'FEE_BPS_LOYALTY', 'FEE_BPS_STANDARD', 'GRACE_PERIOD', 'MAX_ACTIVE_HIGH', 'MAX_ACTIVE_MID', 'MAX_ACTIVE_NO_HISTORY', 'MAX_EXTENSION', 'MAX_PLEDGE_DAYS', 'MAX_RECURRING_PERIODS', 'MIN_PLEDGE_AMOUNT', 'MIN_RECURRING_INTERVAL', 'TIER_HIGH', 'TIER_LOW', 'TIER_MID', 'TIME_BUFFER', 'WEIGHT_INSTALLMENT_BONUS', 'WEIGHT_INSTALLMENT_PARTIAL', 'WEIGHT_LATE', 'WEIGHT_ON_TIME'] | []                                                                                                                                                                                            |
++--------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+INFO:Slither:. analyzed (27 contracts)

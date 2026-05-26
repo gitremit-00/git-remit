@@ -2,8 +2,8 @@
 pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
-import "../contracts/RemittancePledge.sol";
-import "../contracts/MockTokens.sol";
+import "../../contracts/RemittancePledge.sol";
+import "../../contracts/MockTokens.sol";
 
 contract RemittancePledgeFuzzTest is Test {
     RemittancePledge internal pledge;

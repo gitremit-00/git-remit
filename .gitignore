@@ -16,6 +16,10 @@ coverage.json
 lib/
 out/
 cache_forge/
+.foundry/
+
+# Slither
+test/slither/results.json
 
 # Deployments with sensitive data
 # (keep deployments/ tracked so M2/M3 get the addresses)

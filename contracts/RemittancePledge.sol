@@ -65,8 +65,35 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     ///      Works for any whitelisted 6-decimal token (USDC, USDT, etc.).
     uint256 public constant MIN_PLEDGE_AMOUNT = 1_000_000;
 
+    // Recurring pledge constraints
+    uint256 public constant MIN_RECURRING_INTERVAL = 7 days;
+    uint256 public constant MAX_RECURRING_PERIODS  = 12;
+
+    // Reputation weight for each completed recurring installment (50% of full weight).
+    // The remaining 50% is granted as a completion bonus when all periods are settled.
+    uint256 public constant WEIGHT_INSTALLMENT_PARTIAL  = 5000;
+    uint256 public constant WEIGHT_INSTALLMENT_BONUS    = 5000;
+
     // ── Types ──────────────────────────────────────────────────────────────────
     enum PledgeStatus { PENDING, COMPLETED, DEFAULTED, CANCELLED }
+
+    enum RecurringStatus { ACTIVE, PENDING_SETTLEMENT, COMPLETED, CANCELLED }
+
+    struct RecurringPledge {
+        uint256 id;
+        address sender;
+        address merchant;
+        address token;
+        uint256 amountPerPeriod;   // net amount merchant receives per installment
+        uint256 intervalSeconds;   // time between installments (min 7 days)
+        uint256 totalPeriods;      // total number of installments (max 12)
+        uint256 periodsCompleted;  // installments fully paid and released
+        uint256 missedCount;       // installments flagged as missed by merchant
+        uint256 totalMissedDebt;   // total unpaid missed installment amounts
+        uint256 nextDueDate;       // due date of the next installment
+        uint256 appliedFeeBps;     // fee rate locked at creation
+        RecurringStatus status;
+    }
 
     struct Pledge {
         uint256 id;
@@ -111,6 +138,13 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     mapping(address => uint256[]) private senderPledgeIds;
     mapping(address => uint256[]) private merchantPledgeIds;
 
+    // ── Recurring Pledge State ─────────────────────────────────────────────────
+    uint256 public recurringCounter;
+    mapping(uint256 => RecurringPledge) public recurringPledges;
+    mapping(uint256 => uint256) public recurringCancelNonces;
+    mapping(address => uint256[]) private senderRecurringIds;
+    mapping(address => uint256[]) private merchantRecurringIds;
+
     // ── Events ─────────────────────────────────────────────────────────────────
     event PledgeCreated(
         uint256 indexed pledgeId,
@@ -131,6 +165,24 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     event FeeCollected(uint256 indexed pledgeId, address indexed feeRecipient, uint256 fee);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event TokenAllowanceSet(address indexed token, bool allowed);
+
+    // Recurring pledge events
+    event RecurringPledgeCreated(
+        uint256 indexed recurringId,
+        address indexed sender,
+        address indexed merchant,
+        address token,
+        uint256 amountPerPeriod,
+        uint256 intervalSeconds,
+        uint256 totalPeriods,
+        uint256 firstDueDate,
+        uint256 appliedFeeBps
+    );
+    event InstallmentPaid(uint256 indexed recurringId, address indexed sender, uint256 period, uint256 amount);
+    event InstallmentMissed(uint256 indexed recurringId, uint256 period, uint256 debtAdded);
+    event DebtSettled(uint256 indexed recurringId, address indexed sender, uint256 amount);
+    event RecurringPledgeCompleted(uint256 indexed recurringId, address indexed merchant);
+    event RecurringPledgeCancelled(uint256 indexed recurringId, address indexed sender, address indexed merchant);
 
     // ── Constructor ────────────────────────────────────────────────────────────
     /// @param initialTokens List of token addresses to whitelist at deployment (e.g. [USDC, USDT])
@@ -429,6 +481,270 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         emit PledgeCancelled(pledgeId, pledge.sender, pledge.merchant, refund);
     }
 
+    // ── Recurring Pledge Functions ─────────────────────────────────────────────
+
+    /// @notice Create a recurring pledge — a fixed monthly commitment to a merchant.
+    /// @param token           Whitelisted ERC20 token
+    /// @param merchant        Address of the merchant receiving payments
+    /// @param amountPerPeriod Net token amount the merchant receives each installment
+    /// @param intervalSeconds Time between installments — minimum 7 days
+    /// @param totalPeriods    Number of installments — maximum 12
+    /// @param firstDueDate    Due date of the first installment
+    function createRecurringPledge(
+        address token,
+        address merchant,
+        uint256 amountPerPeriod,
+        uint256 intervalSeconds,
+        uint256 totalPeriods,
+        uint256 firstDueDate
+    ) external nonReentrant whenNotPaused {
+        require(allowedTokens[token], "Token not supported");
+        require(merchant != address(0), "Invalid merchant address");
+        require(merchant != msg.sender, "Sender cannot be merchant");
+        require(amountPerPeriod >= MIN_PLEDGE_AMOUNT, "Amount below minimum");
+        require(intervalSeconds >= MIN_RECURRING_INTERVAL, "Interval too short");
+        require(totalPeriods >= 1 && totalPeriods <= MAX_RECURRING_PERIODS, "Invalid period count");
+        require(firstDueDate > block.timestamp, "First due date must be in future");
+
+        uint256 maxActive = getMaxActivePledges(msg.sender);
+        require(
+            activePledgeCount[msg.sender] < maxActive,
+            "Active pledge limit reached for your trust tier"
+        );
+
+        uint256 feeBps = getServiceFeeBps(msg.sender);
+        uint256 recurringId = ++recurringCounter;
+
+        recurringPledges[recurringId] = RecurringPledge({
+            id: recurringId,
+            sender: msg.sender,
+            merchant: merchant,
+            token: token,
+            amountPerPeriod: amountPerPeriod,
+            intervalSeconds: intervalSeconds,
+            totalPeriods: totalPeriods,
+            periodsCompleted: 0,
+            missedCount: 0,
+            totalMissedDebt: 0,
+            nextDueDate: firstDueDate,
+            appliedFeeBps: feeBps,
+            status: RecurringStatus.ACTIVE
+        });
+
+        senderRecurringIds[msg.sender].push(recurringId);
+        merchantRecurringIds[merchant].push(recurringId);
+        activePledgeCount[msg.sender]++;
+
+        emit RecurringPledgeCreated(
+            recurringId, msg.sender, merchant, token,
+            amountPerPeriod, intervalSeconds, totalPeriods, firstDueDate, feeBps
+        );
+    }
+
+    /// @notice Pay the current installment for a recurring pledge.
+    /// @dev Sender may pay early (before nextDueDate). Payment is released to merchant
+    ///      immediately. If paid after the due date but within grace, marked late.
+    /// @param recurringId ID of the recurring pledge
+    function payInstallment(uint256 recurringId) external nonReentrant whenNotPaused {
+        RecurringPledge storage rp = recurringPledges[recurringId];
+
+        require(rp.id != 0, "Recurring pledge does not exist");
+        require(msg.sender == rp.sender, "Only sender can pay");
+        require(rp.status == RecurringStatus.ACTIVE, "Pledge not active");
+        require(
+            rp.periodsCompleted + rp.missedCount < rp.totalPeriods,
+            "All periods accounted for"
+        );
+        require(
+            block.timestamp <= rp.nextDueDate + GRACE_PERIOD,
+            "Grace period has ended - use markMissedInstallment"
+        );
+
+        bool isLate = block.timestamp > rp.nextDueDate;
+        uint256 gross = _grossWithFee(rp.amountPerPeriod, rp.appliedFeeBps);
+        uint256 currentPeriod = rp.periodsCompleted + rp.missedCount + 1;
+
+        // Effects
+        rp.periodsCompleted++;
+        rp.nextDueDate += rp.intervalSeconds;
+
+        // Reputation — each installment contributes half the amount weight.
+        // The other half is granted as a completion bonus when all periods settle.
+        Reputation storage rep = reputations[rp.sender];
+        // slither-disable-next-line divide-before-multiply
+        uint256 halfAmount = rp.amountPerPeriod / 2; // intentional 50% partial weight — max 1 wei rounding loss
+        if (isLate) {
+            rep.lateCount++;
+            rep.weightedScore += halfAmount * WEIGHT_LATE;
+        } else {
+            rep.onTimeCount++;
+            rep.weightedScore += halfAmount * WEIGHT_ON_TIME;
+        }
+        rep.totalWeight += halfAmount;
+
+        uint256 fee = (rp.amountPerPeriod * rp.appliedFeeBps) / 10000;
+
+        // Interactions
+        IERC20(rp.token).safeTransferFrom(msg.sender, address(this), gross);
+        if (fee > 0) {
+            IERC20(rp.token).safeTransfer(feeRecipient, fee);
+            emit FeeCollected(recurringId, feeRecipient, fee);
+        }
+        IERC20(rp.token).safeTransfer(rp.merchant, rp.amountPerPeriod);
+
+        emit InstallmentPaid(recurringId, msg.sender, currentPeriod, rp.amountPerPeriod);
+
+        // Check if all periods are now accounted for (no missed debt outstanding)
+        if (rp.periodsCompleted + rp.missedCount == rp.totalPeriods) {
+            _finalizeRecurring(recurringId);
+        }
+    }
+
+    /// @notice Merchant flags a missed installment after the grace period ends.
+    /// @dev Records the debt. No funds are transferred — merchant is compensated at settlement.
+    ///      Schedule advances to the next period automatically.
+    /// @param recurringId ID of the recurring pledge
+    function markMissedInstallment(uint256 recurringId) external nonReentrant whenNotPaused {
+        RecurringPledge storage rp = recurringPledges[recurringId];
+
+        require(rp.id != 0, "Recurring pledge does not exist");
+        require(msg.sender == rp.merchant, "Only merchant can mark missed");
+        require(rp.status == RecurringStatus.ACTIVE, "Pledge not active");
+        require(
+            rp.periodsCompleted + rp.missedCount < rp.totalPeriods,
+            "All periods accounted for"
+        );
+        require(
+            block.timestamp > rp.nextDueDate + GRACE_PERIOD + TIME_BUFFER,
+            "Grace period not over yet"
+        );
+
+        uint256 currentPeriod = rp.periodsCompleted + rp.missedCount + 1;
+
+        // Effects
+        rp.missedCount++;
+        rp.totalMissedDebt += rp.amountPerPeriod;
+        rp.nextDueDate += rp.intervalSeconds;
+
+        // Reputation — default recorded at half amount (mirrors partial weight logic)
+        _recordDefault(rp.sender, rp.amountPerPeriod / 2);
+
+        emit InstallmentMissed(recurringId, currentPeriod, rp.amountPerPeriod);
+
+        // If all periods are accounted for, move to settlement
+        if (rp.periodsCompleted + rp.missedCount == rp.totalPeriods) {
+            _finalizeRecurring(recurringId);
+        }
+    }
+
+    /// @notice Sender pays all outstanding missed installment debts to complete the contract.
+    /// @dev Only callable when status is PENDING_SETTLEMENT. Releases the full debt
+    ///      amount to the merchant and marks the contract COMPLETED.
+    /// @param recurringId ID of the recurring pledge
+    function settleDebt(uint256 recurringId) external nonReentrant whenNotPaused {
+        RecurringPledge storage rp = recurringPledges[recurringId];
+
+        require(rp.id != 0, "Recurring pledge does not exist");
+        require(msg.sender == rp.sender, "Only sender can settle");
+        require(rp.status == RecurringStatus.PENDING_SETTLEMENT, "No debt to settle");
+
+        uint256 debt = rp.totalMissedDebt;
+        require(debt > 0, "No outstanding debt");
+
+        uint256 grossDebt = _grossWithFee(debt, rp.appliedFeeBps);
+        uint256 fee = (debt * rp.appliedFeeBps) / 10000;
+
+        // Effects
+        rp.totalMissedDebt = 0;
+        rp.status = RecurringStatus.COMPLETED;
+        _decrementActive(rp.sender);
+
+        // Completion bonus — apply remaining 50% reputation weight
+        _applyCompletionBonus(rp.sender, rp.amountPerPeriod, rp.totalPeriods);
+
+        // Interactions
+        IERC20(rp.token).safeTransferFrom(msg.sender, address(this), grossDebt);
+        if (fee > 0) {
+            IERC20(rp.token).safeTransfer(feeRecipient, fee);
+            emit FeeCollected(recurringId, feeRecipient, fee);
+        }
+        IERC20(rp.token).safeTransfer(rp.merchant, debt);
+
+        emit DebtSettled(recurringId, msg.sender, debt);
+        emit RecurringPledgeCompleted(recurringId, rp.merchant);
+    }
+
+    /// @notice Cancel a recurring pledge by mutual agreement — sender calls with merchant's signature.
+    /// @dev Missed debts are forgiven on cancellation. Current period is not refundable
+    ///      since no deposit is held. Reputation is unaffected by the cancellation itself.
+    /// @param recurringId ID of the recurring pledge
+    /// @param sigExpiry   Timestamp after which the merchant signature is no longer valid
+    /// @param merchantSig Merchant's ECDSA signature approving the cancellation
+    function cancelRecurring(
+        uint256 recurringId,
+        uint256 sigExpiry,
+        bytes calldata merchantSig
+    ) external nonReentrant whenNotPaused {
+        RecurringPledge storage rp = recurringPledges[recurringId];
+
+        require(rp.id != 0, "Recurring pledge does not exist");
+        require(msg.sender == rp.sender, "Only sender can cancel");
+        require(
+            rp.status == RecurringStatus.ACTIVE || rp.status == RecurringStatus.PENDING_SETTLEMENT,
+            "Pledge not cancellable"
+        );
+        require(block.timestamp <= sigExpiry, "Signature expired");
+
+        bytes32 msgHash = keccak256(
+            abi.encodePacked(
+                block.chainid,
+                address(this),
+                "cancelRecurring",
+                recurringId,
+                sigExpiry,
+                recurringCancelNonces[recurringId]
+            )
+        );
+        bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(msgHash);
+        require(ECDSA.recover(ethHash, merchantSig) == rp.merchant, "Invalid merchant signature");
+
+        recurringCancelNonces[recurringId]++;
+
+        // Effects — debts forgiven, both parties walk away clean
+        rp.status = RecurringStatus.CANCELLED;
+        rp.totalMissedDebt = 0;
+        _decrementActive(rp.sender);
+
+        emit RecurringPledgeCancelled(recurringId, rp.sender, rp.merchant);
+    }
+
+    /// @dev Called when all periods (paid + missed) are accounted for.
+    ///      If no debt, complete immediately with full bonus. Otherwise enter settlement.
+    function _finalizeRecurring(uint256 recurringId) internal {
+        RecurringPledge storage rp = recurringPledges[recurringId];
+
+        if (rp.totalMissedDebt == 0) {
+            rp.status = RecurringStatus.COMPLETED;
+            _decrementActive(rp.sender);
+            _applyCompletionBonus(rp.sender, rp.amountPerPeriod, rp.totalPeriods);
+            emit RecurringPledgeCompleted(recurringId, rp.merchant);
+        } else {
+            rp.status = RecurringStatus.PENDING_SETTLEMENT;
+        }
+    }
+
+    /// @dev Applies the 50% completion bonus to the sender's reputation when a recurring
+    ///      pledge is fully completed. Uses WEIGHT_ON_TIME so finishing the commitment
+    ///      always scores positively regardless of any late/missed installments.
+    function _applyCompletionBonus(address sender, uint256 amountPerPeriod, uint256 totalPeriods) internal {
+        Reputation storage rep = reputations[sender];
+        // slither-disable-next-line divide-before-multiply
+        uint256 bonusAmount = (amountPerPeriod * totalPeriods) / 2; // intentional 50% completion bonus weight
+        rep.weightedScore += bonusAmount * WEIGHT_ON_TIME;
+        rep.totalWeight += bonusAmount;
+        rep.totalCount++;
+    }
+
     // ── Internal ───────────────────────────────────────────────────────────────
 
     /// @dev Finalizes a fully-funded pledge: pays the fee and the merchant, updates reputation.
@@ -586,6 +902,40 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     function getPledge(uint256 pledgeId) external view returns (Pledge memory) {
         require(pledges[pledgeId].id != 0, "Pledge does not exist");
         return pledges[pledgeId];
+    }
+
+    /// @notice Full recurring pledge details.
+    function getRecurringPledge(uint256 recurringId) external view returns (RecurringPledge memory) {
+        require(recurringPledges[recurringId].id != 0, "Recurring pledge does not exist");
+        return recurringPledges[recurringId];
+    }
+
+    /// @notice All recurring pledge IDs created by a sender.
+    function getSenderRecurringPledges(address sender) external view returns (uint256[] memory) {
+        return senderRecurringIds[sender];
+    }
+
+    /// @notice All recurring pledge IDs for a merchant.
+    function getMerchantRecurringPledges(address merchant) external view returns (uint256[] memory) {
+        return merchantRecurringIds[merchant];
+    }
+
+    /// @notice Paginated view of a sender's recurring pledge IDs.
+    function getSenderRecurringPledgesPaginated(address sender, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory page, uint256 total)
+    {
+        return _paginate(senderRecurringIds[sender], offset, limit);
+    }
+
+    /// @notice Paginated view of a merchant's recurring pledge IDs.
+    function getMerchantRecurringPledgesPaginated(address merchant, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory page, uint256 total)
+    {
+        return _paginate(merchantRecurringIds[merchant], offset, limit);
     }
 
     /// @notice All pledge IDs created by a sender (may be large — prefer the paginated getter).

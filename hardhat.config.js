@@ -1,4 +1,5 @@
 require("@nomicfoundation/hardhat-toolbox");
+require("hardhat-contract-sizer");
 require("dotenv").config();
 
 /** @type import('hardhat/config').HardhatUserConfig */
@@ -10,6 +11,7 @@ module.exports = {
         enabled: true,
         runs: 200,
       },
+      viaIR: true,
       evmVersion: "cancun",
     },
   },
@@ -25,7 +27,7 @@ module.exports = {
   },
   paths: {
     sources: "./contracts",
-    tests: "./test",
+    tests: "./test/hardhat",
     cache: "./cache",
     artifacts: "./artifacts",
   },
