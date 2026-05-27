@@ -69,6 +69,17 @@ export default function Home() {
       setAllPledges(details);
       setActivePledges(details.filter((p) => Number(p.status) === 0));
       setCompletedPledges(details.filter((p) => Number(p.status) === 1));
+
+      // If there are more pledges than last time, mark notifications dirty so the badge appears
+      try {
+        const storedCount = parseInt(localStorage.getItem("remitsafe_pledge_count") ?? "0");
+        const newCount = (ids as bigint[]).length;
+        if (newCount > storedCount) {
+          localStorage.setItem("remitsafe_pledge_count", String(newCount));
+          localStorage.setItem("remitsafe_notif_dirty", "true");
+          window.dispatchEvent(new Event("storage"));
+        }
+      } catch { /* ignore */ }
     } finally { setLoading(false); }
   }
 

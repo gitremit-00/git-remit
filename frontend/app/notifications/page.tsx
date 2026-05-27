@@ -3,7 +3,7 @@ import Header from "../../components/Header";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Bell, CheckCircle2, AlertCircle, ArrowDownCircle, PlusCircle, XCircle, FileText, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { Bell, CheckCircle2, AlertCircle, ArrowDownCircle, PlusCircle, XCircle, FileText, ArrowUpRight, ArrowDownLeft, Clock } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { CONTRACTS } from "../../contracts/addresses";
@@ -15,7 +15,7 @@ interface ActivityItem {
   id: string;
   kind: "pledge" | "transfer";
   // pledge fields
-  type?: "created" | "completed" | "defaulted" | "deposit" | "cancelled";
+  type?: "created" | "completed" | "defaulted" | "deposit" | "cancelled" | "downpayment" | "fulfilment";
   pledgeId?: string;
   // transfer fields
   direction?: "sent" | "received";
@@ -30,6 +30,13 @@ interface ActivityItem {
   blockNumber: number;
 }
 
+interface DeadlineWarning {
+  pledgeId: string;
+  hoursLeft: number;
+  amount: string;
+  commitmentDate: bigint;
+}
+
 const STORAGE_KEY = "remitsafe_read_notifs";
 function getReadIds(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")); }
@@ -42,22 +49,27 @@ function markRead(ids: string[]) {
 }
 
 const PLEDGE_ICON: Record<string, React.ReactNode> = {
-  created:   <PlusCircle size={18} color="#DDE048" />,
-  completed: <CheckCircle2 size={18} color="#22c55e" />,
-  defaulted: <AlertCircle size={18} color="#ef4444" />,
-  deposit:   <ArrowDownCircle size={18} color="#60a5fa" />,
-  cancelled: <XCircle size={18} color="#888" />,
+  created:     <PlusCircle size={18} color="#DDE048" />,
+  completed:   <CheckCircle2 size={18} color="#22c55e" />,
+  defaulted:   <AlertCircle size={18} color="#ef4444" />,
+  deposit:     <ArrowDownCircle size={18} color="#60a5fa" />,
+  cancelled:   <XCircle size={18} color="#888" />,
+  downpayment: <ArrowDownCircle size={18} color="#f59e0b" />,
+  fulfilment:  <CheckCircle2 size={18} color="#60a5fa" />,
 };
 const PLEDGE_BG: Record<string, string> = {
-  created: "#DDE04822", completed: "#22c55e22", defaulted: "#ef444422", deposit: "#60a5fa22", cancelled: "#88888822",
+  created: "#DDE04822", completed: "#22c55e22", defaulted: "#ef444422",
+  deposit: "#60a5fa22", cancelled: "#88888822",
+  downpayment: "#f59e0b22", fulfilment: "#60a5fa22",
 };
 
 export default function Notifications() {
-  const { account, provider, walletLoading } = useWallet();
+  const { account, provider, pledgeRead, walletLoading } = useWallet();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [paymentReqNotifs, setPaymentReqNotifs] = useState<PaymentRequestNotification[]>([]);
+  const [deadlineWarnings, setDeadlineWarnings] = useState<DeadlineWarning[]>([]);
   const [tab, setTab] = useState<"all" | "requests" | "sent" | "received">("all");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
@@ -72,6 +84,26 @@ export default function Notifications() {
     try {
       await Promise.all([loadActivity(), loadPaymentReqNotifs()]);
     } finally { setLoading(false); }
+  }
+
+  async function loadDeadlineWarnings(pendingPledges: { id: string; commitmentDate: bigint; totalAmount: bigint }[]) {
+    const now = Date.now() / 1000;
+    const warnings: DeadlineWarning[] = [];
+    for (const p of pendingPledges) {
+      const deadline = Number(p.commitmentDate);
+      const secondsLeft = deadline - now;
+      const hoursLeft = secondsLeft / 3600;
+      // warn if deadline is within 24 hours and hasn't passed yet
+      if (hoursLeft > 0 && hoursLeft <= 24) {
+        warnings.push({
+          pledgeId: p.id,
+          hoursLeft: Math.ceil(hoursLeft),
+          amount: parseFloat(ethers.formatUnits(p.totalAmount, 6)).toFixed(2),
+          commitmentDate: p.commitmentDate,
+        });
+      }
+    }
+    setDeadlineWarnings(warnings);
   }
 
   async function loadPaymentReqNotifs() {
@@ -100,20 +132,39 @@ export default function Notifications() {
 
     const results: ActivityItem[] = [];
 
+    // Build pledgeId → totalAmount map from PledgeCreated events so we can detect full payments in DepositMade
+    // PledgeCreated args: pledgeId, sender, merchant, totalAmount, initialDeposit, commitmentDate, appliedFeeBps
+    const pledgeTotalMap = new Map<string, number>();
+
     for (const log of [...createdSender, ...createdMerchant]) {
       const p = pledgeIface.parseLog(log); if (!p) continue;
       const pledgeId = p.args[0].toString();
       const isSender = p.args[1].toLowerCase() === addr;
       const total = parseFloat(ethers.formatUnits(p.args[3], 6));
+      const initialDeposit = parseFloat(ethers.formatUnits(p.args[4], 6));
       const fee = parseFloat((total * 0.01).toFixed(2));
-      const gross = parseFloat((total * 1.01).toFixed(2));
-      const amount = total.toFixed(2);
-      results.push({ id: log.transactionHash + "_created", kind: "pledge", type: "created", pledgeId, amount,
+      pledgeTotalMap.set(pledgeId, total);
+
+      results.push({ id: log.transactionHash + "_created", kind: "pledge", type: "created", pledgeId, amount: total.toFixed(2),
         fee: isSender ? fee.toFixed(2) : undefined,
         sign: isSender ? "negative" : "positive",
         title: isSender ? "Pledge created" : "New pledge received",
         sub: isSender ? `You pledged · #${pledgeId}` : `${total.toFixed(2)} USDC pledged to you · #${pledgeId}`,
         href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
+
+      // Separate down-payment item for the sender when an initial deposit was locked
+      if (isSender && initialDeposit > 0) {
+        const isFullUpfront = initialDeposit >= total;
+        results.push({ id: log.transactionHash + "_downpayment", kind: "pledge",
+          type: isFullUpfront ? "fulfilment" : "downpayment",
+          pledgeId, amount: initialDeposit.toFixed(2),
+          sign: "negative",
+          title: isFullUpfront ? "Full payment locked" : "Down payment locked",
+          sub: isFullUpfront
+            ? `${initialDeposit.toFixed(2)} USDC locked upfront · #${pledgeId}`
+            : `${initialDeposit.toFixed(2)} USDC down payment · #${pledgeId}`,
+          href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
+      }
     }
     for (const log of completed) {
       const p = pledgeIface.parseLog(log); if (!p) continue;
@@ -134,12 +185,21 @@ export default function Notifications() {
         href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
     }
     for (const log of deposits) {
+      // DepositMade args: pledgeId, sender, amount, totalDeposited
       const p = pledgeIface.parseLog(log); if (!p) continue;
       const pledgeId = p.args[0].toString();
-      const amount = parseFloat(ethers.formatUnits(p.args[2], 6)).toFixed(2);
-      results.push({ id: log.transactionHash + "_deposit", kind: "pledge", type: "deposit", pledgeId, amount,
+      const amount = parseFloat(ethers.formatUnits(p.args[2], 6));
+      const totalDeposited = parseFloat(ethers.formatUnits(p.args[3], 6));
+      const pledgeTotal = pledgeTotalMap.get(pledgeId);
+      const isFullPayment = pledgeTotal !== undefined && totalDeposited >= pledgeTotal;
+      results.push({ id: log.transactionHash + "_deposit", kind: "pledge",
+        type: isFullPayment ? "fulfilment" : "deposit",
+        pledgeId, amount: amount.toFixed(2),
         sign: "negative",
-        title: "Deposit made", sub: `You deposited ${amount} USDC · #${pledgeId}`,
+        title: isFullPayment ? "Full payment sent" : "Installment payment",
+        sub: isFullPayment
+          ? `Pledge #${pledgeId} fully paid · ${amount.toFixed(2)} USDC`
+          : `You paid ${amount.toFixed(2)} USDC · #${pledgeId}`,
         href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
     }
     for (const log of cancelled) {
@@ -171,10 +231,61 @@ export default function Notifications() {
         href: `https://explorer-hoodi.morph.network/tx/${log.transactionHash}`, blockNumber: log.blockNumber });
     }
 
+    // Fetch ALL pledge IDs from contract storage (not limited by block range)
+    try {
+      const [senderIds, merchantIds] = await Promise.all([
+        pledgeRead.getSenderPledges(account!) as Promise<bigint[]>,
+        pledgeRead.getMerchantPledges(account!) as Promise<bigint[]>,
+      ]);
+      const allIds = [...new Set([...senderIds, ...merchantIds].map((id) => id.toString()))];
+      const allPledges = await Promise.all(
+        allIds.map((id) => pledgeRead.getPledge(id) as Promise<{ id: bigint; sender: string; merchant: string; totalAmount: bigint; commitmentDate: bigint; status: number }>)
+      );
+
+      // Entries with type "downpayment"/"fulfilment"/"deposit" share a pledgeId with "created" — only skip if
+      // the pledge itself (created event) was already seen
+      const seenCreatedIds = new Set(
+        results.filter((r) => r.pledgeId && r.type === "created").map((r) => r.pledgeId)
+      );
+      const STATUS_LABELS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
+      const typeMap: Record<string, ActivityItem["type"]> = { COMPLETED: "completed", DEFAULTED: "defaulted", CANCELLED: "cancelled", PENDING: "created" };
+
+      for (const p of allPledges) {
+        const pledgeId = p.id.toString();
+        const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
+        // Populate map so any DepositMade log for this pledge can detect full payments
+        if (!pledgeTotalMap.has(pledgeId)) pledgeTotalMap.set(pledgeId, total);
+        if (seenCreatedIds.has(pledgeId)) continue;
+        const isSender = p.sender.toLowerCase() === addr;
+        const statusLabel = STATUS_LABELS[p.status] ?? "UNKNOWN";
+        results.push({
+          id: `pledge_${pledgeId}_contract`,
+          kind: "pledge",
+          type: typeMap[statusLabel] ?? "created",
+          pledgeId,
+          amount: total.toFixed(2),
+          sign: isSender ? "negative" : "positive",
+          title: isSender ? `Pledge #${pledgeId}` : `Received pledge #${pledgeId}`,
+          sub: `${total.toFixed(2)} USDC · ${statusLabel}`,
+          href: `/pledge/${pledgeId}`,
+          blockNumber: 0,
+        });
+      }
+
+      // Deadline warnings: pending pledges where user is sender and deadline is within 24h
+      const pendingForWarning = allPledges.filter((p) => p.status === 0 && p.sender.toLowerCase() === addr);
+      await loadDeadlineWarnings(pendingForWarning.map((p) => ({ id: p.id.toString(), commitmentDate: p.commitmentDate, totalAmount: p.totalAmount })));
+    } catch (_) {
+      // contract read failed, continue with log-based results only
+    }
+
     results.sort((a, b) => b.blockNumber - a.blockNumber);
     setActivity(results);
     setPage(1);
-    localStorage.setItem("remitsafe_notif_count", results.length.toString());
+    // Clear the dirty flag — user is now viewing activity
+    localStorage.setItem("remitsafe_notif_dirty", "false");
+    localStorage.setItem("remitsafe_pledge_count", String(results.filter((r) => r.kind === "pledge" && r.type === "created").length));
+    window.dispatchEvent(new Event("storage"));
     markRead(results.map((n) => n.id));
     setReadIds(getReadIds());
   }
@@ -278,6 +389,31 @@ export default function Notifications() {
         </div>
       ) : (
         <>
+          {/* Deadline warnings */}
+          {(tab === "all" || tab === "sent") && deadlineWarnings.length > 0 && (
+            <div className="mb-6">
+              <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">URGENT · DEADLINE TODAY</div>
+              <div className="space-y-2">
+                {deadlineWarnings.map((w) => (
+                  <Link key={w.pledgeId} href={`/pledge/${w.pledgeId}`}
+                    className="flex items-center gap-4 p-4 rounded-2xl border border-[#f59e0b]/40 bg-[#f59e0b08] hover:border-[#f59e0b]/60 transition-colors no-underline text-inherit">
+                    <div className="w-10 h-10 rounded-full bg-[#f59e0b22] flex items-center justify-center shrink-0">
+                      <Clock size={18} color="#f59e0b" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="font-bold text-white text-sm">Last day before grace period</span>
+                        <span className="w-2 h-2 rounded-full bg-[#f59e0b] shrink-0" />
+                      </div>
+                      <div className="text-xs text-[#888]">Pledge #{w.pledgeId} · {w.amount} USDC · {w.hoursLeft}h left to pay before grace activates</div>
+                    </div>
+                    <div className="text-[#f59e0b] text-xs font-bold shrink-0">Pay now →</div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Payment requests */}
           {showRequests && paymentReqNotifs.length > 0 && (
             <div className="mb-6">
@@ -374,6 +510,29 @@ export default function Notifications() {
             <Bell size={40} color="#444" className="mb-3" />
             <div className="font-bold mb-1.5">Wallet not connected</div>
             <div className="text-[#888] text-sm">Connect your wallet to see activity</div>
+          </div>
+        )}
+
+        {/* Deadline warnings */}
+        {!loading && account && (tab === "all" || tab === "sent") && deadlineWarnings.length > 0 && (
+          <div className="mb-4">
+            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-2">URGENT · DEADLINE TODAY</div>
+            {deadlineWarnings.map((w) => (
+              <Link key={w.pledgeId} href={`/pledge/${w.pledgeId}`}
+                className="flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border border-[#f59e0b]/40 bg-[#f59e0b08] no-underline text-inherit">
+                <div className="w-10 h-10 rounded-full bg-[#f59e0b22] flex items-center justify-center shrink-0">
+                  <Clock size={18} color="#f59e0b" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-bold text-white text-sm truncate">Last day before grace period</span>
+                    <span className="w-2 h-2 rounded-full bg-[#f59e0b] shrink-0" />
+                  </div>
+                  <div className="text-xs text-[#888]">Pledge #{w.pledgeId} · {w.amount} USDC · {w.hoursLeft}h left</div>
+                </div>
+                <span className="text-[#f59e0b] text-xs font-bold shrink-0">Pay →</span>
+              </Link>
+            ))}
           </div>
         )}
 

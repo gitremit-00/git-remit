@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, Send, FileText, Users, Wallet, Bell, Shield, Settings, HelpCircle, PanelLeftClose, PanelLeftOpen, ChevronRight } from "lucide-react";
@@ -9,6 +9,8 @@ import Logo from "./Logo";
 import Image from "next/image";
 import MetaMaskGate from "./MetaMaskGate";
 import { useSidebar } from "../context/SidebarContext";
+
+const NOTIF_DIRTY_KEY = "remitsafe_notif_dirty";
 
 const senderNav = [
   { href: "/", label: "Dashboard", Icon: Home },
@@ -44,6 +46,20 @@ export default function DesktopSidebar() {
   const roleLabel = isMerchant ? "MERCHANT" : "OFW SENDER";
 
   const { collapsed, toggle } = useSidebar();
+  const [hasUnread, setHasUnread] = useState(false);
+
+  useEffect(() => {
+    function checkUnread() {
+      try {
+        setHasUnread(localStorage.getItem(NOTIF_DIRTY_KEY) === "true");
+      } catch {
+        setHasUnread(false);
+      }
+    }
+    checkUnread();
+    window.addEventListener("storage", checkUnread);
+    return () => window.removeEventListener("storage", checkUnread);
+  }, [pathname]);
 
   const w = collapsed ? "w-[68px]" : "w-[260px]";
 
@@ -88,8 +104,8 @@ export default function DesktopSidebar() {
                 <Icon size={17} color={active ? "#DDE048" : "currentColor"} className="shrink-0" />
                 {!collapsed && <span className="flex-1 truncate">{label}</span>}
                 {!collapsed && arrow && <ChevronRight size={13} color="#444" className="group-hover:text-[#666]" />}
-                {!collapsed && badge && <span className="w-2 h-2 rounded-full bg-[#DDE048]" />}
-                {collapsed && badge && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#DDE048]" />}
+                {!collapsed && badge && hasUnread && <span className="w-2 h-2 rounded-full bg-[#DDE048]" />}
+                {collapsed && badge && hasUnread && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#DDE048]" />}
               </Link>
             </div>
           );
