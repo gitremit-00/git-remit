@@ -73,6 +73,7 @@ export default function PledgeDetail() {
       setTxStatus("depositing");
       const depositTx = await frozenSigner.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: depositData });
       await depositTx.wait();
+      try { localStorage.setItem("remitsafe_notif_dirty", "true"); window.dispatchEvent(new Event("storage")); } catch { /* ignore */ }
       setTxStatus("done"); loadPledge();
     } catch (err: unknown) {
       const reason = parseContractError(err);

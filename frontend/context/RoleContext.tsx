@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { useRouter, usePathname } from "next/navigation";
 import { useWallet } from "./WalletContext";
 import { fetchUserRole, getUserProfile, Role } from "../lib/supabase";
+import { isSenderOnly, isMerchantOnly, isAdminOnly, isPublic } from "../lib/routes";
 
 interface RoleContextValue {
   role: Role | null;
@@ -14,21 +15,11 @@ interface RoleContextValue {
   setAvatarUrl: (url: string | null) => void;
 }
 
-const RoleContext = createContext<RoleContextValue>({ role: null, loading: true, isNewUser: false, displayName: null, setDisplayName: () => {}, avatarUrl: null, setAvatarUrl: () => {} });
-
-// Routes only senders can access
-const SENDER_ONLY = ["/", "/new-transfer", "/pledges", "/pledge", "/recipients"];
-// Routes only merchants can access
-const MERCHANT_ONLY = ["/merchant"];
-// Routes accessible to both
-const SHARED = ["/wallet", "/notifications", "/profile", "/settings", "/help", "/onboarding"];
-
-function isSenderOnly(path: string) {
-  return SENDER_ONLY.some((r) => path === r || path.startsWith(r + "/"));
-}
-function isMerchantOnly(path: string) {
-  return MERCHANT_ONLY.some((r) => path === r || path.startsWith(r + "/"));
-}
+const RoleContext = createContext<RoleContextValue>({
+  role: null, loading: true, isNewUser: false,
+  displayName: null, setDisplayName: () => {},
+  avatarUrl: null, setAvatarUrl: () => {},
+});
 
 export function RoleProvider({ children }: { children: ReactNode }) {
   const { account, walletLoading } = useWallet();
@@ -50,23 +41,27 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Wallet connected — fetch role from Supabase
     setLoading(true);
     setIsNewUser(false);
+
+    // Always re-fetch role from Supabase — never trust cookie alone
     fetchUserRole(account).then(async (r) => {
       if (!r) {
-        // New user — send to onboarding unless already there
         setIsNewUser(true);
-        if (pathname !== "/onboarding") router.replace("/onboarding");
+        if (!isPublic(pathname) && pathname !== "/onboarding") {
+          router.replace("/signup");
+        }
       } else {
         setRole(r);
-        // Set cookie for middleware to read
         document.cookie = `rs_role=${r}; path=/; max-age=2592000`;
-        // Returning user who landed on /onboarding (e.g. after disconnect) — send to dashboard
-        if (pathname === "/onboarding") {
-          router.replace(r === "merchant" ? "/merchant" : "/");
+
+        // Redirect if on login/signup/onboarding with a known role
+        if (isPublic(pathname) || pathname === "/onboarding") {
+          if (r === "admin") router.replace("/admin");
+          else if (r === "merchant") router.replace("/merchant");
+          else router.replace("/");
         }
-        // Load display name
+
         const profile = await getUserProfile(account);
         if (profile?.name) setDisplayName(profile.name);
         if (profile?.avatar_url) setAvatarUrl(profile.avatar_url);
@@ -78,12 +73,14 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   // Route guard — runs when role or pathname changes
   useEffect(() => {
     if (loading || !role) return;
-    if (pathname === "/onboarding") return;
+    if (isPublic(pathname) || pathname === "/onboarding") return;
 
-    if (role === "sender" && isMerchantOnly(pathname)) {
-      router.replace("/");
-    } else if (role === "merchant" && isSenderOnly(pathname)) {
-      router.replace("/merchant");
+    if (role === "sender") {
+      if (isMerchantOnly(pathname) || isAdminOnly(pathname)) router.replace("/");
+    } else if (role === "merchant") {
+      if (isSenderOnly(pathname) || isAdminOnly(pathname)) router.replace("/merchant");
+    } else if (role === "admin") {
+      if (isSenderOnly(pathname) || isMerchantOnly(pathname)) router.replace("/admin");
     }
   }, [role, pathname, loading]);
 
