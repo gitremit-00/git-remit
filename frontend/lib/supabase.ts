@@ -5,7 +5,8 @@ const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(url, key);
 
-export type Role = "sender" | "merchant";
+export type Role = "sender" | "merchant" | "admin";
+export type KYCStatus = "pending" | "approved" | "rejected";
 
 export interface UserProfile {
   wallet_address: string;
@@ -13,10 +14,26 @@ export interface UserProfile {
   name: string | null;
   avatar_url: string | null;
   bio: string | null;
+  // shared
   phone: string | null;
   country: string | null;
+  country_origin: string | null;
+  kyc_status: KYCStatus;
+  kyc_reject_reason: string | null;
   created_at: string;
   updated_at: string | null;
+  // OFW-specific
+  country_work: string | null;
+  id_type: string | null;
+  id_number: string | null;
+  id_photo_url: string | null;
+  // Merchant-specific
+  business_name: string | null;
+  business_type: string | null;
+  owner_name: string | null;
+  business_address: string | null;
+  city: string | null;
+  permit_url: string | null;
 }
 
 export async function fetchUserRole(walletAddress: string): Promise<Role | null> {
@@ -60,6 +77,7 @@ export async function uploadAvatar(walletAddress: string, file: File): Promise<s
   return data.publicUrl;
 }
 
+// Legacy — kept for compatibility; new signups go through /api/signup
 export async function createUser(walletAddress: string, role: Role, name?: string): Promise<void> {
   await supabase.from("users").insert({
     wallet_address: walletAddress.toLowerCase(),
@@ -68,12 +86,66 @@ export async function createUser(walletAddress: string, role: Role, name?: strin
   });
 }
 
+export async function getUserKYCStatus(walletAddress: string): Promise<KYCStatus | null> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("kyc_status")
+    .eq("wallet_address", walletAddress.toLowerCase())
+    .single();
+  if (error || !data) return null;
+  return data.kyc_status as KYCStatus;
+}
+
+export async function getKYCQueue(): Promise<UserProfile[]> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("kyc_status", "pending")
+    .order("created_at", { ascending: true });
+  if (error || !data) return [];
+  return data as UserProfile[];
+}
+
+export async function approveKYC(walletAddress: string): Promise<void> {
+  await supabase
+    .from("users")
+    .update({ kyc_status: "approved", kyc_reject_reason: null, updated_at: new Date().toISOString() })
+    .eq("wallet_address", walletAddress.toLowerCase());
+}
+
+export async function rejectKYC(walletAddress: string, reason: string): Promise<void> {
+  await supabase
+    .from("users")
+    .update({ kyc_status: "rejected", kyc_reject_reason: reason, updated_at: new Date().toISOString() })
+    .eq("wallet_address", walletAddress.toLowerCase());
+}
+
+export async function getAllSenders(): Promise<UserProfile[]> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("role", "sender")
+    .order("created_at", { ascending: false });
+  if (error || !data) return [];
+  return data as UserProfile[];
+}
+
+export async function getAllMerchants(): Promise<UserProfile[]> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("role", "merchant")
+    .order("created_at", { ascending: false });
+  if (error || !data) return [];
+  return data as UserProfile[];
+}
+
 export interface PaymentRequest {
   id: string;
   merchant_address: string;
   merchant_name: string | null;
-  amount: number;          // USDC amount (no decimals, e.g. 250.00)
-  deadline: string;        // ISO datetime string
+  amount: number;
+  deadline: string;
   title: string | null;
   note: string | null;
   status: "open" | "fulfilled" | "cancelled";

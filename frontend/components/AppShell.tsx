@@ -6,7 +6,7 @@ import DesktopTopbar from "./DesktopTopbar";
 import BottomNav from "./BottomNav";
 import { SidebarProvider, useSidebar } from "../context/SidebarContext";
 
-const SHELL_EXCLUDED = ["/onboarding"];
+const SHELL_EXCLUDED = ["/onboarding", "/login", "/signup"];
 
 function ShellLayout({ children }: { children: ReactNode }) {
   const { collapsed } = useSidebar();

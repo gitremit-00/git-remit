@@ -52,6 +52,7 @@ export default function NewTransfer() {
     }
   }, []);
 
+  const [transferMode, setTransferMode] = useState<"merchant" | "p2p">("merchant");
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<FormState>({
     merchant: "", merchantName: "", note: "",
@@ -352,8 +353,22 @@ export default function NewTransfer() {
             </div>
             {step === 0 && (
               <div className="px-5 py-5 space-y-4">
+                {/* Transfer mode toggle */}
                 <div>
-                  <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">Merchant wallet address</label>
+                  <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">TRANSFER TYPE</label>
+                  <div className="flex gap-2">
+                    {([{ v: "merchant", label: "Send to Merchant" }, { v: "p2p", label: "Send to Person (P2P)" }] as const).map(({ v, label }) => (
+                      <button key={v} onClick={() => setTransferMode(v)}
+                        className={`flex-1 py-2 px-3 rounded-xl border text-sm font-semibold transition-colors ${transferMode === v ? "bg-[#DDE048]/10 border-[#DDE048] text-[#DDE048]" : "bg-[#0e1014] border-[#1e2230] text-[#555] hover:border-[#333]"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">
+                    {transferMode === "p2p" ? "Recipient wallet address" : "Merchant wallet address"}
+                  </label>
                   <input
                     className="w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/40 transition-colors"
                     placeholder="0x..."
@@ -366,10 +381,12 @@ export default function NewTransfer() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">Merchant name <span className="text-[#444]">(optional)</span></label>
+                  <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">
+                    {transferMode === "p2p" ? "Recipient name" : "Merchant name"} <span className="text-[#444]">(optional)</span>
+                  </label>
                   <input
                     className="w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/40 transition-colors"
-                    placeholder="e.g. St. Theresa School"
+                    placeholder={transferMode === "p2p" ? "e.g. Maria Santos" : "e.g. St. Theresa School"}
                     value={form.merchantName}
                     onChange={(e) => setForm({ ...form, merchantName: e.target.value })}
                   />
@@ -823,7 +840,19 @@ export default function NewTransfer() {
         {step === 0 && (
           <div>
             <h2 className="text-2xl font-extrabold mb-[22px]">Who are you sending to?</h2>
-            <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Merchant wallet address</label>
+            {/* Transfer mode toggle — mobile */}
+            <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Transfer type</label>
+            <div className="flex gap-2 mb-3.5">
+              {([{ v: "merchant", label: "Merchant" }, { v: "p2p", label: "Person (P2P)" }] as const).map(({ v, label }) => (
+                <button key={v} onClick={() => setTransferMode(v)}
+                  className={`flex-1 py-2.5 px-3 rounded-[14px] border text-sm font-semibold transition-colors ${transferMode === v ? "bg-[#DDE048]/10 border-[#DDE048] text-[#DDE048]" : "bg-[#11141A] border-[#1F2127] text-[#555]"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">
+              {transferMode === "p2p" ? "Recipient wallet address" : "Merchant wallet address"}
+            </label>
             <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block" placeholder="0x..."
               value={form.merchant}
               onChange={(e) => {
@@ -831,8 +860,11 @@ export default function NewTransfer() {
                 const known = getPledgeMeta(addr);
                 setForm({ ...form, merchant: addr, merchantName: known?.name ?? form.merchantName });
               }} />
-            <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">Merchant name <span className="text-[#888] font-normal">(optional)</span></label>
-            <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block" placeholder="e.g. Dr. Yanga's Colleges Inc."
+            <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">
+              {transferMode === "p2p" ? "Recipient name" : "Merchant name"} <span className="text-[#888] font-normal">(optional)</span>
+            </label>
+            <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block"
+              placeholder={transferMode === "p2p" ? "e.g. Maria Santos" : "e.g. Dr. Yanga's Colleges Inc."}
               value={form.merchantName} onChange={(e) => setForm({ ...form, merchantName: e.target.value })} />
             <div className="flex items-start gap-1.5 mt-1.5"><Info size={13} color="#666" /><span className="text-xs text-[#888] leading-relaxed">Enter the merchant&apos;s wallet address.</span></div>
           </div>
