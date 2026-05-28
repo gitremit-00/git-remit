@@ -22,7 +22,8 @@ contract RemittancePledgeForkTest is Test {
     MockUSDC         internal usdc;
     MockUSDT         internal usdt;
 
-    address internal sender   = address(0xA11CE);
+    // payer = the OFW who fulfills pledges; merchant = creates the pledge
+    address internal payer    = address(0xA11CE);
     address internal merchant = address(0xB0B);
 
     function setUp() public {
@@ -69,76 +70,86 @@ contract RemittancePledgeForkTest is Test {
 
     function test_fork_createAndCompletePledgeUSDC() public {
         uint256 amount = 10_000_000; // 10 USDC
-        uint256 gross  = pledge.quoteGrossAmount(sender, amount);
+        uint256 gross  = pledge.quoteGrossAmount(payer, amount);
 
-        // Use faucet to fund the sender on the live network
-        vm.prank(address(0)); // faucet is open to anyone
-        usdc.faucet(sender, gross);
-
-        vm.prank(sender);
-        usdc.approve(PLEDGE_ADDR, gross);
-
-        vm.prank(sender);
+        // Merchant creates the pledge targeting the payer
+        vm.prank(merchant);
         pledge.createPledge(
             USDC_ADDR,
-            merchant,
+            payer,
             amount,
-            gross,
             block.timestamp + 1 days
         );
 
         assertEq(pledge.pledgeCounter(), 1, "pledge counter should be 1");
+
+        // Use faucet to fund the payer on the live network
+        usdc.faucet(payer, gross);
+
+        vm.prank(payer);
+        usdc.approve(PLEDGE_ADDR, gross);
+
+        // Payer submits the full gross amount to complete the pledge
+        vm.prank(payer);
+        pledge.submitDeposit(1, gross);
+
         assertEq(usdc.balanceOf(merchant), amount, "merchant should have received funds");
-        assertEq(usdc.balanceOf(PLEDGE_ADDR), 0, "contract should be empty after completion");
+        assertEq(usdc.balanceOf(PLEDGE_ADDR), 0,   "contract should be empty after completion");
     }
 
     // ── Live flow: create and complete a pledge using USDT ─────────────────
 
     function test_fork_createAndCompletePledgeUSDT() public {
         uint256 amount = 10_000_000; // 10 USDT
-        uint256 gross  = pledge.quoteGrossAmount(sender, amount);
+        uint256 gross  = pledge.quoteGrossAmount(payer, amount);
 
-        usdt.faucet(sender, gross);
-
-        vm.prank(sender);
-        usdt.approve(PLEDGE_ADDR, gross);
-
-        vm.prank(sender);
+        // Merchant creates the pledge targeting the payer
+        vm.prank(merchant);
         pledge.createPledge(
             USDT_ADDR,
-            merchant,
+            payer,
             amount,
-            gross,
             block.timestamp + 1 days
         );
 
+        usdt.faucet(payer, gross);
+
+        vm.prank(payer);
+        usdt.approve(PLEDGE_ADDR, gross);
+
+        vm.prank(payer);
+        pledge.submitDeposit(1, gross);
+
         assertEq(usdt.balanceOf(merchant), amount, "merchant should have received USDT");
-        assertEq(usdt.balanceOf(PLEDGE_ADDR), 0, "contract should be empty after completion");
+        assertEq(usdt.balanceOf(PLEDGE_ADDR), 0,   "contract should be empty after completion");
     }
 
     // ── Live flow: fee is correctly deducted ───────────────────────────────
 
     function test_fork_feeIsDeducted() public {
         uint256 amount   = 10_000_000; // 10 USDC
-        uint256 gross    = pledge.quoteGrossAmount(sender, amount);
+        uint256 gross    = pledge.quoteGrossAmount(payer, amount);
         uint256 expected = gross - amount; // expected fee
 
-        address feeRecip = pledge.feeRecipient();
+        address feeRecip  = pledge.feeRecipient();
         uint256 feeBefore = usdc.balanceOf(feeRecip);
 
-        usdc.faucet(sender, gross);
-
-        vm.prank(sender);
-        usdc.approve(PLEDGE_ADDR, gross);
-
-        vm.prank(sender);
+        // Merchant creates the pledge
+        vm.prank(merchant);
         pledge.createPledge(
             USDC_ADDR,
-            merchant,
+            payer,
             amount,
-            gross,
             block.timestamp + 1 days
         );
+
+        usdc.faucet(payer, gross);
+
+        vm.prank(payer);
+        usdc.approve(PLEDGE_ADDR, gross);
+
+        vm.prank(payer);
+        pledge.submitDeposit(1, gross);
 
         uint256 feeAfter = usdc.balanceOf(feeRecip);
         assertEq(feeAfter - feeBefore, expected, "fee not correctly collected");

@@ -255,8 +255,8 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice Merchant creates a recurring payment request targeting a specific payer.
-    /// @dev Active pledge count is checked and incremented here since the payer is obligated
-    ///      from the moment the merchant creates the contract.
+    /// @dev No active slot is consumed at creation — the payer hasn't consented yet.
+    ///      The slot is taken on the payer's first installment payment, mirroring one-shot pledges.
     /// @param token           Whitelisted ERC20 token
     /// @param payer           Address of the OFW who will pay each installment
     /// @param amountPerPeriod Net token amount the merchant receives each installment
@@ -279,12 +279,6 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         require(totalPeriods >= 1 && totalPeriods <= MAX_RECURRING_PERIODS, "Invalid period count");
         require(firstDueDate > block.timestamp, "First due date must be in future");
 
-        uint256 maxActive = getMaxActivePledges(payer);
-        require(
-            activePledgeCount[payer] < maxActive,
-            "Payer has reached their active pledge limit"
-        );
-
         uint256 feeBps = getServiceFeeBps(payer);
         uint256 recurringId = ++recurringCounter;
 
@@ -306,7 +300,6 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
 
         payerRecurringIds[payer].push(recurringId);
         merchantRecurringIds[msg.sender].push(recurringId);
-        activePledgeCount[payer]++;
 
         emit RecurringPledgeCreated(
             recurringId, msg.sender, payer, token,
@@ -373,8 +366,15 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         rp.totalMissedDebt += rp.amountPerPeriod;
         rp.nextDueDate += rp.intervalSeconds;
 
-        // Reputation — default recorded at half amount (mirrors partial weight logic)
-        _recordDefault(rp.payer, rp.amountPerPeriod / 2);
+        // Reputation — drag the trust score only if the payer has engaged with
+        // this contract (at least one installment paid). An unengaged contract is
+        // a non-event for the payer's reputation; the merchant can't unilaterally
+        // damage someone's score by creating a recurring they never accepted.
+        // defaultCount is bumped once per failed contract in _finalizeRecurring.
+        if (rp.periodsCompleted > 0) {
+            // slither-disable-next-line divide-before-multiply
+            reputations[rp.payer].totalWeight += rp.amountPerPeriod / 2;
+        }
 
         emit InstallmentMissed(recurringId, currentPeriod, rp.amountPerPeriod);
 
@@ -483,7 +483,6 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         // Interactions
         IERC20(pledge.token).safeTransfer(pledge.payer, amount);
 
-        emit PledgeDefaulted(pledgeId, pledge.merchant, 0);
         emit DepositReclaimed(pledgeId, pledge.payer, amount);
     }
 
@@ -608,6 +607,17 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 gross = _grossWithFee(rp.amountPerPeriod, rp.appliedFeeBps);
         uint256 currentPeriod = rp.periodsCompleted + rp.missedCount + 1;
 
+        // First installment — payer is accepting the obligation now.
+        // Take an active slot, subject to the payer's tier limit.
+        if (rp.periodsCompleted == 0 && rp.missedCount == 0) {
+            uint256 maxActive = getMaxActivePledges(rp.payer);
+            require(
+                activePledgeCount[rp.payer] < maxActive,
+                "Payer has reached their active pledge limit"
+            );
+            activePledgeCount[rp.payer]++;
+        }
+
         // Effects
         rp.periodsCompleted++;
         rp.nextDueDate += rp.intervalSeconds;
@@ -643,6 +653,62 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         }
     }
 
+    /// @notice Payer catches up on one missed installment mid-contract.
+    /// @dev Reduces missedCount by 1, transfers amountPerPeriod (plus fee) to merchant.
+    ///      Counts as a late payment for reputation purposes.
+    ///      For paying ALL outstanding debt at the end of the contract, use settleDebt instead.
+    /// @param recurringId ID of the recurring pledge
+    function payMissedInstallment(uint256 recurringId) external nonReentrant whenNotPaused {
+        RecurringPledge storage rp = recurringPledges[recurringId];
+
+        require(rp.id != 0, "Recurring pledge does not exist");
+        require(msg.sender == rp.payer, "Only the payer can pay missed installments");
+        require(rp.status == RecurringStatus.ACTIVE, "Pledge not active");
+        require(rp.missedCount > 0, "No missed installments to pay");
+
+        uint256 gross = _grossWithFee(rp.amountPerPeriod, rp.appliedFeeBps);
+        uint256 fee = (rp.amountPerPeriod * rp.appliedFeeBps) / 10000;
+        // slither-disable-next-line divide-before-multiply
+        uint256 halfAmount = rp.amountPerPeriod / 2;
+
+        // First engagement via a make-up payment — take an active slot.
+        // Mirrors the slot logic in payInstallment for the regular first-payment path.
+        bool firstEngagement = (rp.periodsCompleted == 0);
+        if (firstEngagement) {
+            uint256 maxActive = getMaxActivePledges(rp.payer);
+            require(
+                activePledgeCount[rp.payer] < maxActive,
+                "Payer has reached their active pledge limit"
+            );
+            activePledgeCount[rp.payer]++;
+        }
+
+        // Effects — move one period from missed to completed
+        rp.missedCount--;
+        rp.totalMissedDebt -= rp.amountPerPeriod;
+        rp.periodsCompleted++;
+
+        // Reputation — make-up payment counts as a LATE installment.
+        // If this is the first engagement, the miss was unengaged so totalWeight
+        // wasn't bumped earlier — add it here. If engaged, weight was already counted.
+        Reputation storage rep = reputations[rp.payer];
+        rep.lateCount++;
+        rep.weightedScore += halfAmount * WEIGHT_LATE;
+        if (firstEngagement) {
+            rep.totalWeight += halfAmount;
+        }
+
+        // Interactions
+        IERC20(rp.token).safeTransferFrom(msg.sender, address(this), gross);
+        if (fee > 0) {
+            IERC20(rp.token).safeTransfer(feeRecipient, fee);
+            emit FeeCollected(recurringId, feeRecipient, fee);
+        }
+        IERC20(rp.token).safeTransfer(rp.merchant, rp.amountPerPeriod);
+
+        emit InstallmentPaid(recurringId, msg.sender, rp.periodsCompleted, rp.amountPerPeriod);
+    }
+
     /// @notice Payer pays all outstanding missed installment debts to complete the contract.
     /// @dev Only callable when status is PENDING_SETTLEMENT.
     /// @param recurringId ID of the recurring pledge
@@ -662,7 +728,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         // Effects
         rp.totalMissedDebt = 0;
         rp.status = RecurringStatus.COMPLETED;
-        _decrementActive(rp.payer);
+        // Slot was only taken if the payer made at least one installment.
+        if (rp.periodsCompleted > 0) {
+            _decrementActive(rp.payer);
+        }
 
         _applyCompletionBonus(rp.payer, rp.amountPerPeriod, rp.totalPeriods);
 
@@ -715,7 +784,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
 
         rp.status = RecurringStatus.CANCELLED;
         rp.totalMissedDebt = 0;
-        _decrementActive(rp.payer);
+        // Slot was only taken if the payer made at least one installment.
+        if (rp.periodsCompleted > 0) {
+            _decrementActive(rp.payer);
+        }
 
         emit RecurringPledgeCancelled(recurringId, rp.payer, rp.merchant);
     }
@@ -760,22 +832,35 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
 
         if (rp.totalMissedDebt == 0) {
             rp.status = RecurringStatus.COMPLETED;
-            _decrementActive(rp.payer);
+            // Slot was only taken if the payer made at least one installment.
+            if (rp.periodsCompleted > 0) {
+                _decrementActive(rp.payer);
+            }
             _applyCompletionBonus(rp.payer, rp.amountPerPeriod, rp.totalPeriods);
+            reputations[rp.payer].totalCount++;
             emit RecurringPledgeCompleted(recurringId, rp.merchant);
         } else {
             rp.status = RecurringStatus.PENDING_SETTLEMENT;
+            // Record one default for the failed contract — caps defaultCount inflation
+            // regardless of how many individual installments were missed.
+            // Skip if the payer never engaged (no installments paid): the contract
+            // was never accepted by them and should not damage their reputation.
+            if (rp.periodsCompleted > 0) {
+                Reputation storage rep = reputations[rp.payer];
+                rep.defaultCount++;
+                rep.totalCount++;
+            }
         }
     }
 
     /// @dev Applies the 50% completion bonus when a recurring pledge is fully completed.
+    ///      Caller is responsible for incrementing totalCount.
     function _applyCompletionBonus(address payer, uint256 amountPerPeriod, uint256 totalPeriods) internal {
         Reputation storage rep = reputations[payer];
         // slither-disable-next-line divide-before-multiply
         uint256 bonusAmount = (amountPerPeriod * totalPeriods) / 2; // intentional 50% completion bonus weight
         rep.weightedScore += bonusAmount * WEIGHT_ON_TIME;
         rep.totalWeight += bonusAmount;
-        rep.totalCount++;
     }
 
     /// @dev Finalizes a fully-funded pledge: pays the fee and the merchant, updates payer reputation.

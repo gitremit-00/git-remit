@@ -12,7 +12,7 @@ contract PledgeHandler is Test {
     RemittancePledge public pledge;
     MockUSDC         public usdc;
 
-    address public sender   = address(0xA11CE);
+    address public payer    = address(0xA11CE);
     address public merchant = address(0xB0B);
     address public feeRecip;
 
@@ -29,92 +29,80 @@ contract PledgeHandler is Test {
 
     function createAndCompletePledge(uint256 amount) external {
         amount = bound(amount, 1_000_000, 1_000_000_000_000);
-        uint256 gross = pledge.quoteGrossAmount(sender, amount);
+        uint256 gross = pledge.quoteGrossAmount(payer, amount);
 
-        deal(address(usdc), sender, gross);
-        vm.prank(sender);
+        // Merchant creates the pledge
+        vm.prank(merchant);
+        pledge.createPledge(address(usdc), payer, amount, block.timestamp + 1 days);
+
+        uint256 pledgeId = pledge.pledgeCounter();
+
+        // Payer submits the full gross amount in one shot
+        deal(address(usdc), payer, gross);
+        vm.prank(payer);
         usdc.approve(address(pledge), gross);
 
-        vm.prank(sender);
-        pledge.createPledge(
-            address(usdc),
-            merchant,
-            amount,
-            gross,
-            block.timestamp + 1 days
-        );
-
-        ghost_totalDeposited += gross;
-        ghost_totalReleased  += gross;
+        vm.prank(payer);
+        try pledge.submitDeposit(pledgeId, gross) {
+            ghost_totalDeposited += gross;
+            ghost_totalReleased  += gross;
+        } catch {}
     }
 
     function createAndTopUpPledge(uint256 amount, uint256 depositPct) external {
         amount     = bound(amount, 1_000_000, 500_000_000_000);
         depositPct = bound(depositPct, 20, 99);
 
-        uint256 gross   = pledge.quoteGrossAmount(sender, amount);
-        uint256 deposit = (gross * depositPct) / 100;
+        uint256 gross     = pledge.quoteGrossAmount(payer, amount);
+        uint256 deposit   = (gross * depositPct) / 100;
         uint256 remaining = gross - deposit;
         if (deposit == 0 || remaining == 0) return;
 
-        deal(address(usdc), sender, gross);
-        vm.prank(sender);
-        usdc.approve(address(pledge), gross);
-
-        uint256 pledgeId = pledge.pledgeCounter() + 1;
-
-        vm.prank(sender);
+        // Merchant creates the pledge
+        vm.prank(merchant);
         try pledge.createPledge(
             address(usdc),
-            merchant,
+            payer,
             amount,
-            deposit,
             block.timestamp + 7 days
         ) {
-            ghost_totalDeposited += deposit;
+            uint256 pledgeId = pledge.pledgeCounter();
 
-            vm.prank(sender);
-            try pledge.depositRemaining(pledgeId, remaining) {
-                ghost_totalDeposited += remaining;
-                ghost_totalReleased  += gross;
+            deal(address(usdc), payer, gross);
+            vm.prank(payer);
+            usdc.approve(address(pledge), gross);
+
+            vm.prank(payer);
+            try pledge.submitDeposit(pledgeId, deposit) {
+                ghost_totalDeposited += deposit;
+
+                vm.prank(payer);
+                try pledge.submitDeposit(pledgeId, remaining) {
+                    ghost_totalDeposited += remaining;
+                    ghost_totalReleased  += gross;
+                } catch {}
             } catch {}
         } catch {}
     }
 
     function claimDefault(uint256 pledgeId) external {
         pledgeId = bound(pledgeId, 1, pledge.pledgeCounter());
-        (, , , , , , , uint256 commitmentDate, , RemittancePledge.PledgeStatus status, ) =
-            _getPledgeFields(pledgeId);
+        RemittancePledge.Pledge memory p = pledge.getPledge(pledgeId);
 
-        if (status != RemittancePledge.PledgeStatus.PENDING) return;
+        if (p.status != RemittancePledge.PledgeStatus.PENDING) return;
+        if (p.depositedAmount == 0) return;
 
-        uint256 claimableAt = commitmentDate
+        uint256 claimableAt = p.commitmentDate
             + pledge.GRACE_PERIOD()
             + pledge.TIME_BUFFER()
             + 1;
 
         vm.warp(claimableAt);
 
-        (, , , , , , uint256 depositedAmount, , , ,) = _getPledgeFields(pledgeId);
-
         vm.prank(merchant);
         try pledge.claimDefaultedDeposit(pledgeId) {
-            ghost_totalReleased += depositedAmount;
+            ghost_totalReleased += p.depositedAmount;
         } catch {}
-    }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    function _getPledgeFields(uint256 id) internal view returns (
-        uint256, address, address, address, uint256, uint256,
-        uint256, uint256, uint256, RemittancePledge.PledgeStatus, bool
-    ) {
-        RemittancePledge.Pledge memory p = pledge.getPledge(id);
-        return (
-            p.id, p.sender, p.merchant, p.token,
-            p.totalAmount, p.initialDeposit, p.depositedAmount,
-            p.commitmentDate, p.appliedFeeBps, p.status, p.paidDuringGrace
-        );
     }
 }
 

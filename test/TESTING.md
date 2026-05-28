@@ -15,6 +15,8 @@ test/
 
 **What it does:** Unit and integration tests. Covers every function, revert path, event, and reputation logic in the contract.
 
+**Role model:** Merchants create pledges targeting a payer (OFW). The payer fulfills the pledge by calling `submitDeposit`. This is the core cross-border remittance flow — the merchant invoices, the OFW pays.
+
 ### Setup
 
 ```bash
@@ -29,11 +31,12 @@ npx hardhat test
 
 # Run a specific feature group
 npx hardhat test --grep "createPledge"
-npx hardhat test --grep "depositRemaining"
+npx hardhat test --grep "submitDeposit"
 npx hardhat test --grep "claimDefaultedDeposit"
 npx hardhat test --grep "reclaimDeposit"
 npx hardhat test --grep "extendDeadline"
 npx hardhat test --grep "cancelPledge"
+npx hardhat test --grep "sendP2P"
 npx hardhat test --grep "createRecurringPledge"
 npx hardhat test --grep "payInstallment"
 npx hardhat test --grep "markMissedInstallment"
@@ -44,7 +47,7 @@ npx hardhat test --grep "recurring pledge reputation"
 npx hardhat test --grep "views and fee tiers"
 
 # Run a specific test by name
-npx hardhat test --grep "auto-releases when initial deposit covers the full gross"
+npx hardhat test --grep "completes the pledge when full gross is deposited"
 
 # Run a specific test file
 npx hardhat test test/hardhat/RemittancePledge.test.js
@@ -59,14 +62,14 @@ npx hardhat coverage
 ### Expected output (Hardhat)
 
 ```text
-146 passing
+163 passing
 ```
 
 ### Expected coverage
 
 | File                 | Statements | Branches | Functions | Lines |
 | -------------------- | ---------- | -------- | --------- | ----- |
-| RemittancePledge.sol | 99.58%     | 84.96%   | 100%      | 100%  |
+| RemittancePledge.sol | 99.60%     | 85.82%   | 100%      | 100%  |
 | MockTokens.sol       | 100%       | 100%     | 100%      | 100%  |
 
 > The ~15% uncovered branches are mathematically unreachable paths in fee and overflow guards — expected and safe to ignore.
@@ -118,28 +121,28 @@ All forge commands on Windows must be run through WSL:
 
 ```bash
 # Run all fuzz tests
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test"
+wsl bash -c "cd '/mnt/c/Users/new user/git-remit' && ~/.foundry/bin/forge test"
 
 # Run with verbosity (shows test names)
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test -v"
+wsl bash -c "cd '/mnt/c/Users/new user/git-remit' && ~/.foundry/bin/forge test -v"
 
 # Run with full trace on failure
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test -vvvv"
+wsl bash -c "cd '/mnt/c/Users/new user/git-remit' && ~/.foundry/bin/forge test -vvvv"
 
 # Run a specific test file
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test --match-path test/foundry/RemittancePledge.fuzz.t.sol"
+wsl bash -c "cd '/mnt/c/Users/new user/git-remit' && ~/.foundry/bin/forge test --match-path test/foundry/RemittancePledge.fuzz.t.sol"
 
 # Run a specific test function
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test --match-test testFuzz_completionConservesMoney"
+wsl bash -c "cd '/mnt/c/Users/new user/git-remit' && ~/.foundry/bin/forge test --match-test testFuzz_completionConservesMoney"
 
 # Run with a custom fuzz seed (for reproducibility)
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test --fuzz-seed 12345"
+wsl bash -c "cd '/mnt/c/Users/new user/git-remit' && ~/.foundry/bin/forge test --fuzz-seed 12345"
 
 # Run only fuzz tests
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test --match-path test/foundry/RemittancePledge.fuzz.t.sol -v"
+wsl bash -c "cd '/mnt/c/Users/new user/git-remit' && ~/.foundry/bin/forge test --match-path test/foundry/RemittancePledge.fuzz.t.sol -v"
 
 # Run only invariant tests
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test --match-path test/foundry/RemittancePledge.invariant.t.sol -v"
+wsl bash -c "cd '/mnt/c/Users/new user/git-remit' && ~/.foundry/bin/forge test --match-path test/foundry/RemittancePledge.invariant.t.sol -v"
 ```
 
 > Fuzz runs are configured in `foundry.toml` — **1000 runs** per fuzz test, **64 runs × 30 depth** per invariant test.
@@ -149,6 +152,8 @@ wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge t
 ### Fork Commands
 
 Fork tests run against the live deployed contracts on Morph testnet.
+
+> **Note:** Fork tests require the contract to be deployed first. If the contract has been updated and not yet redeployed, fork tests will revert. Redeploy to Morph Holesky and update the addresses in `test/foundry/RemittancePledge.fork.t.sol` before running these.
 
 **Deployed addresses (Morph Holesky):**
 
@@ -251,9 +256,36 @@ slither . --compile-force-framework hardhat --config-file .slither.config.json -
 
 ### Notes
 
-- All findings from `node_modules/@openzeppelin` are false positives — ignore them
+- All findings from `node_modules/@openzeppelin` are false positives — ignore them entirely
+- The only finding from our contracts is the `timestamp` detector on `RemittancePledge.sol` — this is expected and safe. Every time-based function (deadlines, grace periods, claim windows) must compare against `block.timestamp`. There is no alternative.
 - Known suppressions are already applied inline in the contract with `// slither-disable-next-line`
 - The config file `.slither.config.json` at project root excludes node_modules, informational, and optimization findings automatically
+
+### Contract summary (`--print human-summary`)
+
+```text
+Total contracts in source files : 1
+Contracts in dependencies       : 23
+Contracts in tests              : 3
+SLOC (source files)             : 747
+SLOC (dependencies)             : 2072
+Assembly lines                  : 0
+Optimization issues             : 0
+Informational issues            : 57   ← all from node_modules
+Low issues                      : 13   ← all from node_modules
+Medium issues                   : 9    ← all from node_modules
+High issues                     : 1    ← all from node_modules
+```
+
+| Name             | Functions | Complex code |
+| ---------------- | --------- | ------------ |
+| RemittancePledge | 67        | No           |
+
+All reported issues are from OpenZeppelin dependencies. `RemittancePledge.sol` itself has no high, medium, or low findings — only the expected `timestamp` warnings which are intentional.
+
+### Clean run result
+
+Running `slither . --compile-force-framework hardhat --config-file .slither.config.json` should produce **0 findings** from project contracts after filters are applied. Raw output (without the config) will show `timestamp` warnings from `RemittancePledge.sol` — these are intentional and not actionable.
 
 ---
 
@@ -264,7 +296,7 @@ slither . --compile-force-framework hardhat --config-file .slither.config.json -
 npx hardhat test
 
 # 2. Foundry — fuzz and invariant tests
-wsl bash -c "cd /mnt/c/Users/<your-username>/git-remit && ~/.foundry/bin/forge test -v"
+wsl bash -c "cd '/mnt/c/Users/<your-username>/git-remit' && ~/.foundry/bin/forge test -v"
 
 # 3. Slither — static analysis
 slither . --compile-force-framework hardhat --config-file .slither.config.json

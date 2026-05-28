@@ -9,7 +9,7 @@ contract RemittancePledgeFuzzTest is Test {
     RemittancePledge internal pledge;
     MockUSDC internal usdc;
 
-    address internal sender   = address(0xA11CE);
+    address internal payer    = address(0xA11CE);
     address internal merchant = address(0xB0B);
     address internal feeRecip = address(0xFEE);
 
@@ -25,7 +25,7 @@ contract RemittancePledgeFuzzTest is Test {
 
     function testFuzz_grossNeverBelowNet(uint256 totalAmount) public view {
         totalAmount = bound(totalAmount, MIN_PLEDGE, MAX_PLEDGE);
-        uint256 gross = pledge.quoteGrossAmount(sender, totalAmount);
+        uint256 gross = pledge.quoteGrossAmount(payer, totalAmount);
         assertGe(gross, totalAmount, "gross must be >= net");
         uint256 fee = gross - totalAmount;
         assertEq(fee, (totalAmount * 100) / 10000, "fee must equal exactly 1%");
@@ -33,21 +33,28 @@ contract RemittancePledgeFuzzTest is Test {
 
     function testFuzz_grossNoOverflow(uint256 totalAmount) public view {
         totalAmount = bound(totalAmount, MIN_PLEDGE, MAX_PLEDGE);
-        uint256 gross = pledge.quoteGrossAmount(sender, totalAmount);
+        uint256 gross = pledge.quoteGrossAmount(payer, totalAmount);
         assertGt(gross, 0);
     }
 
     function testFuzz_escrowBalanceMatchesDeposit(uint256 totalAmount, uint256 depositPct) public {
         totalAmount = bound(totalAmount, MIN_PLEDGE, MAX_PLEDGE);
         depositPct  = bound(depositPct, 20, 100);
-        uint256 gross   = pledge.quoteGrossAmount(sender, totalAmount);
+        uint256 gross   = pledge.quoteGrossAmount(payer, totalAmount);
         uint256 deposit = (gross * depositPct) / 100;
         if (deposit == 0) return;
-        deal(address(usdc), sender, gross);
-        vm.prank(sender);
+
+        // Merchant creates the pledge
+        vm.prank(merchant);
+        pledge.createPledge(address(usdc), payer, totalAmount, block.timestamp + 30 days);
+
+        // Payer funds and deposits
+        deal(address(usdc), payer, gross);
+        vm.prank(payer);
         usdc.approve(address(pledge), deposit);
-        vm.prank(sender);
-        pledge.createPledge(address(usdc), merchant, totalAmount, deposit, block.timestamp + 30 days);
+        vm.prank(payer);
+        pledge.submitDeposit(1, deposit);
+
         uint256 contractBal = usdc.balanceOf(address(pledge));
         if (deposit >= gross) {
             assertEq(contractBal, 0, "completed pledge should leave 0 in contract");
@@ -58,16 +65,25 @@ contract RemittancePledgeFuzzTest is Test {
 
     function testFuzz_completionConservesMoney(uint256 totalAmount) public {
         totalAmount = bound(totalAmount, MIN_PLEDGE, MAX_PLEDGE);
-        uint256 gross   = pledge.quoteGrossAmount(sender, totalAmount);
+        uint256 gross   = pledge.quoteGrossAmount(payer, totalAmount);
         uint256 deposit = (gross * 40) / 100;
-        deal(address(usdc), sender, gross);
-        vm.prank(sender);
-        usdc.approve(address(pledge), gross);
-        vm.prank(sender);
-        pledge.createPledge(address(usdc), merchant, totalAmount, deposit, block.timestamp + 30 days);
         uint256 remaining = gross - deposit;
-        vm.prank(sender);
-        pledge.depositRemaining(1, remaining);
+
+        // Merchant creates the pledge
+        vm.prank(merchant);
+        pledge.createPledge(address(usdc), payer, totalAmount, block.timestamp + 30 days);
+
+        // Payer funds and submits partial deposit then remaining
+        deal(address(usdc), payer, gross);
+        vm.prank(payer);
+        usdc.approve(address(pledge), gross);
+
+        vm.prank(payer);
+        pledge.submitDeposit(1, deposit);
+
+        vm.prank(payer);
+        pledge.submitDeposit(1, remaining);
+
         uint256 merchantBal = usdc.balanceOf(merchant);
         uint256 feeBal      = usdc.balanceOf(feeRecip);
         assertEq(merchantBal, totalAmount,           "merchant receives net amount");
