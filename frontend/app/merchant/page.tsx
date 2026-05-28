@@ -12,6 +12,7 @@ import BottomNav from "../../components/BottomNav";
 import Header from "../../components/Header";
 import { CONTRACTS } from "../../contracts/addresses";
 import DashboardWalletConfirm from "../../components/DashboardWalletConfirm";
+import KYCBanner from "../../components/KYCBanner";
 
 interface PledgeRaw { id: bigint; payer: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
 
@@ -100,6 +101,7 @@ export default function MerchantDashboard() {
   /* ── DESKTOP ── */
   const Desktop = (
     <div className="hidden md:block p-8">
+      <KYCBanner />
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
@@ -311,6 +313,7 @@ export default function MerchantDashboard() {
   const Mobile = (
     <div className="md:hidden">
       <Header title="Merchant" />
+      <div className="px-4 pt-4"><KYCBanner /></div>
       <div className="px-4 pt-4 pb-24">
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 mb-5">

@@ -9,31 +9,32 @@ export const supabase: SupabaseClient | null = hasSupabaseConfig
   : null;
 
 export type Role = "sender" | "merchant" | "admin";
-export type KYCStatus = "pending" | "approved" | "rejected";
+export type KYCStatus = "pending" | "verified" | "rejected" | "needs_revision";
 
 export interface UserProfile {
-  wallet_address: string;
+  id: string;
+  username: string;
+  email: string | null;
   role: Role;
   name: string | null;
   avatar_url: string | null;
   bio: string | null;
-  // shared
   phone: string | null;
   country: string | null;
   country_origin: string | null;
+  country_work: string | null;
   kyc_status: KYCStatus;
-  kyc_reject_reason: string | null;
+  kyc_rejection_reason: string | null;
+  kyc_reviewed_at: string | null;
   created_at: string;
   updated_at: string | null;
   // OFW-specific
-  country_work: string | null;
   id_type: string | null;
   id_number: string | null;
   id_photo_url: string | null;
   // Merchant-specific
   business_name: string | null;
   business_type: string | null;
-  owner_name: string | null;
   business_address: string | null;
   city: string | null;
   permit_url: string | null;
@@ -42,7 +43,7 @@ export interface UserProfile {
 type ProfileRow = {
   id: string;
   username: string;
-  role: "ofw_sender" | "merchant";
+  role: "ofw_sender" | "merchant" | "admin";
   full_name: string | null;
   phone_number: string | null;
   email: string | null;
@@ -52,51 +53,65 @@ type ProfileRow = {
   id_number: string | null;
   gov_id_photo_url: string | null;
   business_permit_url: string | null;
+  bio: string | null;
+  avatar_url: string | null;
+  business_name: string | null;
+  business_type: string | null;
+  business_address: string | null;
+  city: string | null;
+  kyc_status: KYCStatus;
+  kyc_rejection_reason: string | null;
+  kyc_reviewed_at: string | null;
   created_at: string;
   updated_at: string | null;
 };
 
+const KYC_SELECT = "id,username,role,full_name,phone_number,email,country_of_work,country_of_origin,gov_id_type,id_number,gov_id_photo_url,business_permit_url,bio,avatar_url,business_name,business_type,business_address,city,kyc_status,kyc_rejection_reason,kyc_reviewed_at,created_at,updated_at";
+
 function appRole(role: string): Role {
-  return role === "merchant" ? "merchant" : "sender";
+  if (role === "merchant") return "merchant";
+  if (role === "admin") return "admin";
+  return "sender";
 }
 
 function mapProfile(row: ProfileRow): UserProfile {
   return {
-    wallet_address: row.id,
+    id: row.id,
+    username: row.username,
+    email: row.email,
     role: appRole(row.role),
     name: row.full_name,
-    avatar_url: null,
-    bio: null,
+    avatar_url: row.avatar_url,
+    bio: row.bio,
     phone: row.phone_number,
     country: row.country_of_origin,
     country_origin: row.country_of_origin,
-    kyc_status: "pending",
-    kyc_reject_reason: null,
+    country_work: row.country_of_work,
+    kyc_status: (row.kyc_status as KYCStatus) ?? "pending",
+    kyc_rejection_reason: row.kyc_rejection_reason,
+    kyc_reviewed_at: row.kyc_reviewed_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    country_work: row.country_of_work,
     id_type: row.gov_id_type,
     id_number: row.id_number,
     id_photo_url: row.gov_id_photo_url,
-    business_name: row.role === "merchant" ? row.full_name : null,
-    business_type: null,
-    owner_name: row.role === "merchant" ? row.full_name : null,
-    business_address: null,
-    city: null,
+    business_name: row.business_name,
+    business_type: row.business_type,
+    business_address: row.business_address,
+    city: row.city,
     permit_url: row.business_permit_url,
   };
 }
 
 function profileQuery(identifier: string) {
   const normalized = identifier.toLowerCase();
-  if (normalized.includes("@")) return supabase!.from("profiles").select("*").eq("email", normalized).single();
-  if (/^[0-9a-f-]{36}$/i.test(normalized)) return supabase!.from("profiles").select("*").eq("id", normalized).single();
-  return supabase!.from("profiles").select("*").eq("username", normalized).single();
+  if (normalized.includes("@")) return supabase!.from("profiles").select(KYC_SELECT).eq("email", normalized).single();
+  if (/^[0-9a-f-]{36}$/i.test(normalized)) return supabase!.from("profiles").select(KYC_SELECT).eq("id", normalized).single();
+  return supabase!.from("profiles").select(KYC_SELECT).eq("username", normalized).single();
 }
 
 export async function fetchUserRole(identifier: string): Promise<Role | null> {
   if (!supabase) return "sender";
-
   const { data, error } = await profileQuery(identifier);
   if (error || !data) return null;
   return appRole((data as ProfileRow).role);
@@ -104,34 +119,32 @@ export async function fetchUserRole(identifier: string): Promise<Role | null> {
 
 export async function getUserProfile(identifier: string): Promise<UserProfile | null> {
   if (!supabase) return null;
-
   const { data, error } = await profileQuery(identifier);
   if (error || !data) return null;
   return mapProfile(data as ProfileRow);
 }
 
 export async function updateUserProfile(
-  walletAddress: string,
+  userId: string,
   updates: Partial<Pick<UserProfile, "name" | "avatar_url" | "bio" | "phone" | "country">>
 ): Promise<void> {
   if (!supabase) return;
-
   await supabase
     .from("profiles")
     .update({
       full_name: updates.name,
       phone_number: updates.phone,
       country_of_origin: updates.country,
-      updated_at: new Date().toISOString(),
+      avatar_url: updates.avatar_url,
+      bio: updates.bio,
     })
-    .eq("id", walletAddress.toLowerCase());
+    .eq("id", userId);
 }
 
-export async function uploadAvatar(walletAddress: string, file: File): Promise<string | null> {
+export async function uploadAvatar(userId: string, file: File): Promise<string | null> {
   if (!supabase) return null;
-
   const ext = file.name.split(".").pop();
-  const path = `${walletAddress.toLowerCase()}/avatar.${ext}`;
+  const path = `${userId}/avatar.${ext}`;
   const { error } = await supabase.storage
     .from("avatars")
     .upload(path, file, { upsert: true, contentType: file.type });
@@ -140,33 +153,30 @@ export async function uploadAvatar(walletAddress: string, file: File): Promise<s
   return data.publicUrl;
 }
 
-// Legacy — kept for compatibility; new signups go through /api/signup
-export async function createUser(walletAddress: string, role: Role, name?: string): Promise<void> {
-  return;
+export async function getUserKYCStatus(userId: string): Promise<KYCStatus | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.from("profiles").select("kyc_status").eq("id", userId).single();
+  return (data?.kyc_status as KYCStatus) ?? null;
 }
 
-export async function getUserKYCStatus(walletAddress: string): Promise<KYCStatus | null> {
-  return null;
-}
-
-export async function getKYCQueue(): Promise<UserProfile[]> {
-  return [];
-}
-
-export async function approveKYC(walletAddress: string): Promise<void> {
-  return;
-}
-
-export async function rejectKYC(walletAddress: string, reason: string): Promise<void> {
-  return;
+export async function getKYCQueue(statusFilter?: KYCStatus): Promise<UserProfile[]> {
+  if (!supabase) return [];
+  let query = supabase
+    .from("profiles")
+    .select(KYC_SELECT)
+    .in("role", ["ofw_sender", "merchant"])
+    .order("created_at", { ascending: false });
+  if (statusFilter) query = query.eq("kyc_status", statusFilter);
+  const { data, error } = await query;
+  if (error || !data) return [];
+  return (data as ProfileRow[]).map(mapProfile);
 }
 
 export async function getAllSenders(): Promise<UserProfile[]> {
   if (!supabase) return [];
-
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select(KYC_SELECT)
     .eq("role", "ofw_sender")
     .order("created_at", { ascending: false });
   if (error || !data) return [];
@@ -175,15 +185,19 @@ export async function getAllSenders(): Promise<UserProfile[]> {
 
 export async function getAllMerchants(): Promise<UserProfile[]> {
   if (!supabase) return [];
-
   const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select(KYC_SELECT)
     .eq("role", "merchant")
     .order("created_at", { ascending: false });
   if (error || !data) return [];
   return (data as ProfileRow[]).map(mapProfile);
 }
+
+// Legacy stubs
+export async function createUser(_walletAddress: string, _role: Role, _name?: string): Promise<void> { return; }
+export async function approveKYC(_id: string): Promise<void> { return; }
+export async function rejectKYC(_id: string, _reason: string): Promise<void> { return; }
 
 export interface PaymentRequest {
   id: string;
@@ -346,6 +360,7 @@ export async function createTransferRequest(
     | "note"
   >
 ): Promise<TransferRequest | null> {
+  if (!supabase) return null;
   const { data, error } = await supabase
     .from("transfer_requests")
     .insert({
@@ -361,6 +376,7 @@ export async function createTransferRequest(
 }
 
 export async function getTransferRequest(id: string): Promise<TransferRequest | null> {
+  if (!supabase) return null;
   const { data, error } = await supabase
     .from("transfer_requests")
     .select("*")
@@ -371,6 +387,7 @@ export async function getTransferRequest(id: string): Promise<TransferRequest | 
 }
 
 export async function getSenderTransferRequests(senderAddress: string): Promise<TransferRequest[]> {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from("transfer_requests")
     .select("*")
@@ -381,6 +398,7 @@ export async function getSenderTransferRequests(senderAddress: string): Promise<
 }
 
 export async function getMerchantTransferRequests(merchantAddress: string): Promise<TransferRequest[]> {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from("transfer_requests")
     .select("*")
@@ -392,6 +410,7 @@ export async function getMerchantTransferRequests(merchantAddress: string): Prom
 
 // Merchant accepts the sender's proposal as-is
 export async function acceptTransferRequest(id: string): Promise<void> {
+  if (!supabase) return;
   await supabase
     .from("transfer_requests")
     .update({ status: "accepted", updated_at: new Date().toISOString() })
@@ -408,6 +427,7 @@ export async function merchantCounterPropose(
   >,
   currentCount: number
 ): Promise<void> {
+  if (!supabase) return;
   await supabase
     .from("transfer_requests")
     .update({
@@ -425,6 +445,7 @@ export async function senderAcceptsCounter(id: string, counter: Pick<TransferReq
   | "counter_amount_per_period" | "counter_interval_seconds" | "counter_total_periods"
   | "counter_first_due_date" | "counter_note"
 >): Promise<void> {
+  if (!supabase) return;
   await supabase
     .from("transfer_requests")
     .update({
@@ -460,6 +481,7 @@ export async function senderCounterPropose(
   >,
   currentCount: number
 ): Promise<void> {
+  if (!supabase) return;
   await supabase
     .from("transfer_requests")
     .update({
@@ -480,6 +502,7 @@ export async function senderCounterPropose(
 }
 
 export async function cancelTransferRequest(id: string, cancelledBy: CancelledBy): Promise<void> {
+  if (!supabase) return;
   await supabase
     .from("transfer_requests")
     .update({ status: "cancelled", cancelled_by: cancelledBy, updated_at: new Date().toISOString() })
@@ -488,6 +511,7 @@ export async function cancelTransferRequest(id: string, cancelledBy: CancelledBy
 
 // Called after on-chain pledge creation succeeds
 export async function confirmTransferRequest(id: string, pledgeId: string, txHash: string): Promise<void> {
+  if (!supabase) return;
   await supabase
     .from("transfer_requests")
     .update({ status: "confirmed", pledge_id: pledgeId, tx_hash: txHash, updated_at: new Date().toISOString() })
@@ -499,6 +523,7 @@ export async function sendTransferRequestNotification(
   recipientAddress: string,
   type: TransferRequestNotificationType
 ): Promise<void> {
+  if (!supabase) return;
   await supabase
     .from("transfer_request_notifications")
     .insert({ request_id: requestId, recipient_address: recipientAddress.toLowerCase(), type });
@@ -507,6 +532,7 @@ export async function sendTransferRequestNotification(
 export async function getTransferRequestNotifications(
   recipientAddress: string
 ): Promise<TransferRequestNotification[]> {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from("transfer_request_notifications")
     .select("*, transfer_requests(*)")
@@ -517,5 +543,7 @@ export async function getTransferRequestNotifications(
 }
 
 export async function markTransferNotificationRead(id: string): Promise<void> {
+  if (!supabase) return;
   await supabase.from("transfer_request_notifications").update({ read: true }).eq("id", id);
 }
+

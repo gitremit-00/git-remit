@@ -12,6 +12,7 @@ import ProgressBar from "../components/ProgressBar";
 import { useCurrency } from "../context/CurrencyContext";
 import { getPledgeMeta } from "../lib/pledgeMeta";
 import DashboardWalletConfirm from "../components/DashboardWalletConfirm";
+import KYCBanner from "../components/KYCBanner";
 
 interface RepState { score: number; onTime: number; total: number; defaults: number; late: number; }
 interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
@@ -100,6 +101,7 @@ export default function Home() {
   /* ── DESKTOP LAYOUT ── */
   const DesktopDashboard = (
     <div className="hidden md:block p-8">
+      <KYCBanner />
       {/* Page header */}
       <div className="flex items-start justify-between mb-8">
         <div>
@@ -399,6 +401,7 @@ export default function Home() {
   const MobileDashboard = (
     <div className="md:hidden">
       <Header />
+      <div className="px-4 pt-4"><KYCBanner /></div>
       <div className="px-4 pt-5 pb-4">
         <div className="mb-3">
           <div className="text-[#888] text-[13px]">Welcome,</div>

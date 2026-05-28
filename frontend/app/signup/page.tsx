@@ -89,6 +89,9 @@ export default function Signup() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [verificationReady, setVerificationReady] = useState(false);
+  const [devOtp, setDevOtp] = useState<string | null>(null);
+  const [otpValue, setOtpValue] = useState("");
+  const [verified, setVerified] = useState(false);
 
   const issues = useMemo(() => passwordIssues(form.password), [form.password]);
   const canSubmit = Boolean(
@@ -124,7 +127,22 @@ export default function Signup() {
       });
       const result = await postForm("/api/auth/register", data);
       setMessage(result.message);
+      if (result.devOtp) setDevOtp(result.devOtp);
       setVerificationReady(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitVerify(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true); setError(""); setMessage("");
+    try {
+      const result = await postJson("/api/auth/verify-email", { otp: otpValue });
+      setMessage(result.message);
+      setVerified(true);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -147,17 +165,53 @@ export default function Signup() {
 
           {verificationReady ? (
             <div className="max-w-sm mx-auto text-center">
-              <div className="w-14 h-14 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-4">
-                <CheckCircle2 size={24} color="#22c55e" />
-              </div>
-              <h2 className="text-white font-extrabold text-lg mb-2">Check your email</h2>
-              <p className="text-[#888] text-sm leading-relaxed mb-5">
-                Supabase sent a verification link to <span className="text-white font-semibold">{form.email}</span>.
-                Open that link, then return to log in.
-              </p>
-              <Link href="/login" className="w-full bg-[#DDE048] text-black font-extrabold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2">
-                Go to Login <ArrowRight size={15} />
-              </Link>
+              {verified ? (
+                <>
+                  <div className="w-14 h-14 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle2 size={24} color="#22c55e" />
+                  </div>
+                  <h2 className="text-white font-extrabold text-lg mb-2">Email verified!</h2>
+                  <p className="text-[#888] text-sm leading-relaxed mb-5">Your account is active. You can now log in.</p>
+                  <Link href="/login" className="w-full bg-[#DDE048] text-black font-extrabold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2">
+                    Go to Login <ArrowRight size={15} />
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <div className="w-14 h-14 rounded-2xl bg-[#DDE048]/10 border border-[#DDE048]/20 flex items-center justify-center mx-auto mb-4">
+                    <Check size={24} color="#DDE048" />
+                  </div>
+                  <h2 className="text-white font-extrabold text-lg mb-1">Verify your email</h2>
+                  <p className="text-[#888] text-sm leading-relaxed mb-5">
+                    We sent a 6-digit code to <span className="text-white font-semibold">{form.email}</span>. Enter it below to activate your account.
+                  </p>
+                  {devOtp && (
+                    <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs rounded-xl px-3 py-2 mb-4 text-left">
+                      Development code: <span className="font-mono font-bold">{devOtp}</span>
+                    </div>
+                  )}
+                  <form onSubmit={submitVerify} className="space-y-3">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder="000000"
+                      value={otpValue}
+                      onChange={(e) => setOtpValue(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      className="w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-center text-2xl font-mono tracking-[0.4em] outline-none focus:border-[#DDE048]/50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={loading || otpValue.length !== 6}
+                      className="w-full bg-[#DDE048] text-black font-extrabold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {loading ? <Loader size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                      {loading ? "Verifying…" : "Verify Email"}
+                    </button>
+                  </form>
+                  <p className="text-[#444] text-xs mt-4">Didn&apos;t get the code? Check your spam folder.</p>
+                </>
+              )}
             </div>
           ) : (
             <form onSubmit={submitRegistration} className="space-y-6">
