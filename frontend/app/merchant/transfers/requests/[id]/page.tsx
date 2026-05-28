@@ -4,7 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Clock, CheckCircle2, XCircle, RefreshCw,
-  ChevronRight, User, AlertCircle,
+  ChevronRight, User,
 } from "lucide-react";
 import Header from "../../../../../components/Header";
 import LoadingSpinner from "../../../../../components/LoadingSpinner";
@@ -12,13 +12,12 @@ import { ethers } from "ethers";
 import { useWallet } from "../../../../../context/WalletContext";
 import { CONTRACTS } from "../../../../../contracts/addresses";
 import {
-  getTransferRequest, acceptTransferRequest, merchantCounterPropose,
+  getTransferRequest, merchantCounterPropose,
   cancelTransferRequest, sendTransferRequestNotification,
   confirmTransferRequest, type TransferRequest,
 } from "../../../../../lib/supabase";
 import { getPledgeMeta } from "../../../../../lib/pledgeMeta";
 
-function shortAddr(a: string) { return a.slice(0, 6) + "…" + a.slice(-4); }
 function fmtDate(s: string | null) {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -63,7 +62,7 @@ function TermRow({ label, value, accent, last }: { label: string; value: string;
 export default function MerchantRequestDetail() {
   const params = useParams();
   const router = useRouter();
-  const { account, signer, pledgeWrite } = useWallet();
+  const { signer, pledgeWrite } = useWallet();
   const id = params.id as string;
 
   const [req, setReq] = useState<TransferRequest | null>(null);
@@ -90,7 +89,11 @@ export default function MerchantRequestDetail() {
   }
 
   async function handleAccept() {
-    if (!req || !signer || !pledgeWrite) return;
+    if (!req) return;
+    if (!signer || !pledgeWrite) {
+      setError("Please connect your wallet first before accepting.");
+      return;
+    }
     setActionLoading(true); setError("");
     try {
       // Step 1 — determine agreed terms (use counter if renegotiating)
@@ -115,8 +118,8 @@ export default function MerchantRequestDetail() {
         txHash = tx.hash;
 
         // Extract pledgeId from PledgeCreated event (topic[1])
-        const event = receipt?.logs?.find((l: { topics: string[] }) => l.topics.length >= 2);
-        pledgeId = event ? String(BigInt(event.topics[1])) : "unknown";
+        const eventLog = (receipt?.logs ?? []).filter(l => l.topics.length >= 2)[0];
+        pledgeId = eventLog ? String(BigInt(eventLog.topics[1])) : "unknown";
       } else {
         // Recurring pledge
         const amtPerPeriod = useCounter ? req.counter_amount_per_period! : req.amount_per_period!;
@@ -133,8 +136,8 @@ export default function MerchantRequestDetail() {
         const receipt = await tx.wait();
         txHash = tx.hash;
 
-        const event = receipt?.logs?.find((l: { topics: string[] }) => l.topics.length >= 2);
-        pledgeId = event ? String(BigInt(event.topics[1])) : "unknown";
+        const eventLog = (receipt?.logs ?? []).filter(l => l.topics.length >= 2)[0];
+        pledgeId = eventLog ? String(BigInt(eventLog.topics[1])) : "unknown";
       }
 
       // Step 3 — save pledgeId to Supabase and mark accepted
@@ -328,6 +331,11 @@ export default function MerchantRequestDetail() {
       {/* Actions */}
       {canAct && !showCounterForm && !isCounterPending && (
         <div className="space-y-3">
+          {error && !showCounterForm && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+              <p className="text-red-400 text-xs">{error}</p>
+            </div>
+          )}
           <button onClick={handleAccept} disabled={actionLoading}
             className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 hover:bg-[#c8ce30] transition-colors disabled:opacity-50">
             {actionLoading ? "Processing…" : "Accept Request →"}
