@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   adminClient,
   assertAllowedFile,
-  publicClient,
+  generateOtp,
+  hashSecret,
+  sendOtpEmail,
   uploadSecureFile,
   validatePassword,
 } from "../../../../lib/auth-server";
+import { createSignedCookie, type PendingOtpSession } from "../../../../lib/session";
 
 function value(form: FormData, key: string) {
   return String(form.get(key) ?? "").trim();
@@ -19,16 +22,9 @@ function fileExt(file: File) {
   return "jpg";
 }
 
-async function findAuthUserByEmail(admin: ReturnType<typeof adminClient>, email: string) {
-  const perPage = 100;
-  for (let page = 1; page <= 10; page++) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
-    if (error) throw error;
-    const found = data.users.find((user) => user.email?.toLowerCase() === email);
-    if (found) return found;
-    if (data.users.length < perPage) break;
-  }
-  return null;
+function appRole(profileRole: string) {
+  if (profileRole === "merchant") return "merchant";
+  return "sender";
 }
 
 export async function POST(req: NextRequest) {
@@ -48,6 +44,10 @@ export async function POST(req: NextRequest) {
     const idNumber = value(form, "idNumber");
     const idPhoto = form.get("idPhoto") as File | null;
     const businessPermit = form.get("businessPermit") as File | null;
+    const businessName = value(form, "businessName") || null;
+    const businessType = value(form, "businessType") || null;
+    const businessAddress = value(form, "businessAddress") || null;
+    const city = value(form, "city") || null;
 
     if (role !== "ofw_sender" && role !== "merchant") {
       return NextResponse.json({ error: "Choose OFW/Sender or Merchant." }, { status: 400 });
@@ -87,23 +87,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email is already registered." }, { status: 409 });
     }
 
-    const auth = publicClient();
-    const { data: signup, error: signupError } = await auth.auth.signUp({
+    // Create user in Supabase Auth — email_confirm:true skips Supabase's own email.
+    // We send our own branded OTP instead.
+    const { data: created, error: createError } = await admin.auth.admin.createUser({
       email,
       password,
-      options: {
-        data: { username, role, full_name: fullName },
-        emailRedirectTo: `${req.nextUrl.origin}/login`,
-      },
+      email_confirm: true,
+      user_metadata: { username, role, full_name: fullName },
     });
 
-    if (signupError) return NextResponse.json({ error: signupError.message }, { status: 400 });
-    const user = signup.user ?? await findAuthUserByEmail(admin, email);
-    if (!user) {
-      return NextResponse.json({
-        error: "Supabase Auth did not return the new user. Check that Email provider is enabled in Supabase Auth settings, then try again.",
-      }, { status: 500 });
-    }
+    if (createError) return NextResponse.json({ error: createError.message }, { status: 400 });
+    const user = created.user;
+    if (!user) return NextResponse.json({ error: "Failed to create account. Please try again." }, { status: 500 });
 
     try {
       const safeBase = `${user.id}`;
@@ -125,7 +120,12 @@ export async function POST(req: NextRequest) {
         id_number: idNumber,
         gov_id_photo_url: idPhotoUrl,
         business_permit_url: permitUrl,
-        email_verified: Boolean(user.email_confirmed_at),
+        business_name: businessName,
+        business_type: businessType,
+        business_address: businessAddress,
+        city,
+        email_verified: false,
+        kyc_status: "pending",
       });
 
       if (profileError) throw profileError;
@@ -134,10 +134,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: (profileErr as Error).message }, { status: 500 });
     }
 
-    return NextResponse.json({
-      message: "Account created. Please check your email and click the Supabase verification link before logging in.",
+    // Send branded OTP verification email
+    const otp = generateOtp();
+    const pending = await createSignedCookie<PendingOtpSession>({
+      userId: user.id,
+      role: appRole(role) as "sender" | "merchant" | "admin",
       email,
+      otpHash: hashSecret(otp),
+      exp: Date.now() + 30 * 60_000,
     });
+    const delivery = await sendOtpEmail(email, otp, "verify");
+
+    const response = NextResponse.json({
+      message: "Account created! Check your email for a 6-digit verification code.",
+      email,
+      devOtp: delivery.delivered ? undefined : otp,
+    });
+    response.cookies.set("rs_pending_verify", pending, {
+      path: "/",
+      maxAge: 30 * 60,
+      httpOnly: true,
+      sameSite: "lax",
+    });
+    return response;
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

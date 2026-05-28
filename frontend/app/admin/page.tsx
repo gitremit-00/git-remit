@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Users, Store, ShieldCheck, ShieldX, Clock } from "lucide-react";
-import { getAllSenders, getAllMerchants, getKYCQueue } from "../../lib/supabase";
 import Link from "next/link";
 
 export default function AdminOverview() {
@@ -11,14 +10,16 @@ export default function AdminOverview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getAllSenders(), getAllMerchants(), getKYCQueue()]).then(
-      ([senders, merchants, queue]) => {
-        setSenderCount(senders.length);
-        setMerchantCount(merchants.length);
-        setPendingKYC(queue.length);
-        setLoading(false);
-      }
-    );
+    Promise.all([
+      fetch("/api/admin/kyc/users?role=ofw_sender&status=all").then((r) => r.json()),
+      fetch("/api/admin/kyc/users?role=merchant&status=all").then((r) => r.json()),
+      fetch("/api/admin/kyc/users?status=pending").then((r) => r.json()),
+    ]).then(([senders, merchants, pending]) => {
+      setSenderCount((senders.users ?? []).length);
+      setMerchantCount((merchants.users ?? []).length);
+      setPendingKYC((pending.users ?? []).length);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
 
   return (

@@ -37,19 +37,12 @@ export async function POST(req: NextRequest) {
     const { data: authData, error: authError } = await auth.auth.signInWithPassword({ email, password: pass });
 
     if (authError || !authData.user) {
-      const message = authError?.message?.toLowerCase().includes("email not confirmed")
-        ? "Email is not verified. Check your inbox for the Supabase verification link."
-        : "Wrong credentials.";
-      return NextResponse.json({ error: message }, { status: authError?.message?.toLowerCase().includes("email not confirmed") ? 403 : 401 });
-    }
-
-    if (!authData.user.email_confirmed_at) {
-      return NextResponse.json({ error: "Email is not verified. Check your inbox for the Supabase verification link." }, { status: 403 });
+      return NextResponse.json({ error: "Wrong credentials." }, { status: 401 });
     }
 
     const { data: profile, error: profileError } = await admin
       .from("profiles")
-      .select("id,email,role")
+      .select("id,email,role,email_verified")
       .eq("id", authData.user.id)
       .single();
 
@@ -57,10 +50,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Profile not found for this account." }, { status: 404 });
     }
 
-    await admin
-      .from("profiles")
-      .update({ email_verified: true, updated_at: new Date().toISOString() })
-      .eq("id", profile.id);
+    if (!profile.email_verified) {
+      return NextResponse.json({ error: "Email not verified. Please check your inbox for the verification code." }, { status: 403 });
+    }
 
     const otp = generateOtp();
     const role = appRole(profile.role);
