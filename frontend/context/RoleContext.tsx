@@ -22,7 +22,7 @@ const RoleContext = createContext<RoleContextValue>({
 });
 
 export function RoleProvider({ children }: { children: ReactNode }) {
-  const { account, walletLoading } = useWallet();
+  useWallet();
   const router = useRouter();
   const pathname = usePathname();
   const [role, setRole] = useState<Role | null>(null);
@@ -31,16 +31,9 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
+  // Fetch role from auth session on mount — independent of wallet connection.
+  // Wallet state is for on-chain features only; role comes from the session cookie.
   useEffect(() => {
-    if (walletLoading) return;
-
-    if (!account) {
-      setRole(null);
-      setIsNewUser(false);
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     setIsNewUser(false);
 
@@ -67,7 +60,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       if (profile?.avatar_url) setAvatarUrl(profile.avatar_url);
       setLoading(false);
     });
-  }, [account, walletLoading]);
+  }, []);
 
   // Route guard — runs when role or pathname changes
   useEffect(() => {
