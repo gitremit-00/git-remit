@@ -15,7 +15,7 @@ import { CONTRACTS } from "../../contracts/addresses";
 import { useCurrency } from "../../context/CurrencyContext";
 import ProgressBar from "../../components/ProgressBar";
 import { savePledgeMeta, getPledgeMeta } from "../../lib/pledgeMeta";
-import { getPaymentRequest, type PaymentRequest, markNotificationRead, createTransferRequest, sendTransferRequestNotification } from "../../lib/supabase";
+import { getPaymentRequest, type PaymentRequest, markNotificationRead, createTransferRequest, confirmTransferRequest, sendTransferRequestNotification } from "../../lib/supabase";
 import Link from "next/link";
 
 type PaymentType = "full" | "partial" | "installment";
@@ -305,8 +305,32 @@ function NewTransferContent() {
       const approveTx = await tokenWrite.approve(CONTRACTS.REMITTANCE_PLEDGE, amt);
       await approveTx.wait();
       const sendTx = await pledgeWrite.sendP2P(tokenAddress, form.merchant, amt);
-      await sendTx.wait();
+      const receipt = await sendTx.wait();
       savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: "p2p" });
+
+      // Save P2P transaction to Supabase so it reflects in the UI
+      const saved = await createTransferRequest({
+        sender_address: account.toLowerCase(),
+        merchant_address: form.merchant.toLowerCase(),
+        type: "partial",
+        token: selectedToken as "USDC" | "USDT",
+        total_amount: parseFloat(form.totalAmount),
+        initial_deposit: parseFloat(form.totalAmount),
+        commitment_date: null,
+        amount_per_period: null,
+        interval_seconds: null,
+        total_periods: null,
+        first_due_date: null,
+        note: form.note || null,
+      });
+      if (saved) {
+        await Promise.all([
+          confirmTransferRequest(saved.id, "", receipt?.hash ?? ""),
+          sendTransferRequestNotification(saved.id, form.merchant.toLowerCase(), "accepted"),
+          sendTransferRequestNotification(saved.id, account.toLowerCase(), "confirmed"),
+        ]);
+      }
+
       setRequestSent(true);
       setTimeout(() => router.push("/pledges"), 1800);
     } catch (e: unknown) {

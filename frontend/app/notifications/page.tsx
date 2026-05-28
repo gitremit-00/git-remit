@@ -84,6 +84,8 @@ export default function Notifications() {
     setLoading(true);
     try {
       await Promise.all([loadActivity(), loadPaymentReqNotifs(), loadTransferReqNotifs()]);
+    } catch (err) {
+      console.error("Failed to load notifications:", err);
     } finally { setLoading(false); }
   }
 
@@ -108,13 +110,21 @@ export default function Notifications() {
   }
 
   async function loadPaymentReqNotifs() {
-    const data = await getSenderNotifications(account!);
-    setPaymentReqNotifs(data);
+    try {
+      const data = await getSenderNotifications(account!);
+      setPaymentReqNotifs(data);
+    } catch (err) {
+      console.error("Failed to load payment request notifications:", err);
+    }
   }
 
   async function loadTransferReqNotifs() {
-    const data = await getTransferRequestNotifications(account!);
-    setTransferReqNotifs(data);
+    try {
+      const data = await getTransferRequestNotifications(account!);
+      setTransferReqNotifs(data);
+    } catch (err) {
+      console.error("Failed to load transfer request notifications:", err);
+    }
   }
 
   async function loadActivity() {
