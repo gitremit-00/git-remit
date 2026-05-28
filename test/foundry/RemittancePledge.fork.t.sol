@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
 import "../../contracts/RemittancePledge.sol";
@@ -14,9 +14,9 @@ import "../../contracts/MockTokens.sol";
 ///     --fork-url https://rpc-quicknode-holesky.morphl2.io -v
 contract RemittancePledgeForkTest is Test {
     // ── Deployed addresses on Morph Holesky testnet ────────────────────────
-    address constant PLEDGE_ADDR = 0xd44280f56e1b8571f6b52D57Bc41bABD5c1e961A;
-    address constant USDC_ADDR   = 0xe3bC47ef2353391dE4BC9691A358e99F3e2a06CE;
-    address constant USDT_ADDR   = 0xe7E4CdAED4a034380904c5DA5A26890015358bE5;
+    address constant PLEDGE_ADDR = 0x18d74B544Fa754f1A8927e916506205b9dbF2721;
+    address constant USDC_ADDR   = 0x165186FCF4b2c145bEA0073ef3cb1f2b1F3837da;
+    address constant USDT_ADDR   = 0xb49a61765a05fE938491507e3A02873ACD4cD8dc;
 
     RemittancePledge internal pledge;
     MockUSDC         internal usdc;

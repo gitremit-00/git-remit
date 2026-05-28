@@ -11,7 +11,7 @@ import { getPledgeMeta } from "../../../lib/pledgeMeta";
 import { CONTRACTS } from "../../../contracts/addresses";
 import { getMerchantTransferRequests, type TransferRequest } from "../../../lib/supabase";
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
+interface PledgeRaw { id: bigint; payer: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
 
 function tokenSymbol(addr: string): string {
   if (addr?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
@@ -78,7 +78,7 @@ export default function MerchantTransfers() {
       const details = await Promise.all(ids.map((id) => pledgeRead.getPledge(id))) as PledgeRaw[];
       setPledges(details.reverse());
       setTransferRequests(trData);
-      const uniqueSenders = [...new Set(details.map((p) => p.sender.toLowerCase()))];
+      const uniqueSenders = [...new Set(details.map((p) => p.payer.toLowerCase()))];
       const reps = await Promise.all(uniqueSenders.map((s) => pledgeRead.getReputation(s)));
       const repMap: Record<string, SenderRep> = {};
       uniqueSenders.forEach((s, i) => {
@@ -99,7 +99,7 @@ export default function MerchantTransfers() {
     else if (s !== filter) return false;
     if (search) {
       const q = search.toLowerCase();
-      return p.sender.toLowerCase().includes(q) || p.id.toString().includes(q);
+      return p.payer.toLowerCase().includes(q) || p.id.toString().includes(q);
     }
     return true;
   });
@@ -274,17 +274,17 @@ export default function MerchantTransfers() {
                       const remaining = Math.max(0, parseFloat((gross - locked).toFixed(6)));
                       const sym = tokenSymbol(p.token);
                       const status = STATUS[p.status];
-                      const rep = senderReps[p.sender.toLowerCase()];
-                      const meta = getPledgeMeta(p.sender);
+                      const rep = senderReps[p.payer.toLowerCase()];
+                      const meta = getPledgeMeta(p.payer);
                       return (
                         <tr key={p.id.toString()} className="border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors group">
                           <td className="px-5 py-4">
                             <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-black shrink-0" style={{ background: avatarColor(p.sender) }}>
-                                {initials(p.sender)}
+                              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-black shrink-0" style={{ background: avatarColor(p.payer) }}>
+                                {initials(p.payer)}
                               </div>
                               <div>
-                                <div className="font-semibold text-white text-xs">{meta?.name || shortAddr(p.sender)}</div>
+                                <div className="font-semibold text-white text-xs">{meta?.name || shortAddr(p.payer)}</div>
                                 {rep && <div className="flex items-center gap-1 mt-0.5"><ShieldCheck size={11} color="#DDE048" /><span className="text-[10px] text-[#555]">{rep.score}/100</span></div>}
                               </div>
                             </div>
@@ -421,18 +421,18 @@ export default function MerchantTransfers() {
               const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
               const sym = tokenSymbol(p.token);
               const status = STATUS[p.status];
-              const rep = senderReps[p.sender.toLowerCase()];
-              const meta = getPledgeMeta(p.sender);
+              const rep = senderReps[p.payer.toLowerCase()];
+              const meta = getPledgeMeta(p.payer);
               return (
                 <Link key={p.id.toString()} href={`/merchant/transfers/${p.id.toString()}`} className="block no-underline text-inherit">
                   <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 mb-3">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black text-black shrink-0" style={{ background: avatarColor(p.sender) }}>
-                          {initials(p.sender)}
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black text-black shrink-0" style={{ background: avatarColor(p.payer) }}>
+                          {initials(p.payer)}
                         </div>
                         <div>
-                          <div className="font-semibold text-white text-sm">{meta?.name || shortAddr(p.sender)}</div>
+                          <div className="font-semibold text-white text-sm">{meta?.name || shortAddr(p.payer)}</div>
                           {rep && <div className="text-[11px] text-[#666]">Trust {rep.score}/100</div>}
                         </div>
                       </div>

@@ -23,7 +23,7 @@ const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
 const STATUS_COLOR: Record<string, string> = { PENDING: "#f59e0b", COMPLETED: "#22c55e", DEFAULTED: "#ef4444", CANCELLED: "#888" };
 const STATUS_BG: Record<string, string> = { PENDING: "#f59e0b22", COMPLETED: "#22c55e22", DEFAULTED: "#ef444422", CANCELLED: "#88888822" };
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; token: string; totalAmount: bigint; initialDeposit: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; paidDuringGrace: boolean; }
+interface PledgeRaw { id: bigint; payer: string; merchant: string; token: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; paidDuringGrace: boolean; }
 interface SenderRep { score: number; total: number; defaults: number; label: string; }
 
 function shortAddr(a: string) { return a.slice(0, 6) + "…" + a.slice(-4); }
@@ -78,7 +78,7 @@ export default function MerchantTransferDetail() {
     try {
       const pledgeData = await pledgeRead.getPledge(id) as PledgeRaw;
       setPledge(pledgeData);
-      const r = await pledgeRead.getReputation(pledgeData.sender);
+      const r = await pledgeRead.getReputation(pledgeData.payer);
       const score = Math.round(Number(r.basisPoints) / 100);
       setRep({ score, total: Number(r.totalCount), defaults: Number(r.defaultCount ?? 0), label: trustLabel(score) });
     } finally { setLoading(false); }
@@ -126,7 +126,7 @@ export default function MerchantTransferDetail() {
   const graceEndTs = pledge.commitmentDate + BigInt(3 * 86400);
   const graceEndDate = fmtDate(graceEndTs);
   const pledgeIdHex = `#${pledge.id.toString()}`;
-  const senderMeta = getPledgeMeta(pledge.sender);
+  const senderMeta = getPledgeMeta(pledge.payer);
 
   /* ── DESKTOP ── */
   const DesktopDetail = (
@@ -156,12 +156,12 @@ export default function MerchantTransferDetail() {
           <div className="flex items-center gap-2 mt-3">
             <div
               className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black text-black"
-              style={{ background: avatarColor(pledge.sender) }}
+              style={{ background: avatarColor(pledge.payer) }}
             >
-              {initials(pledge.sender)}
+              {initials(pledge.payer)}
             </div>
-            <span className="text-white font-semibold text-sm">{senderMeta?.name || shortAddr(pledge.sender)}</span>
-            <span className="text-[#555] font-mono text-xs">{shortAddr(pledge.sender)}</span>
+            <span className="text-white font-semibold text-sm">{senderMeta?.name || shortAddr(pledge.payer)}</span>
+            <span className="text-[#555] font-mono text-xs">{shortAddr(pledge.payer)}</span>
           </div>
         </div>
 
@@ -211,7 +211,7 @@ export default function MerchantTransferDetail() {
             <TimelineStep
               done={true}
               label="Pledge received"
-              sub={`Sender locked initial deposit · ${shortAddr(pledge.sender)}`}
+              sub={`Sender locked initial deposit · ${shortAddr(pledge.payer)}`}
               amount={`${locked.toFixed(2)} USDC locked`}
             />
             <TimelineStep
@@ -272,7 +272,7 @@ export default function MerchantTransferDetail() {
             <div className="text-[11px] text-[#555] tracking-[1.5px] mb-4">ON-CHAIN PROOF</div>
             <div className="space-y-3">
               <ProofRow label="Pledge ID" value={pledge.id.toString()} />
-              <ProofRow label="Sender" value={pledge.sender} mono />
+              <ProofRow label="Sender" value={pledge.payer} mono />
               <ProofRow label="Contract" value={CONTRACTS.REMITTANCE_PLEDGE} mono link={`https://explorer-hoodi.morphl2.io/address/${CONTRACTS.REMITTANCE_PLEDGE}`} />
               <ProofRow label="Commitment date" value={deadlineDate} />
               <ProofRow label="Grace end" value={graceEndDate} last />
@@ -288,13 +288,13 @@ export default function MerchantTransferDetail() {
             <div className="flex items-center gap-4 mb-4">
               <div
                 className="w-14 h-14 rounded-2xl flex items-center justify-center text-lg font-black text-black shrink-0"
-                style={{ background: avatarColor(pledge.sender) }}
+                style={{ background: avatarColor(pledge.payer) }}
               >
-                {initials(pledge.sender)}
+                {initials(pledge.payer)}
               </div>
               <div>
-                <div className="font-bold text-white text-base">{senderMeta?.name || shortAddr(pledge.sender)}</div>
-                <div className="text-[#555] text-xs font-mono mt-0.5">{shortAddr(pledge.sender)}</div>
+                <div className="font-bold text-white text-base">{senderMeta?.name || shortAddr(pledge.payer)}</div>
+                <div className="text-[#555] text-xs font-mono mt-0.5">{shortAddr(pledge.payer)}</div>
                 <div className="flex items-center gap-1.5 mt-1.5">
                   <BadgeCheck size={13} color="#DDE048" />
                   <span className="text-[11px] text-[#DDE048] font-semibold">Verified OFW</span>
@@ -394,12 +394,12 @@ export default function MerchantTransferDetail() {
           <div className="text-[32px] font-extrabold text-white">{total.toFixed(2)} <span className="text-base text-[#888] font-normal">USDC</span></div>
           <div className="text-[#888] text-sm mt-1">≈ {fmt(total)}</div>
           <div className="flex items-center gap-2 mt-3 pt-3 border-t border-[#1F2127]">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black text-black" style={{ background: avatarColor(pledge.sender) }}>
-              {initials(pledge.sender)}
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black text-black" style={{ background: avatarColor(pledge.payer) }}>
+              {initials(pledge.payer)}
             </div>
             <div>
-              <div className="text-sm font-semibold text-white">{senderMeta?.name || shortAddr(pledge.sender)}</div>
-              <div className="text-xs text-[#666] font-mono">{shortAddr(pledge.sender)}</div>
+              <div className="text-sm font-semibold text-white">{senderMeta?.name || shortAddr(pledge.payer)}</div>
+              <div className="text-xs text-[#666] font-mono">{shortAddr(pledge.payer)}</div>
             </div>
           </div>
         </div>
@@ -461,11 +461,11 @@ export default function MerchantTransferDetail() {
           <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5">
             <div className="text-[10px] text-[#888] tracking-[1.5px] mb-4">SENDER TRUST</div>
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-base font-black text-black" style={{ background: avatarColor(pledge.sender) }}>
-                {initials(pledge.sender)}
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-base font-black text-black" style={{ background: avatarColor(pledge.payer) }}>
+                {initials(pledge.payer)}
               </div>
               <div>
-                <div className="font-bold text-white">{senderMeta?.name || shortAddr(pledge.sender)}</div>
+                <div className="font-bold text-white">{senderMeta?.name || shortAddr(pledge.payer)}</div>
                 <div className="text-xs text-[#666]">{rep.total} pledges · {rep.defaults} defaults</div>
               </div>
               <div className="ml-auto">

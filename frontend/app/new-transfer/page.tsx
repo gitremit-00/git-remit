@@ -7,15 +7,15 @@ import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ethers } from "ethers";
 import {
-  ArrowLeft, Calendar, Check, Info, CheckCircle2, Clock, Loader,
-  Shield, ChevronRight, FileText, User, Store, Zap, CreditCard, CalendarDays,
+  ArrowLeft, Check, Info, CheckCircle2, Clock, Loader,
+  ChevronRight, FileText, User, Store, Zap, CreditCard, CalendarDays,
 } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import { CONTRACTS } from "../../contracts/addresses";
 import { useCurrency } from "../../context/CurrencyContext";
 import ProgressBar from "../../components/ProgressBar";
 import { savePledgeMeta, getPledgeMeta } from "../../lib/pledgeMeta";
-import { getPaymentRequest, type PaymentRequest, markNotificationRead, updatePaymentRequestStatus, createTransferRequest, sendTransferRequestNotification } from "../../lib/supabase";
+import { getPaymentRequest, type PaymentRequest, markNotificationRead, createTransferRequest, sendTransferRequestNotification } from "../../lib/supabase";
 import Link from "next/link";
 
 type PaymentType = "full" | "partial" | "installment";
@@ -54,7 +54,7 @@ export default function NewTransfer() {
 function NewTransferContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { account, signer, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();
+  const { account, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();
   const { fmt } = useCurrency();
 
   const [transferMode, setTransferMode] = useState<"merchant" | "p2p">("merchant");
@@ -75,7 +75,6 @@ function NewTransferContent() {
   const [selectedToken, setSelectedToken] = useState<"USDC" | "USDT">("USDC");
   const [usdcBalance, setUsdcBalance] = useState<string>("—");
   const [usdtBalance, setUsdtBalance] = useState<string>("—");
-  const [txStatus, setTxStatus] = useState("");
   const [txError, setTxError] = useState("");
   const [loading, setLoading] = useState(false);
   const [requestSent, setRequestSent] = useState(false);
@@ -224,7 +223,6 @@ function NewTransferContent() {
   const merchantReceives = total;
   const deadline = form.commitmentDate ? new Date(form.commitmentDate) : null;
   const reqDeadline = requestPreview ? new Date(requestPreview.deadline.replace(" ", "T")) : null;
-  const daysLeft = deadline ? Math.ceil((deadline.getTime() - Date.now()) / 86400000) : 0;
   const deadlineStr = deadline ? deadline.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
 
   // Installment schedule preview
@@ -251,87 +249,14 @@ function NewTransferContent() {
   );
 
   // ── Submit handlers ────────────────────────────────────────────────────────
+  // In the new contract model, merchants create pledges — OFWs can only REQUEST one.
+  // All merchant-flow submissions go off-chain to Supabase via sendRequest().
+  // The merchant reviews the request and accepts it by calling createPledge on-chain.
   async function submit() {
-    if (!pledgeWrite || !signer) return;
-    if (paymentType === "installment") {
-      await submitInstallment();
+    if (transferMode === "p2p") {
+      await sendP2PTransaction();
     } else {
-      await submitPledge();
-    }
-  }
-
-  async function submitPledge() {
-    const tokenRead = selectedToken === "USDC" ? usdcRead : usdtRead;
-    const tokenWrite = selectedToken === "USDC" ? usdcWrite : usdtWrite;
-    const tokenAddress = selectedToken === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
-    if (!pledgeWrite || !tokenWrite || !signer) return;
-
-    const depositAmt = isFullPayment ? gross : deposit;
-    const totalAmt = ethers.parseUnits(form.totalAmount, 6);
-    const initDeposit = ethers.parseUnits(depositAmt.toFixed(6), 6);
-
-    let commitTs: number;
-    if (isFullPayment) {
-      const d = new Date(); d.setDate(d.getDate() + 85); d.setHours(9, 0, 0, 0);
-      commitTs = Math.floor(d.getTime() / 1000);
-    } else {
-      commitTs = Math.floor(new Date(form.commitmentDate).getTime() / 1000);
-    }
-
-    setLoading(true); setTxError("");
-    try {
-      const balance: bigint = await tokenRead.balanceOf(account);
-      if (balance < initDeposit) {
-        const has = parseFloat(ethers.formatUnits(balance, 6)).toFixed(2);
-        const needs = parseFloat(ethers.formatUnits(initDeposit, 6)).toFixed(2);
-        setTxError(`Insufficient ${selectedToken} balance. You have ${has} but need ${needs} ${selectedToken}.`);
-        setLoading(false); return;
-      }
-      const allowance: bigint = await tokenRead.allowance(account, CONTRACTS.REMITTANCE_PLEDGE);
-      if (allowance < initDeposit) {
-        setTxStatus("approving");
-        const approveData = tokenWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, initDeposit]);
-        const approveTx = await signer.sendTransaction({ to: tokenAddress, data: approveData });
-        await approveTx.wait();
-      } else {
-        setTxStatus("approving");
-      }
-      setTxStatus("creating");
-      const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [tokenAddress, form.merchant, totalAmt, initDeposit, commitTs]);
-      const createTx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
-      await createTx.wait();
-      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
-      if (requestId) updatePaymentRequestStatus(requestId, "fulfilled");
-      try { localStorage.setItem("remitsafe_notif_dirty", "true"); window.dispatchEvent(new Event("storage")); } catch { /* ignore */ }
-      setTxStatus("done");
-      setTimeout(() => router.push("/pledges"), 1800);
-    } catch (err: unknown) {
-      setTxError(parseContractError(err));
-      setTxStatus(""); setLoading(false);
-    }
-  }
-
-  async function submitInstallment() {
-    const tokenAddress = selectedToken === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
-    if (!pledgeWrite || !signer) return;
-    const amtPerPeriod = ethers.parseUnits(form.totalAmount, 6);
-    const firstDueTs = Math.floor(new Date(form.commitmentDate).getTime() / 1000);
-    setLoading(true); setTxError("");
-    try {
-      setTxStatus("creating");
-      const data = pledgeWrite.interface.encodeFunctionData("createRecurringPledge", [
-        tokenAddress, form.merchant, amtPerPeriod,
-        installmentInterval, installmentCount, firstDueTs,
-      ]);
-      const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data });
-      await tx.wait();
-      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
-      try { localStorage.setItem("remitsafe_notif_dirty", "true"); window.dispatchEvent(new Event("storage")); } catch { /* ignore */ }
-      setTxStatus("done");
-      setTimeout(() => router.push("/pledges"), 1800);
-    } catch (err: unknown) {
-      setTxError(parseContractError(err));
-      setTxStatus(""); setLoading(false);
+      await sendRequest();
     }
   }
 
@@ -340,14 +265,17 @@ function NewTransferContent() {
     setLoading(true); setTxError("");
     try {
       const isInstallment = paymentType === "installment";
+      const isFull = paymentType === "full";
+      // Auto-set commitment date for full payments (85 days out)
+      const fullDate = (() => { const d = new Date(); d.setDate(d.getDate() + 85); d.setHours(9, 0, 0, 0); return d.toISOString(); })();
       const req = await createTransferRequest({
         sender_address: account,
         merchant_address: form.merchant,
         type: isInstallment ? "installment" : "partial",
         token: selectedToken,
         total_amount: isInstallment ? null : parseFloat(form.totalAmount),
-        initial_deposit: isInstallment ? null : parseFloat(form.initialDeposit),
-        commitment_date: isInstallment ? null : (form.commitmentDate ? new Date(form.commitmentDate).toISOString() : null),
+        initial_deposit: isInstallment || isFull ? null : parseFloat(form.initialDeposit),
+        commitment_date: isInstallment ? null : isFull ? fullDate : (form.commitmentDate ? new Date(form.commitmentDate).toISOString() : null),
         amount_per_period: isInstallment ? parseFloat(form.totalAmount) : null,
         interval_seconds: isInstallment ? installmentInterval : null,
         total_periods: isInstallment ? installmentCount : null,
@@ -366,12 +294,43 @@ function NewTransferContent() {
     }
   }
 
-  const txGuardSteps = paymentType === "installment"
-    ? [{ label: "Create recurring pledge on-chain", state: (txStatus === "creating" ? "active" : txStatus === "done" ? "done" : "pending") as "active" | "done" | "pending" }]
-    : [
-        { label: `Approve ${selectedToken} spend`, state: (txStatus === "approving" ? "active" : (txStatus === "creating" || txStatus === "done") ? "done" : "pending") as "active" | "done" | "pending" },
-        { label: "Create pledge on-chain", state: (txStatus === "creating" ? "active" : txStatus === "done" ? "done" : "pending") as "active" | "done" | "pending" },
-      ];
+  async function sendP2PTransaction() {
+    if (!account || !pledgeWrite) return;
+    const tokenWrite = selectedToken === "USDT" ? usdtWrite : usdcWrite;
+    const tokenAddress = selectedToken === "USDT" ? CONTRACTS.MOCK_USDT : CONTRACTS.MOCK_USDC;
+    if (!tokenWrite) return;
+    setLoading(true); setTxError("");
+    try {
+      const amt = ethers.parseUnits(parseFloat(form.totalAmount).toFixed(6), 6);
+      const approveTx = await tokenWrite.approve(CONTRACTS.REMITTANCE_PLEDGE, amt);
+      await approveTx.wait();
+      const sendTx = await pledgeWrite.sendP2P(tokenAddress, form.merchant, amt);
+      await sendTx.wait();
+      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: "p2p" });
+      setRequestSent(true);
+      setTimeout(() => router.push("/pledges"), 1800);
+    } catch (e: unknown) {
+      console.error("[sendP2P error]", e);
+      const err = e as { reason?: string; code?: string; message?: string };
+      const reason = err.reason ?? err.message ?? String(e);
+      if (reason.includes("user rejected") || err.code === "ACTION_REJECTED") {
+        setTxError("Transaction rejected.");
+      } else if (reason.includes("Sender not verified")) {
+        setTxError("Your wallet is not verified as a sender. Please complete KYC/verification before sending P2P.");
+      } else if (reason.includes("insufficient")) {
+        setTxError("Insufficient token balance to complete this transfer.");
+      } else {
+        setTxError(`Transaction failed: ${reason}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Merchant-flow is now off-chain (request to Supabase) — single step, no wallet needed.
+  const txGuardSteps = [
+    { label: "Sending payment request to merchant", state: (loading ? "active" : requestSent ? "done" : "pending") as "active" | "done" | "pending" },
+  ];
 
   // ── Payment request preview modal ──────────────────────────────────────────
   const RequestPreviewScreen = requestPreview && showPreview && (
@@ -691,11 +650,10 @@ function NewTransferContent() {
             active={step === STEP_REVIEW}
             done={false}
           >
-            {txStatus === "done" ? (
+            {requestSent ? (
               <div className="bg-[#0d1f0d] border border-green-500/20 rounded-xl px-4 py-4 mb-4">
-                <TxStep label={paymentType === "installment" ? "Recurring pledge created" : `${selectedToken} approved`} state="done" />
-                {paymentType !== "installment" && <TxStep label="Pledge created" state="done" />}
-                <p className="text-green-400 text-xs mt-2 text-center">Redirecting to your pledges…</p>
+                <TxStep label="Request sent to merchant" state="done" />
+                <p className="text-green-400 text-xs mt-2 text-center">Redirecting to your requests…</p>
               </div>
             ) : (
               <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-1 mb-4">
@@ -808,7 +766,7 @@ function NewTransferContent() {
                     <div className="pt-2 border-t border-[#1e2230] pb-2">
                       <SummaryRow label="Total you pay" value={gross > 0 ? `${gross.toFixed(2)} ${selectedToken}` : "—"} bold />
                     </div>
-                    <SummaryRow label="Lock now" value={deposit > 0 ? `${deposit.toFixed(2)} ${selectedToken}` : "—"} accent />
+                    <SummaryRow label={transferMode === "merchant" ? "Upfront (requested)" : "Lock now"} value={deposit > 0 ? `${deposit.toFixed(2)} ${selectedToken}` : "—"} accent />
                     <SummaryRow label={`Due ${deadlineStr}`} value={remaining > 0 ? `${remaining.toFixed(2)} ${selectedToken}` : (deposit > 0 ? "None" : "—")} />
                     <div className="pt-2 border-t border-[#1e2230]">
                       <SummaryRow label="Merchant receives" value={merchantReceives > 0 ? `${merchantReceives.toFixed(2)} ${selectedToken}` : "—"} />
@@ -819,8 +777,9 @@ function NewTransferContent() {
 
               {paymentType !== "installment" && deposit > 0 && (
                 <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-3 py-3 mb-4 text-center">
-                  <div className="text-[11px] text-[#555] mb-1">Sign now</div>
+                  <div className="text-[11px] text-[#555] mb-1">{transferMode === "merchant" ? "Requesting to pay" : "You pay"}</div>
                   <div className="text-2xl font-extrabold text-[#DDE048]">{deposit.toFixed(2)} <span className="text-sm font-normal text-[#888]">{selectedToken}</span></div>
+                  {transferMode === "merchant" && <div className="text-[10px] text-[#555] mt-1">Funds locked after merchant accepts</div>}
                 </div>
               )}
 
@@ -834,11 +793,15 @@ function NewTransferContent() {
 
               {step === STEP_REVIEW && (
                 <>
-                  {transferMode === "merchant" && (paymentType === "partial" || paymentType === "installment") ? (
+                  {transferMode === "merchant" ? (
                     <>
                       <div className="flex items-start gap-2 bg-[#DDE048]/5 border border-[#DDE048]/20 rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
                         <FileText size={13} color="#DDE048" className="shrink-0 mt-0.5" />
-                        Your request will be sent to the merchant for review. No funds are locked yet.
+                        {paymentType === "full"
+                          ? "Your full payment request will be sent to the merchant. Once they accept and create the pledge, you can deposit to complete it."
+                          : paymentType === "partial"
+                          ? "Your request will be sent to the merchant for review. No funds are locked until they accept."
+                          : "Your installment plan request will be sent to the merchant. They review and accept before any payments begin."}
                       </div>
                       {requestSent ? (
                         <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2">
@@ -856,22 +819,23 @@ function NewTransferContent() {
                     </>
                   ) : (
                     <>
-                      <div className="flex items-start gap-2 bg-[#0e1014] border border-[#1e2230] rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
-                        <Shield size={13} color="#555" className="shrink-0 mt-0.5" />
-                        Secured by smart contract · Visible to {form.merchantName || "merchant"} as soon as you sign.
+                      <div className="flex items-start gap-2 bg-[#DDE048]/5 border border-[#DDE048]/20 rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
+                        <Zap size={13} color="#DDE048" className="shrink-0 mt-0.5" />
+                        Funds will be sent directly to the recipient&apos;s wallet. This action cannot be undone.
                       </div>
-                      <button
-                        onClick={submit} disabled={loading}
-                        className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#c8ce30] transition-colors"
-                      >
-                        {loading ? (txStatus === "done" ? "✓ Done!" : "Processing…") : paymentType === "installment" ? "Create Installment Plan" : "Confirm & Lock Funds"}
-                      </button>
-                      <button className="w-full text-[#555] text-sm py-2.5 hover:text-[#888] transition-colors">Save as draft</button>
-                      <p className="text-[11px] text-[#444] text-center leading-relaxed">
-                        {paymentType === "installment"
-                          ? "MetaMask will ask you to sign one transaction to create the recurring pledge."
-                          : `MetaMask will ask you to approve two transactions: ${selectedToken} spend + pledge creation`}
-                      </p>
+                      {requestSent ? (
+                        <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2">
+                          <CheckCircle2 size={16} /> Sent! Redirecting…
+                        </div>
+                      ) : (
+                        <button
+                          onClick={sendP2PTransaction} disabled={loading || !pledgeWrite}
+                          className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#c8ce30] transition-colors"
+                        >
+                          {loading ? "Sending…" : "Send Transaction →"}
+                        </button>
+                      )}
+                      {txError && <p className="text-red-400 text-[12px] mt-2 text-center">{txError}</p>}
                     </>
                   )}
                 </>
@@ -881,7 +845,7 @@ function NewTransferContent() {
         </div>
       </div>
 
-      <TxGuard active={loading && txStatus !== "done"} steps={txGuardSteps} />
+      <TxGuard active={loading} steps={txGuardSteps} />
     </div>
   );
 
@@ -1107,32 +1071,25 @@ function NewTransferContent() {
                     </>
                   )}
                 </div>
-                {txStatus === "done" && (
+                {requestSent && (
                   <div className="bg-[#0d1f0d] border border-green-500/20 rounded-2xl px-4 py-3.5 mb-3">
-                    {paymentType === "installment" ? (
-                      <TxStep label="Recurring pledge created" state="done" />
-                    ) : (
-                      <>
-                        <TxStep label={`${selectedToken} approved`} state="done" />
-                        <TxStep label="Pledge created" state="done" />
-                      </>
-                    )}
-                    <p className="text-green-400 text-xs mt-2 text-center">Redirecting to your pledges...</p>
+                    <TxStep label={transferMode === "p2p" ? "Transaction sent!" : "Request sent to merchant"} state="done" />
+                    <p className="text-green-400 text-xs mt-2 text-center">{transferMode === "p2p" ? "Redirecting…" : "Redirecting to your requests..."}</p>
                   </div>
                 )}
                 {txError && (
                   <div className="bg-[#1f0d0d] border border-red-500/20 rounded-2xl px-4 py-3 mb-3">
-                    <p className="text-red-400 text-[13px] font-semibold mb-0.5">Transaction failed</p>
+                    <p className="text-red-400 text-[13px] font-semibold mb-0.5">{transferMode === "p2p" ? "Transaction failed" : "Request failed"}</p>
                     <p className="text-[#888] text-xs leading-relaxed">{txError}</p>
                   </div>
                 )}
               </div>
             )}
 
-            <TxGuard active={loading && txStatus !== "done"} steps={txGuardSteps} />
+            <TxGuard active={loading} steps={txGuardSteps} />
 
             {step !== STEP_TYPE && (
-              step === STEP_REVIEW && transferMode === "merchant" && (paymentType === "partial" || paymentType === "installment") ? (
+              step === STEP_REVIEW && transferMode === "merchant" ? (
                 requestSent ? (
                   <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-base rounded-2xl py-[17px] flex items-center justify-center gap-2 mt-6 mb-6">
                     <CheckCircle2 size={18} /> Request sent! Redirecting…
@@ -1151,11 +1108,7 @@ function NewTransferContent() {
                   style={{ opacity: canNext ? 1 : 0.5 }}
                   onClick={step < STEP_REVIEW ? nextStep : submit}
                   disabled={!canNext || loading}>
-                  {loading
-                    ? (txStatus === "done" ? "✓ Done!" : "Processing...")
-                    : step < STEP_REVIEW
-                      ? "Continue →"
-                      : paymentType === "installment" ? "Create Installment Plan" : "Confirm & Lock Funds"}
+                  {loading ? "Processing..." : step < STEP_REVIEW ? "Continue →" : transferMode === "p2p" ? "Send Transaction →" : "Send →"}
                 </button>
               )
             )}
@@ -1703,18 +1656,6 @@ function MobileInstallmentForm({
 
 // ── Utility components ────────────────────────────────────────────────────────
 
-function parseContractError(err: unknown): string {
-  const e = err as { reason?: string; data?: string; message?: string };
-  if (e.reason) return e.reason;
-  if (e.data?.startsWith("0xe450d38c")) {
-    const needed = BigInt("0x" + e.data.slice(130, 194));
-    const has = BigInt("0x" + e.data.slice(66, 130));
-    return `Insufficient USDC balance. You have ${(Number(has) / 1e6).toFixed(2)} USDC but need ${(Number(needed) / 1e6).toFixed(2)} USDC.`;
-  }
-  if (e.data?.startsWith("0xfb8f41b2")) return "USDC allowance too low. Please try again.";
-  if (e.message?.includes("user rejected")) return "Transaction rejected in MetaMask.";
-  return e.message ?? "Transaction failed.";
-}
 
 function ReviewRow({ label, value, accent, last }: { label: string; value: string; accent?: boolean; last?: boolean }) {
   return (
