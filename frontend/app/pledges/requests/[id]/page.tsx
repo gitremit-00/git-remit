@@ -172,17 +172,19 @@ export default function SenderRequestDetail() {
 
   async function handleAgreeAndPay() {
     if (!req || !signer || !pledgeWrite) return;
+
+    // Merchant must have created the pledge on-chain first and saved the pledgeId.
+    if (!req.pledge_id) {
+      setTxError("Waiting for merchant to confirm on-chain. Please check back shortly.");
+      return;
+    }
+
     setActionLoading(true); setTxError("");
-    // Use counter terms if renegotiating, else original terms
     const useCounter = req.status === "renegotiating" && req.counter_total_amount !== null;
     const agreedTerms = {
       total_amount: useCounter ? req.counter_total_amount : req.total_amount,
       initial_deposit: useCounter ? req.counter_initial_deposit : req.initial_deposit,
-      commitment_date: useCounter ? req.counter_commitment_date : req.commitment_date,
       amount_per_period: useCounter ? req.counter_amount_per_period : req.amount_per_period,
-      interval_seconds: useCounter ? req.counter_interval_seconds : req.interval_seconds,
-      total_periods: useCounter ? req.counter_total_periods : req.total_periods,
-      first_due_date: useCounter ? req.counter_first_due_date : req.first_due_date,
     };
 
     const tokenAddress = req.token === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
@@ -191,11 +193,10 @@ export default function SenderRequestDetail() {
 
     try {
       if (req.type === "partial") {
-        const totalAmt = ethers.parseUnits((agreedTerms.total_amount ?? 0).toFixed(6), 6);
+        // Merchant already created the pledge — payer submits deposit
         const gross = agreedTerms.total_amount! * (1 + feeBps / 10000);
         const deposit = agreedTerms.initial_deposit ?? gross;
         const depositAmt = ethers.parseUnits(deposit.toFixed(6), 6);
-        const commitTs = Math.floor(new Date(agreedTerms.commitment_date!).getTime() / 1000);
 
         const balance: bigint = await tokenRead.balanceOf(account);
         if (balance < depositAmt) {
@@ -209,27 +210,33 @@ export default function SenderRequestDetail() {
           const approveTx = await signer.sendTransaction({ to: tokenAddress, data: approveData });
           await approveTx.wait();
         }
-        setTxStatus("creating");
-        const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [
-          tokenAddress, req.merchant_address, totalAmt, depositAmt, commitTs,
-        ]);
-        const createTx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
-        const receipt = await createTx.wait();
-        const pledgeCreatedEvent = receipt?.logs?.find((l: { topics: string[] }) => l.topics[0]?.startsWith("0x"));
-        const pledgeId = pledgeCreatedEvent ? String(BigInt(pledgeCreatedEvent.topics[1])) : "unknown";
-        await confirmTransferRequest(id, pledgeId, createTx.hash);
+        setTxStatus("depositing");
+        const depositData = pledgeWrite.interface.encodeFunctionData("submitDeposit", [req.pledge_id, depositAmt]);
+        const depositTx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: depositData });
+        await depositTx.wait();
+        await confirmTransferRequest(id, req.pledge_id, depositTx.hash);
       } else {
-        const amtPerPeriod = ethers.parseUnits((agreedTerms.amount_per_period ?? 0).toFixed(6), 6);
-        const firstDueTs = Math.floor(new Date(agreedTerms.first_due_date!).getTime() / 1000);
-        setTxStatus("creating");
-        const data = pledgeWrite.interface.encodeFunctionData("createRecurringPledge", [
-          tokenAddress, req.merchant_address, amtPerPeriod,
-          agreedTerms.interval_seconds, agreedTerms.total_periods, firstDueTs,
-        ]);
-        const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data });
-        const receipt = await tx.wait();
-        const pledgeId = receipt?.logs?.[0]?.topics?.[1] ? String(BigInt(receipt.logs[0].topics[1])) : "unknown";
-        await confirmTransferRequest(id, pledgeId, tx.hash);
+        // Recurring — merchant created it, payer pays first installment
+        const gross = agreedTerms.amount_per_period! * (1 + feeBps / 10000);
+        const grossAmt = ethers.parseUnits(gross.toFixed(6), 6);
+
+        const balance: bigint = await tokenRead.balanceOf(account);
+        if (balance < grossAmt) {
+          setTxError(`Insufficient ${req.token} balance.`);
+          setActionLoading(false); return;
+        }
+        const allowance: bigint = await tokenRead.allowance(account, CONTRACTS.REMITTANCE_PLEDGE);
+        if (allowance < grossAmt) {
+          setTxStatus("approving");
+          const approveData = tokenWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, grossAmt]);
+          const approveTx = await signer.sendTransaction({ to: tokenAddress, data: approveData });
+          await approveTx.wait();
+        }
+        setTxStatus("depositing");
+        const installData = pledgeWrite.interface.encodeFunctionData("payInstallment", [req.pledge_id]);
+        const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: installData });
+        await tx.wait();
+        await confirmTransferRequest(id, req.pledge_id, tx.hash);
       }
 
       if (useCounter) {
