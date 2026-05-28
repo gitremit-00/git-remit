@@ -13,7 +13,7 @@ import Header from "../../components/Header";
 import { CONTRACTS } from "../../contracts/addresses";
 import DashboardWalletConfirm from "../../components/DashboardWalletConfirm";
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
+interface PledgeRaw { id: bigint; payer: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
 
 function tokenSymbol(addr: string): string {
   if (addr?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
@@ -51,7 +51,7 @@ export default function MerchantDashboard() {
       const ids = await pledgeRead.getMerchantPledges(account) as bigint[];
       const details = await Promise.all(ids.map((id) => pledgeRead.getPledge(id))) as PledgeRaw[];
       setPledges(details);
-      const uniqueSenders = [...new Set(details.map((p) => p.sender.toLowerCase()))];
+      const uniqueSenders = [...new Set(details.map((p) => p.payer.toLowerCase()))];
       const reps = await Promise.all(uniqueSenders.map((s) => pledgeRead.getReputation(s)));
       const repMap: Record<string, SenderRep> = {};
       uniqueSenders.forEach((s, i) => {
@@ -80,7 +80,7 @@ export default function MerchantDashboard() {
 
   const filtered = pledges.filter((p) => {
     const statusMatch = filter === "ALL" || STATUS[Number(p.status)] === filter || (filter === "CLAIMABLE" && claimable.includes(p));
-    const searchMatch = !search || p.sender.toLowerCase().includes(search.toLowerCase()) || p.id.toString().includes(search);
+    const searchMatch = !search || p.payer.toLowerCase().includes(search.toLowerCase()) || p.id.toString().includes(search);
     return statusMatch && searchMatch;
   });
 
@@ -196,7 +196,7 @@ export default function MerchantDashboard() {
               const remaining = Math.max(0, gross - locked);
               const sym = tokenSymbol(p.token);
               const status = STATUS[p.status];
-              const rep = senderReps[p.sender.toLowerCase()];
+              const rep = senderReps[p.payer.toLowerCase()];
               const meta = getPledgeMeta(p.merchant);
               const isClaimable = status === "PENDING" && Date.now() / 1000 > Number(p.commitmentDate) + 3 * 86400;
               const overdue = isClaimable ? daysOverdue(p.commitmentDate) : 0;
@@ -208,13 +208,13 @@ export default function MerchantDashboard() {
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-black shrink-0"
-                        style={{ background: avatarColor(p.sender) }}>
-                        {initials(p.sender)}
+                        style={{ background: avatarColor(p.payer) }}>
+                        {initials(p.payer)}
                       </div>
                       <div>
-                        <div className="text-sm font-semibold text-white">{shortAddr(p.sender)}</div>
+                        <div className="text-sm font-semibold text-white">{shortAddr(p.payer)}</div>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="font-mono text-[11px] text-[#555]">{shortAddr(p.sender)}</span>
+                          <span className="font-mono text-[11px] text-[#555]">{shortAddr(p.payer)}</span>
                           {rep && (
                             <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
                               style={{ background: rep.score >= 50 ? "#DDE04822" : "#ef444422", color: rep.score >= 50 ? "#DDE048" : "#ef4444" }}>
@@ -353,7 +353,7 @@ export default function MerchantDashboard() {
           const remaining = Math.max(0, gross - locked);
           const sym = tokenSymbol(p.token);
           const status = STATUS[p.status];
-          const rep = senderReps[p.sender.toLowerCase()];
+          const rep = senderReps[p.payer.toLowerCase()];
           const isClaimable = status === "PENDING" && Date.now() / 1000 > Number(p.commitmentDate) + 3 * 86400;
 
           return (
@@ -361,13 +361,13 @@ export default function MerchantDashboard() {
               <div className="flex items-start justify-between mb-2.5">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-black shrink-0"
-                    style={{ background: avatarColor(p.sender) }}>
-                    {initials(p.sender)}
+                    style={{ background: avatarColor(p.payer) }}>
+                    {initials(p.payer)}
                   </div>
                   <div>
-                    <div className="font-bold text-[15px]">{shortAddr(p.sender)}</div>
+                    <div className="font-bold text-[15px]">{shortAddr(p.payer)}</div>
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-[11px] text-[#888]">{shortAddr(p.sender)}</span>
+                      <span className="font-mono text-[11px] text-[#888]">{shortAddr(p.payer)}</span>
                       {rep && <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: rep.score >= 50 ? "#DDE04822" : "#ef444422", color: rep.score >= 50 ? "#DDE048" : "#ef4444" }}>{rep.score}</span>}
                     </div>
                   </div>

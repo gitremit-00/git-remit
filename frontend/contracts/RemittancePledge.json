@@ -127,7 +127,7 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -152,7 +152,7 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -183,7 +183,7 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -277,7 +277,7 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -294,6 +294,25 @@
       }
     ],
     "name": "InstallmentPaid",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "merchant",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "verified",
+        "type": "bool"
+      }
+    ],
+    "name": "MerchantVerificationChanged",
     "type": "event"
   },
   {
@@ -338,6 +357,43 @@
     "anonymous": false,
     "inputs": [
       {
+        "indexed": true,
+        "internalType": "address",
+        "name": "sender",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fee",
+        "type": "uint256"
+      }
+    ],
+    "name": "P2PSent",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": false,
         "internalType": "address",
         "name": "account",
@@ -359,7 +415,7 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -415,13 +471,13 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "sender",
+        "name": "merchant",
         "type": "address"
       },
       {
         "indexed": true,
         "internalType": "address",
-        "name": "merchant",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -434,12 +490,6 @@
         "indexed": false,
         "internalType": "uint256",
         "name": "totalAmount",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "initialDeposit",
         "type": "uint256"
       },
       {
@@ -495,7 +545,7 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -539,13 +589,13 @@
       {
         "indexed": true,
         "internalType": "address",
-        "name": "sender",
+        "name": "merchant",
         "type": "address"
       },
       {
         "indexed": true,
         "internalType": "address",
-        "name": "merchant",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -619,6 +669,76 @@
     ],
     "name": "Unpaused",
     "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "ofw",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "oldScore",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newScore",
+        "type": "uint256"
+      }
+    ],
+    "name": "VerificationBaselineChanged",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "oldOp",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOp",
+        "type": "address"
+      }
+    ],
+    "name": "VerificationOperatorChanged",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "BASELINE_KYC",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "BASELINE_KYC_PLUS_AVATAR",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
     "inputs": [],
@@ -778,6 +898,19 @@
   },
   {
     "inputs": [],
+    "name": "MAX_BASELINE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_EXTENSION",
     "outputs": [
       {
@@ -831,6 +964,19 @@
   {
     "inputs": [],
     "name": "MIN_RECURRING_INTERVAL",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_TRANSACT_BASELINE",
     "outputs": [
       {
         "internalType": "uint256",
@@ -993,6 +1139,19 @@
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "ofw",
+        "type": "address"
+      }
+    ],
+    "name": "boostVerificationBaseline",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
@@ -1077,17 +1236,12 @@
       },
       {
         "internalType": "address",
-        "name": "merchant",
+        "name": "payer",
         "type": "address"
       },
       {
         "internalType": "uint256",
         "name": "totalAmount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "initialDeposit",
         "type": "uint256"
       },
       {
@@ -1110,7 +1264,7 @@
       },
       {
         "internalType": "address",
-        "name": "merchant",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -1135,24 +1289,6 @@
       }
     ],
     "name": "createRecurringPledge",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "pledgeId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "depositRemaining",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1221,7 +1357,7 @@
     "inputs": [
       {
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       }
     ],
@@ -1345,6 +1481,112 @@
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "payer",
+        "type": "address"
+      }
+    ],
+    "name": "getPayerPledges",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "payer",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "offset",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "limit",
+        "type": "uint256"
+      }
+    ],
+    "name": "getPayerPledgesPaginated",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "page",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "total",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "payer",
+        "type": "address"
+      }
+    ],
+    "name": "getPayerRecurringPledges",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "payer",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "offset",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "limit",
+        "type": "uint256"
+      }
+    ],
+    "name": "getPayerRecurringPledgesPaginated",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "page",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "total",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "pledgeId",
         "type": "uint256"
@@ -1361,12 +1603,12 @@
           },
           {
             "internalType": "address",
-            "name": "sender",
+            "name": "merchant",
             "type": "address"
           },
           {
             "internalType": "address",
-            "name": "merchant",
+            "name": "payer",
             "type": "address"
           },
           {
@@ -1377,11 +1619,6 @@
           {
             "internalType": "uint256",
             "name": "totalAmount",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "initialDeposit",
             "type": "uint256"
           },
           {
@@ -1437,12 +1674,12 @@
           },
           {
             "internalType": "address",
-            "name": "sender",
+            "name": "merchant",
             "type": "address"
           },
           {
             "internalType": "address",
-            "name": "merchant",
+            "name": "payer",
             "type": "address"
           },
           {
@@ -1547,7 +1784,7 @@
     "inputs": [
       {
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       }
     ],
@@ -1566,113 +1803,7 @@
     "inputs": [
       {
         "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      }
-    ],
-    "name": "getSenderPledges",
-    "outputs": [
-      {
-        "internalType": "uint256[]",
-        "name": "",
-        "type": "uint256[]"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "offset",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "limit",
-        "type": "uint256"
-      }
-    ],
-    "name": "getSenderPledgesPaginated",
-    "outputs": [
-      {
-        "internalType": "uint256[]",
-        "name": "page",
-        "type": "uint256[]"
-      },
-      {
-        "internalType": "uint256",
-        "name": "total",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      }
-    ],
-    "name": "getSenderRecurringPledges",
-    "outputs": [
-      {
-        "internalType": "uint256[]",
-        "name": "",
-        "type": "uint256[]"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "offset",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "limit",
-        "type": "uint256"
-      }
-    ],
-    "name": "getSenderRecurringPledgesPaginated",
-    "outputs": [
-      {
-        "internalType": "uint256[]",
-        "name": "page",
-        "type": "uint256[]"
-      },
-      {
-        "internalType": "uint256",
-        "name": "total",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       }
     ],
@@ -1720,6 +1851,25 @@
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "isMerchantVerified",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -1785,6 +1935,19 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      }
+    ],
+    "name": "payMissedInstallment",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "pendingOwner",
     "outputs": [
@@ -1827,12 +1990,12 @@
       },
       {
         "internalType": "address",
-        "name": "sender",
+        "name": "merchant",
         "type": "address"
       },
       {
         "internalType": "address",
-        "name": "merchant",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -1843,11 +2006,6 @@
       {
         "internalType": "uint256",
         "name": "totalAmount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "initialDeposit",
         "type": "uint256"
       },
       {
@@ -1883,7 +2041,7 @@
     "inputs": [
       {
         "internalType": "address",
-        "name": "sender",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -1965,12 +2123,12 @@
       },
       {
         "internalType": "address",
-        "name": "sender",
+        "name": "merchant",
         "type": "address"
       },
       {
         "internalType": "address",
-        "name": "merchant",
+        "name": "payer",
         "type": "address"
       },
       {
@@ -2082,11 +2240,52 @@
     "inputs": [
       {
         "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "sendP2P",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
         "name": "newRecipient",
         "type": "address"
       }
     ],
     "name": "setFeeRecipient",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "merchant",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "verified",
+        "type": "bool"
+      }
+    ],
+    "name": "setMerchantVerified",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -2112,12 +2311,61 @@
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "ofw",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "newScore",
+        "type": "uint256"
+      }
+    ],
+    "name": "setVerificationBaseline",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOp",
+        "type": "address"
+      }
+    ],
+    "name": "setVerificationOperator",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "recurringId",
         "type": "uint256"
       }
     ],
     "name": "settleDebt",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "pledgeId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "submitDeposit",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -2140,6 +2388,38 @@
     "name": "unpause",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "verificationBaseline",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "verificationOperator",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   }
 ]

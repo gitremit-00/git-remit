@@ -139,38 +139,28 @@ export default function Notifications() {
     const results: ActivityItem[] = [];
 
     // Build pledgeId → totalAmount map from PledgeCreated events so we can detect full payments in DepositMade
-    // PledgeCreated args: pledgeId, sender, merchant, totalAmount, initialDeposit, commitmentDate, appliedFeeBps
+    // PledgeCreated args: pledgeId, merchant, payer, token, totalAmount, commitmentDate, appliedFeeBps
     const pledgeTotalMap = new Map<string, number>();
 
     for (const log of [...createdSender, ...createdMerchant]) {
       const p = pledgeIface.parseLog(log); if (!p) continue;
       const pledgeId = p.args[0].toString();
-      const isSender = p.args[1].toLowerCase() === addr;
-      const total = parseFloat(ethers.formatUnits(p.args[3], 6));
-      const initialDeposit = parseFloat(ethers.formatUnits(p.args[4], 6));
+      const isMerchant = p.args[1].toLowerCase() === addr;  // args[1] = merchant
+      const isPayer   = p.args[2].toLowerCase() === addr;   // args[2] = payer
+      const total = parseFloat(ethers.formatUnits(p.args[4], 6)); // args[4] = totalAmount
       const fee = parseFloat((total * 0.01).toFixed(2));
       pledgeTotalMap.set(pledgeId, total);
 
       results.push({ id: log.transactionHash + "_created", kind: "pledge", type: "created", pledgeId, amount: total.toFixed(2),
-        fee: isSender ? fee.toFixed(2) : undefined,
-        sign: isSender ? "negative" : "positive",
-        title: isSender ? "Pledge created" : "New pledge received",
-        sub: isSender ? `You pledged · #${pledgeId}` : `${total.toFixed(2)} USDC pledged to you · #${pledgeId}`,
+        fee: isMerchant ? fee.toFixed(2) : undefined,
+        sign: isMerchant ? "positive" : "negative",
+        title: isMerchant ? "Pledge invoice created" : "New pledge received",
+        sub: isMerchant
+          ? `${total.toFixed(2)} USDC requested from payer · #${pledgeId}`
+          : isPayer
+            ? `${total.toFixed(2)} USDC payment requested · #${pledgeId}`
+            : `${total.toFixed(2)} USDC · #${pledgeId}`,
         href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
-
-      // Separate down-payment item for the sender when an initial deposit was locked
-      if (isSender && initialDeposit > 0) {
-        const isFullUpfront = initialDeposit >= total;
-        results.push({ id: log.transactionHash + "_downpayment", kind: "pledge",
-          type: isFullUpfront ? "fulfilment" : "downpayment",
-          pledgeId, amount: initialDeposit.toFixed(2),
-          sign: "negative",
-          title: isFullUpfront ? "Full payment locked" : "Down payment locked",
-          sub: isFullUpfront
-            ? `${initialDeposit.toFixed(2)} USDC locked upfront · #${pledgeId}`
-            : `${initialDeposit.toFixed(2)} USDC down payment · #${pledgeId}`,
-          href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
-      }
     }
     for (const log of completed) {
       const p = pledgeIface.parseLog(log); if (!p) continue;
@@ -240,12 +230,12 @@ export default function Notifications() {
     // Fetch ALL pledge IDs from contract storage (not limited by block range)
     try {
       const [senderIds, merchantIds] = await Promise.all([
-        pledgeRead.getSenderPledges(account!) as Promise<bigint[]>,
+        pledgeRead.getPayerPledges(account!) as Promise<bigint[]>,
         pledgeRead.getMerchantPledges(account!) as Promise<bigint[]>,
       ]);
       const allIds = [...new Set([...senderIds, ...merchantIds].map((id) => id.toString()))];
       const allPledges = await Promise.all(
-        allIds.map((id) => pledgeRead.getPledge(id) as Promise<{ id: bigint; sender: string; merchant: string; totalAmount: bigint; commitmentDate: bigint; status: number }>)
+        allIds.map((id) => pledgeRead.getPledge(id) as Promise<{ id: bigint; payer: string; merchant: string; totalAmount: bigint; commitmentDate: bigint; status: number }>)
       );
 
       // Entries with type "downpayment"/"fulfilment"/"deposit" share a pledgeId with "created" — only skip if
@@ -262,7 +252,7 @@ export default function Notifications() {
         // Populate map so any DepositMade log for this pledge can detect full payments
         if (!pledgeTotalMap.has(pledgeId)) pledgeTotalMap.set(pledgeId, total);
         if (seenCreatedIds.has(pledgeId)) continue;
-        const isSender = p.sender.toLowerCase() === addr;
+        const isPayer = p.payer.toLowerCase() === addr;
         const statusLabel = STATUS_LABELS[p.status] ?? "UNKNOWN";
         results.push({
           id: `pledge_${pledgeId}_contract`,
@@ -270,16 +260,16 @@ export default function Notifications() {
           type: typeMap[statusLabel] ?? "created",
           pledgeId,
           amount: total.toFixed(2),
-          sign: isSender ? "negative" : "positive",
-          title: isSender ? `Pledge #${pledgeId}` : `Received pledge #${pledgeId}`,
+          sign: isPayer ? "negative" : "positive",
+          title: isPayer ? `Pledge #${pledgeId}` : `Received pledge #${pledgeId}`,
           sub: `${total.toFixed(2)} USDC · ${statusLabel}`,
           href: `/pledge/${pledgeId}`,
           blockNumber: 0,
         });
       }
 
-      // Deadline warnings: pending pledges where user is sender and deadline is within 24h
-      const pendingForWarning = allPledges.filter((p) => p.status === 0 && p.sender.toLowerCase() === addr);
+      // Deadline warnings: pending pledges where user is payer and deadline is within 24h
+      const pendingForWarning = allPledges.filter((p) => p.status === 0 && p.payer.toLowerCase() === addr);
       await loadDeadlineWarnings(pendingForWarning.map((p) => ({ id: p.id.toString(), commitmentDate: p.commitmentDate, totalAmount: p.totalAmount })));
     } catch (_) {
       // contract read failed, continue with log-based results only

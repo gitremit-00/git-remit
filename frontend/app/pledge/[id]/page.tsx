@@ -23,7 +23,7 @@ const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
 const STATUS_COLOR: Record<string, string> = { PENDING: "#f59e0b", COMPLETED: "#22c55e", DEFAULTED: "#ef4444", CANCELLED: "#888" };
 const STATUS_BG: Record<string, string> = { PENDING: "#f59e0b22", COMPLETED: "#22c55e22", DEFAULTED: "#ef444422", CANCELLED: "#88888822" };
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; token: string; totalAmount: bigint; initialDeposit: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; paidDuringGrace: boolean; }
+interface PledgeRaw { id: bigint; payer: string; merchant: string; token: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; paidDuringGrace: boolean; }
 
 function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
@@ -64,7 +64,7 @@ export default function PledgeDetail() {
       return;
     }
     const approveData = usdcWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, remaining]);
-    const depositData = pledgeWrite.interface.encodeFunctionData("depositRemaining", [id, remaining]);
+    const depositData = pledgeWrite.interface.encodeFunctionData("submitDeposit", [id, remaining]);
     const frozenSigner = signer;
     setTxLoading(true); setTxStatus("approving");
     try {
@@ -118,7 +118,7 @@ export default function PledgeDetail() {
   const deadline = new Date(Number(pledge.commitmentDate) * 1000);
   const graceEnd = new Date((Number(pledge.commitmentDate) + 7 * 86400) * 1000);
   const days = daysLeft(pledge.commitmentDate);
-  const isSender = account?.toLowerCase() === pledge.sender.toLowerCase();
+  const isSender = account?.toLowerCase() === pledge.payer.toLowerCase();
   const isMerchant = account?.toLowerCase() === pledge.merchant.toLowerCase();
   const isGraceOver = Date.now() / 1000 > Number(pledge.commitmentDate) + 3 * 86400;
   const meta = getPledgeMeta(pledge.merchant);
@@ -222,8 +222,8 @@ export default function PledgeDetail() {
             </div>
             <div className="flex flex-col gap-0">
               <TimelineStep state="done" title="Pledge created"
-                sub={`Locked ${ethers.formatUnits(pledge.initialDeposit, 6)} USDC into escrow contract`}
-                amount={`${ethers.formatUnits(pledge.initialDeposit, 6)} USDC`}
+                sub={`Merchant created payment request · deposit pending`}
+                amount={`${total.toFixed(2)} USDC`}
                 date={deadline.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                 isLast={false} lineActive={true} />
               <TimelineStep
@@ -258,7 +258,7 @@ export default function PledgeDetail() {
             <div className="space-y-0">
               <ProofRow label="PLEDGE ID" value={pledgeIdShort} copyValue={pledge.id.toString()} />
               <ProofRow label="CONTRACT" value="0xRemitSafe…Pledge" copyValue={CONTRACTS.REMITTANCE_PLEDGE} />
-              <ProofRow label="SENDER" value={shortAddr(pledge.sender)} copyValue={pledge.sender} last />
+              <ProofRow label="PAYER" value={shortAddr(pledge.payer)} copyValue={pledge.payer} last />
             </div>
           </div>
         </div>
@@ -414,12 +414,12 @@ export default function PledgeDetail() {
         <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 mb-3">
           <div className="text-[11px] text-[#888] tracking-[1.5px] mb-5 uppercase">Timeline</div>
           <div className="flex flex-col gap-0">
-            <TimelineStep state="done" title="Pledge created" sub={`${pledge.initialDeposit === pledge.totalAmount ? "Full amount" : ethers.formatUnits(pledge.initialDeposit, 6) + " USDC"} locked upfront`}
+            <TimelineStep state="done" title="Pledge created" sub={`Merchant created payment request · deposit pending`}
               date={deadline.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} isLast={false} lineActive={true} />
             <TimelineStep
               state={status === "COMPLETED" ? "done" : status === "DEFAULTED" ? "failed" : status === "CANCELLED" ? "failed" : remaining <= 0 ? "done" : "active"}
               title={status === "COMPLETED" ? "Fully funded" : status === "DEFAULTED" ? "Payment missed" : status === "CANCELLED" ? "Cancelled" : remaining <= 0 ? "Fully funded" : "Deposit remaining"}
-              sub={status === "COMPLETED" ? `${total.toFixed(2)} USDC paid in full` : status === "DEFAULTED" ? `${ethers.formatUnits(pledge.initialDeposit, 6)} USDC forfeited to merchant` : status === "CANCELLED" ? "Deposit refunded to sender" : remaining <= 0 ? "All funds locked — confirming" : `${remaining.toFixed(2)} USDC due by ${deadline.toLocaleDateString()} at ${deadline.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`}
+              sub={status === "COMPLETED" ? `${total.toFixed(2)} USDC paid in full` : status === "DEFAULTED" ? `${ethers.formatUnits(pledge.depositedAmount, 6)} USDC forfeited to merchant` : status === "CANCELLED" ? "Deposit refunded to sender" : remaining <= 0 ? "All funds locked — confirming" : `${remaining.toFixed(2)} USDC due by ${deadline.toLocaleDateString()} at ${deadline.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`}
               date={status === "PENDING" && remaining > 0 ? `${days}d left` : status === "PENDING" ? "Confirming" : ""}
               isLast={false} lineActive={status === "COMPLETED"} />
             <TimelineStep

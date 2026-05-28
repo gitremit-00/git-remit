@@ -30,7 +30,7 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
 const TABS = ["All", "Sent", "Received"] as const;
 type Tab = typeof TABS[number];
 
-interface PledgeRaw { id: bigint; sender: string; merchant: string; token: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; }
+interface PledgeRaw { id: bigint; payer: string; merchant: string; token: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; }
 
 function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
@@ -56,7 +56,7 @@ export default function Pledges() {
     setLoading(true);
     try {
       let ids: bigint[] = [];
-      if (tab === "Sent" || tab === "All") ids = [...ids, ...(await pledgeRead.getSenderPledges(account)) as bigint[]];
+      if (tab === "Sent" || tab === "All") ids = [...ids, ...(await pledgeRead.getPayerPledges(account)) as bigint[]];
       if (tab === "Received" || tab === "All") ids = [...ids, ...(await pledgeRead.getMerchantPledges(account)) as bigint[]];
       const unique = [...new Set(ids.map((id) => id.toString()))];
       const list = (await Promise.all(unique.map((id) => pledgeRead.getPledge(id)))) as PledgeRaw[];
@@ -129,8 +129,8 @@ export default function Pledges() {
                 const gross = total * (1 + feeBps / 10000);
                 const status = STATUS[p.status];
                 const sym = tokenSymbol(p.token);
-                const isSent = account?.toLowerCase() === p.sender.toLowerCase();
-                const counterparty = isSent ? p.merchant : p.sender;
+                const isSent = account?.toLowerCase() === p.payer.toLowerCase();
+                const counterparty = isSent ? p.merchant : p.payer;
                 const meta = getPledgeMeta(counterparty);
                 const days = daysLeft(p.commitmentDate);
                 return (
@@ -225,14 +225,14 @@ export default function Pledges() {
           const sym = tokenSymbol(p.token);
           const days = daysLeft(p.commitmentDate);
           const deadline = new Date(Number(p.commitmentDate) * 1000);
-          const isSent = account?.toLowerCase() === p.sender.toLowerCase();
+          const isSent = account?.toLowerCase() === p.payer.toLowerCase();
           return (
             <Link key={p.id.toString()} href={`/pledge/${p.id}`} className="bg-[#11141A] border border-[#1F2127] rounded-[18px] p-4 mb-3 block text-inherit">
               <div className="flex justify-between items-start mb-2.5">
                 <div>
-                  {(() => { const meta = getPledgeMeta(isSent ? p.merchant : p.sender); return (<>
-                    <div className="font-bold text-[15px]">{meta?.name || shortAddr(isSent ? p.merchant : p.sender)}</div>
-                    <div className="text-[11px] text-[#888] mt-0.5">{shortAddr(isSent ? p.merchant : p.sender)}</div>
+                  {(() => { const meta = getPledgeMeta(isSent ? p.merchant : p.payer); return (<>
+                    <div className="font-bold text-[15px]">{meta?.name || shortAddr(isSent ? p.merchant : p.payer)}</div>
+                    <div className="text-[11px] text-[#888] mt-0.5">{shortAddr(isSent ? p.merchant : p.payer)}</div>
                   </>); })()}
                 </div>
                 <span className="px-2.5 py-1 rounded-[20px] text-[11px] font-bold whitespace-nowrap flex items-center gap-1" style={{ color: STATUS_COLOR[status], background: STATUS_COLOR[status] + "22" }}>

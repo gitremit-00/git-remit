@@ -251,88 +251,11 @@ function NewTransferContent() {
   );
 
   // ── Submit handlers ────────────────────────────────────────────────────────
+  // In the new contract model, merchants create pledges — OFWs can only REQUEST one.
+  // All merchant-flow submissions go off-chain to Supabase via sendRequest().
+  // The merchant reviews the request and accepts it by calling createPledge on-chain.
   async function submit() {
-    if (!pledgeWrite || !signer) return;
-    if (paymentType === "installment") {
-      await submitInstallment();
-    } else {
-      await submitPledge();
-    }
-  }
-
-  async function submitPledge() {
-    const tokenRead = selectedToken === "USDC" ? usdcRead : usdtRead;
-    const tokenWrite = selectedToken === "USDC" ? usdcWrite : usdtWrite;
-    const tokenAddress = selectedToken === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
-    if (!pledgeWrite || !tokenWrite || !signer) return;
-
-    const depositAmt = isFullPayment ? gross : deposit;
-    const totalAmt = ethers.parseUnits(form.totalAmount, 6);
-    const initDeposit = ethers.parseUnits(depositAmt.toFixed(6), 6);
-
-    let commitTs: number;
-    if (isFullPayment) {
-      const d = new Date(); d.setDate(d.getDate() + 85); d.setHours(9, 0, 0, 0);
-      commitTs = Math.floor(d.getTime() / 1000);
-    } else {
-      commitTs = Math.floor(new Date(form.commitmentDate).getTime() / 1000);
-    }
-
-    setLoading(true); setTxError("");
-    try {
-      const balance: bigint = await tokenRead.balanceOf(account);
-      if (balance < initDeposit) {
-        const has = parseFloat(ethers.formatUnits(balance, 6)).toFixed(2);
-        const needs = parseFloat(ethers.formatUnits(initDeposit, 6)).toFixed(2);
-        setTxError(`Insufficient ${selectedToken} balance. You have ${has} but need ${needs} ${selectedToken}.`);
-        setLoading(false); return;
-      }
-      const allowance: bigint = await tokenRead.allowance(account, CONTRACTS.REMITTANCE_PLEDGE);
-      if (allowance < initDeposit) {
-        setTxStatus("approving");
-        const approveData = tokenWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, initDeposit]);
-        const approveTx = await signer.sendTransaction({ to: tokenAddress, data: approveData });
-        await approveTx.wait();
-      } else {
-        setTxStatus("approving");
-      }
-      setTxStatus("creating");
-      const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [tokenAddress, form.merchant, totalAmt, initDeposit, commitTs]);
-      const createTx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
-      await createTx.wait();
-      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
-      if (requestId) updatePaymentRequestStatus(requestId, "fulfilled");
-      try { localStorage.setItem("remitsafe_notif_dirty", "true"); window.dispatchEvent(new Event("storage")); } catch { /* ignore */ }
-      setTxStatus("done");
-      setTimeout(() => router.push("/pledges"), 1800);
-    } catch (err: unknown) {
-      setTxError(parseContractError(err));
-      setTxStatus(""); setLoading(false);
-    }
-  }
-
-  async function submitInstallment() {
-    const tokenAddress = selectedToken === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
-    if (!pledgeWrite || !signer) return;
-    const amtPerPeriod = ethers.parseUnits(form.totalAmount, 6);
-    const firstDueTs = Math.floor(new Date(form.commitmentDate).getTime() / 1000);
-    setLoading(true); setTxError("");
-    try {
-      setTxStatus("creating");
-      const data = pledgeWrite.interface.encodeFunctionData("createRecurringPledge", [
-        tokenAddress, form.merchant, amtPerPeriod,
-        installmentInterval, installmentCount, firstDueTs,
-      ]);
-      const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data });
-      await tx.wait();
-      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
-      try { localStorage.setItem("remitsafe_notif_dirty", "true"); window.dispatchEvent(new Event("storage")); } catch { /* ignore */ }
-      setTxStatus("done");
-      setTimeout(() => router.push("/pledges"), 1800);
-    } catch (err: unknown) {
-      setTxError(parseContractError(err));
-      setTxStatus(""); setLoading(false);
-    }
+    await sendRequest();
   }
 
   async function sendRequest() {
@@ -340,14 +263,17 @@ function NewTransferContent() {
     setLoading(true); setTxError("");
     try {
       const isInstallment = paymentType === "installment";
+      const isFull = paymentType === "full";
+      // Auto-set commitment date for full payments (85 days out)
+      const fullDate = (() => { const d = new Date(); d.setDate(d.getDate() + 85); d.setHours(9, 0, 0, 0); return d.toISOString(); })();
       const req = await createTransferRequest({
         sender_address: account,
         merchant_address: form.merchant,
-        type: isInstallment ? "installment" : "partial",
+        type: isInstallment ? "installment" : isFull ? "full" : "partial",
         token: selectedToken,
         total_amount: isInstallment ? null : parseFloat(form.totalAmount),
-        initial_deposit: isInstallment ? null : parseFloat(form.initialDeposit),
-        commitment_date: isInstallment ? null : (form.commitmentDate ? new Date(form.commitmentDate).toISOString() : null),
+        initial_deposit: isInstallment || isFull ? null : parseFloat(form.initialDeposit),
+        commitment_date: isInstallment ? null : isFull ? fullDate : (form.commitmentDate ? new Date(form.commitmentDate).toISOString() : null),
         amount_per_period: isInstallment ? parseFloat(form.totalAmount) : null,
         interval_seconds: isInstallment ? installmentInterval : null,
         total_periods: isInstallment ? installmentCount : null,
@@ -366,12 +292,10 @@ function NewTransferContent() {
     }
   }
 
-  const txGuardSteps = paymentType === "installment"
-    ? [{ label: "Create recurring pledge on-chain", state: (txStatus === "creating" ? "active" : txStatus === "done" ? "done" : "pending") as "active" | "done" | "pending" }]
-    : [
-        { label: `Approve ${selectedToken} spend`, state: (txStatus === "approving" ? "active" : (txStatus === "creating" || txStatus === "done") ? "done" : "pending") as "active" | "done" | "pending" },
-        { label: "Create pledge on-chain", state: (txStatus === "creating" ? "active" : txStatus === "done" ? "done" : "pending") as "active" | "done" | "pending" },
-      ];
+  // Merchant-flow is now off-chain (request to Supabase) — single step, no wallet needed.
+  const txGuardSteps = [
+    { label: "Sending payment request to merchant", state: (loading ? "active" : requestSent ? "done" : "pending") as "active" | "done" | "pending" },
+  ];
 
   // ── Payment request preview modal ──────────────────────────────────────────
   const RequestPreviewScreen = requestPreview && showPreview && (

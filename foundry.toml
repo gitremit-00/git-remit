@@ -2,7 +2,7 @@
 src = "contracts"
 test = "test/foundry"
 libs = ["node_modules", "lib"]
-solc = "0.8.24"
+solc = "0.8.28"
 via_ir = true
 
 [fuzz]

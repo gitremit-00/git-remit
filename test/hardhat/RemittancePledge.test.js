@@ -159,15 +159,15 @@ describe("RemittancePledge", function () {
         expect(await pledge.getTrustScore(fresh.address)).to.equal(6000);
       });
 
-      it("operator can set baseline", async function () {
+      it("operator cannot call setVerificationBaseline directly (owner-only)", async function () {
         await pledge.connect(owner).setVerificationOperator(outsider.address);
-        await pledge.connect(outsider).setVerificationBaseline(fresh.address, 6000);
-        expect(await pledge.verificationBaseline(fresh.address)).to.equal(6000);
+        await expect(pledge.connect(outsider).setVerificationBaseline(fresh.address, 6000))
+          .to.be.revertedWithCustomError(pledge, "OwnableUnauthorizedAccount");
       });
 
-      it("non-owner non-operator cannot set baseline", async function () {
+      it("non-owner cannot set baseline", async function () {
         await expect(pledge.connect(outsider).setVerificationBaseline(fresh.address, 5000))
-          .to.be.revertedWith("Not authorized");
+          .to.be.revertedWithCustomError(pledge, "OwnableUnauthorizedAccount");
       });
 
       it("reverts on baseline above MAX_BASELINE", async function () {
@@ -190,6 +190,58 @@ describe("RemittancePledge", function () {
         await pledge.connect(owner).setVerificationBaseline(fresh.address, 5000);
         await pledge.connect(owner).setVerificationBaseline(fresh.address, 0);
         expect(await pledge.getTrustScore(fresh.address)).to.equal(0);
+      });
+    });
+
+    describe("boostVerificationBaseline (operator)", function () {
+      beforeEach(async function () {
+        await pledge.connect(owner).setVerificationOperator(outsider.address);
+      });
+
+      it("operator can boost a KYC-approved user from 5000 to 6000", async function () {
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 5000);
+        await pledge.connect(outsider).boostVerificationBaseline(fresh.address);
+        expect(await pledge.verificationBaseline(fresh.address)).to.equal(6000);
+      });
+
+      it("emits VerificationBaselineChanged on boost", async function () {
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 5000);
+        await expect(pledge.connect(outsider).boostVerificationBaseline(fresh.address))
+          .to.emit(pledge, "VerificationBaselineChanged")
+          .withArgs(fresh.address, 5000, 6000);
+      });
+
+      it("operator cannot boost an unverified user (0 baseline)", async function () {
+        await expect(pledge.connect(outsider).boostVerificationBaseline(fresh.address))
+          .to.be.revertedWith("Only boostable from BASELINE_KYC");
+      });
+
+      it("operator cannot boost an already-boosted user", async function () {
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 6000);
+        await expect(pledge.connect(outsider).boostVerificationBaseline(fresh.address))
+          .to.be.revertedWith("Only boostable from BASELINE_KYC");
+      });
+
+      it("non-operator cannot call boost (even owner)", async function () {
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 5000);
+        await expect(pledge.connect(owner).boostVerificationBaseline(fresh.address))
+          .to.be.revertedWith("Only operator");
+      });
+
+      it("compromised operator cannot revoke users", async function () {
+        // Even with operator key, you can't lower anyone's baseline.
+        await pledge.connect(owner).setVerificationBaseline(payer.address, 5000);
+        // The operator has no function that can lower a baseline — only boost.
+        // boostVerificationBaseline reverts if baseline != BASELINE_KYC, so calling
+        // it after payer is already at 5000 → succeeds, raising to 6000.
+        // The defense: there's no operator-callable function that lowers anything.
+        await expect(pledge.connect(outsider).setVerificationBaseline(payer.address, 0))
+          .to.be.revertedWithCustomError(pledge, "OwnableUnauthorizedAccount");
+      });
+
+      it("reverts on zero address", async function () {
+        await expect(pledge.connect(outsider).boostVerificationBaseline(ethers.ZeroAddress))
+          .to.be.revertedWith("Invalid OFW address");
       });
     });
 

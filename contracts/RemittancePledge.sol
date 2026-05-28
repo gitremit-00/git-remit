@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity 0.8.28;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -1009,19 +1009,34 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         verificationOperator = newOp;
     }
 
-    /// @notice Set or update an OFW's KYC baseline score.
-    /// @dev Callable by owner OR verification operator. Value must be <= MAX_BASELINE.
-    ///      Typical values: 0 (unverified), 5000 (KYC approved), 6000 (KYC + avatar).
-    function setVerificationBaseline(address ofw, uint256 newScore) external whenNotPaused {
-        require(
-            msg.sender == owner() || msg.sender == verificationOperator,
-            "Not authorized"
-        );
+    /// @notice Set or update an OFW's KYC baseline score (full admin control).
+    /// @dev Owner-only — used for KYC approval (0 → 5000), revocation (any → 0),
+    ///      or manual overrides. The operator wallet uses boostVerificationBaseline
+    ///      instead, which is restricted to the avatar-upload +1000 boost.
+    ///      Intentionally NOT gated by whenNotPaused — admin must be able to revoke
+    ///      fraudulent verifications during an emergency pause.
+    function setVerificationBaseline(address ofw, uint256 newScore) external onlyOwner {
         require(ofw != address(0), "Invalid OFW address");
         require(newScore <= MAX_BASELINE, "Baseline exceeds maximum");
         uint256 oldScore = verificationBaseline[ofw];
         verificationBaseline[ofw] = newScore;
         emit VerificationBaselineChanged(ofw, oldScore, newScore);
+    }
+
+    /// @notice Operator-only narrow function: boost a KYC-approved OFW from
+    ///         BASELINE_KYC to BASELINE_KYC_PLUS_AVATAR after they upload an avatar.
+    /// @dev Restricted to this single transition for defense-in-depth. A compromised
+    ///      operator key cannot fake-verify new users or revoke existing ones — it can
+    ///      only push already-KYC-approved users up by +1000.
+    function boostVerificationBaseline(address ofw) external whenNotPaused {
+        require(msg.sender == verificationOperator, "Only operator");
+        require(ofw != address(0), "Invalid OFW address");
+        require(
+            verificationBaseline[ofw] == BASELINE_KYC,
+            "Only boostable from BASELINE_KYC"
+        );
+        verificationBaseline[ofw] = BASELINE_KYC_PLUS_AVATAR;
+        emit VerificationBaselineChanged(ofw, BASELINE_KYC, BASELINE_KYC_PLUS_AVATAR);
     }
 
     /// @notice Set merchant verification flag. Owner-only — operator cannot do this.

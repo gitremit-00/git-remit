@@ -86,7 +86,7 @@ export default function Profile() {
       const [max, pct, ids] = await Promise.all([
         pledgeRead.getMaxActivePledges(account),
         pledgeRead.getRequiredDepositPct(account),
-        pledgeRead.getSenderPledges(account),
+        pledgeRead.getPayerPledges(account),
       ]);
       setMaxActive(Number(max));
       setReqPct(Number(pct));

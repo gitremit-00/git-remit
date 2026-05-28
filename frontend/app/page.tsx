@@ -53,7 +53,7 @@ export default function Home() {
         usdcRead.balanceOf(account),
         usdtRead.balanceOf(account),
         pledgeRead.getReputation(account),
-        pledgeRead.getSenderPledges(account),
+        pledgeRead.getPayerPledges(account),
         pledgeRead.getMaxActivePledges(account),
       ]);
       setUsdcBal(ethers.formatUnits(uBal, 6));
