@@ -98,6 +98,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       sessionStorage.setItem(`rs_wallet_confirmed_${address.toLowerCase()}`, "1");
       setWalletVerified(true);
       setError(null);
+
+      // Persist wallet address to profile so KYC approval can whitelist it on-chain
+      fetch("/api/profile/wallet", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: address }),
+      }).catch(() => {/* non-critical — dashboard still works */});
     } catch (err: unknown) {
       setWalletVerified(false);
       setError((err as Error).message || "MetaMask confirmation was rejected.");

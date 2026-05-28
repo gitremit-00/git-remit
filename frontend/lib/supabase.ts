@@ -28,6 +28,7 @@ export interface UserProfile {
   kyc_reviewed_at: string | null;
   created_at: string;
   updated_at: string | null;
+  wallet_address: string | null;
   // OFW-specific
   id_type: string | null;
   id_number: string | null;
@@ -64,9 +65,10 @@ type ProfileRow = {
   kyc_reviewed_at: string | null;
   created_at: string;
   updated_at: string | null;
+  wallet_address: string | null;
 };
 
-const KYC_SELECT = "id,username,role,full_name,phone_number,email,country_of_work,country_of_origin,gov_id_type,id_number,gov_id_photo_url,business_permit_url,bio,avatar_url,business_name,business_type,business_address,city,kyc_status,kyc_rejection_reason,kyc_reviewed_at,created_at,updated_at";
+const KYC_SELECT = "id,username,role,full_name,phone_number,email,country_of_work,country_of_origin,gov_id_type,id_number,gov_id_photo_url,business_permit_url,bio,avatar_url,business_name,business_type,business_address,city,kyc_status,kyc_rejection_reason,kyc_reviewed_at,created_at,updated_at,wallet_address";
 
 function appRole(role: string): Role {
   if (role === "merchant") return "merchant";
@@ -100,6 +102,7 @@ function mapProfile(row: ProfileRow): UserProfile {
     business_address: row.business_address,
     city: row.city,
     permit_url: row.business_permit_url,
+    wallet_address: row.wallet_address,
   };
 }
 
