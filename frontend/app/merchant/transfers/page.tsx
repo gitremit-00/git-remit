@@ -70,14 +70,16 @@ export default function MerchantTransfers() {
 
   async function loadData() {
     setLoading(true);
+    console.log("[MerchantTransfers] loadData for account:", account);
     try {
-      const [ids, trData] = await Promise.all([
-        pledgeRead.getMerchantPledges(account) as Promise<bigint[]>,
+      const [idsResult, trData] = await Promise.all([
+        (pledgeRead.getMerchantPledges(account) as Promise<bigint[]>).catch((e) => { console.error("[MerchantTransfers] getMerchantPledges error:", e); return [] as bigint[]; }),
         getMerchantTransferRequests(account!),
       ]);
-      const details = await Promise.all(ids.map((id) => pledgeRead.getPledge(id))) as PledgeRaw[];
-      setPledges(details.reverse());
+      console.log("[MerchantTransfers] transferRequests:", trData.length, "pledges:", idsResult.length);
       setTransferRequests(trData);
+      const details = await Promise.all(idsResult.map((id) => pledgeRead.getPledge(id))) as PledgeRaw[];
+      setPledges(details.reverse());
       const uniqueSenders = [...new Set(details.map((p) => p.payer.toLowerCase()))];
       const reps = await Promise.all(uniqueSenders.map((s) => pledgeRead.getReputation(s)));
       const repMap: Record<string, SenderRep> = {};

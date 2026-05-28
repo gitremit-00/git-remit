@@ -374,7 +374,8 @@ export async function createTransferRequest(
     })
     .select()
     .single();
-  if (error) { console.error(error); return null; }
+  if (error) { console.error("[createTransferRequest] error:", error); return null; }
+  console.log("[createTransferRequest] saved with merchant_address:", req.merchant_address.toLowerCase(), "status:", "pending");
   return data as TransferRequest;
 }
 
@@ -401,13 +402,15 @@ export async function getSenderTransferRequests(senderAddress: string): Promise<
 }
 
 export async function getMerchantTransferRequests(merchantAddress: string): Promise<TransferRequest[]> {
-  if (!supabase) return [];
+  if (!supabase) { console.warn("[getMerchantTransferRequests] supabase not configured"); return []; }
   const { data, error } = await supabase
     .from("transfer_requests")
     .select("*")
     .eq("merchant_address", merchantAddress.toLowerCase())
     .order("created_at", { ascending: false });
-  if (error || !data) return [];
+  if (error) { console.error("[getMerchantTransferRequests] error:", error, "address:", merchantAddress.toLowerCase()); return []; }
+  if (!data) return [];
+  console.log("[getMerchantTransferRequests] found", data.length, "rows for", merchantAddress.toLowerCase());
   return data as TransferRequest[];
 }
 
