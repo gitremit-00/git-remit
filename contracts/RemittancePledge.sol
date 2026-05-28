@@ -73,6 +73,18 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     uint256 public constant WEIGHT_INSTALLMENT_PARTIAL = 5000;
     uint256 public constant WEIGHT_INSTALLMENT_BONUS   = 5000;
 
+    // ── Verification / KYC tiers ───────────────────────────────────────────────
+    /// @dev Minimum baseline trust score required to initiate new transactions.
+    ///      Below this, the payer cannot deposit, pay installments, send P2P, etc.
+    ///      Set to match BASELINE_KYC — KYC approval is the gate.
+    uint256 public constant MIN_TRANSACT_BASELINE = 5000;
+    /// @dev Awarded baseline when admin approves KYC.
+    uint256 public constant BASELINE_KYC = 5000;
+    /// @dev Awarded baseline when KYC is approved AND avatar is uploaded.
+    uint256 public constant BASELINE_KYC_PLUS_AVATAR = 6000;
+    /// @dev Maximum admin-settable baseline. Behavioral score can still exceed this.
+    uint256 public constant MAX_BASELINE = 6000;
+
     // ── Types ──────────────────────────────────────────────────────────────────
     enum PledgeStatus { PENDING, COMPLETED, DEFAULTED, CANCELLED }
 
@@ -137,6 +149,18 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     mapping(address => uint256[]) private payerPledgeIds;
     mapping(address => uint256[]) private merchantPledgeIds;
 
+    // ── Verification State ─────────────────────────────────────────────────────
+    /// @notice Per-OFW baseline trust score set by admin/operator based on KYC.
+    ///         Behavioral score (from pledge history) can rise above this.
+    mapping(address => uint256) public verificationBaseline;
+
+    /// @notice Per-merchant binary verification flag set by admin.
+    mapping(address => bool) public isMerchantVerified;
+
+    /// @notice Backend wallet authorized to update OFW baselines automatically
+    ///         (e.g. avatar upload boost). Cannot touch merchant verification.
+    address public verificationOperator;
+
     // ── Recurring Pledge State ─────────────────────────────────────────────────
     uint256 public recurringCounter;
     mapping(uint256 => RecurringPledge) public recurringPledges;
@@ -163,6 +187,11 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     event FeeCollected(uint256 indexed pledgeId, address indexed feeRecipient, uint256 fee);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event TokenAllowanceSet(address indexed token, bool allowed);
+
+    // Verification events
+    event VerificationBaselineChanged(address indexed ofw, uint256 oldScore, uint256 newScore);
+    event MerchantVerificationChanged(address indexed merchant, bool verified);
+    event VerificationOperatorChanged(address indexed oldOp, address indexed newOp);
 
     // P2P instant transfer event
     event P2PSent(
@@ -221,9 +250,14 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 totalAmount,
         uint256 commitmentDate
     ) external whenNotPaused {
-        require(allowedTokens[token], "Token not supported");
+        require(isMerchantVerified[msg.sender], "Merchant not verified");
         require(payer != address(0), "Invalid payer address");
         require(payer != msg.sender, "Merchant cannot be the payer");
+        require(
+            verificationBaseline[payer] >= MIN_TRANSACT_BASELINE,
+            "Payer not verified"
+        );
+        require(allowedTokens[token], "Token not supported");
         require(totalAmount >= MIN_PLEDGE_AMOUNT, "Amount below minimum");
         require(commitmentDate > block.timestamp, "Commitment date must be in future");
         require(
@@ -271,9 +305,14 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 totalPeriods,
         uint256 firstDueDate
     ) external whenNotPaused {
-        require(allowedTokens[token], "Token not supported");
+        require(isMerchantVerified[msg.sender], "Merchant not verified");
         require(payer != address(0), "Invalid payer address");
         require(payer != msg.sender, "Merchant cannot be the payer");
+        require(
+            verificationBaseline[payer] >= MIN_TRANSACT_BASELINE,
+            "Payer not verified"
+        );
+        require(allowedTokens[token], "Token not supported");
         require(amountPerPeriod >= MIN_PLEDGE_AMOUNT, "Amount below minimum");
         require(intervalSeconds >= MIN_RECURRING_INTERVAL, "Interval too short");
         require(totalPeriods >= 1 && totalPeriods <= MAX_RECURRING_PERIODS, "Invalid period count");
@@ -311,6 +350,7 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     /// @dev Callable only after the grace period and within CLAIM_WINDOW.
     /// @param pledgeId ID of the defaulted pledge
     function claimDefaultedDeposit(uint256 pledgeId) external nonReentrant whenNotPaused {
+        require(isMerchantVerified[msg.sender], "Merchant not verified");
         Pledge storage pledge = pledges[pledgeId];
 
         require(pledge.id != 0, "Pledge does not exist");
@@ -398,6 +438,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         nonReentrant
         whenNotPaused
     {
+        require(
+            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
+            "Payer not verified"
+        );
         Pledge storage pledge = pledges[pledgeId];
 
         require(pledge.id != 0, "Pledge does not exist");
@@ -497,6 +541,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 sigExpiry,
         bytes calldata merchantSig
     ) external nonReentrant whenNotPaused {
+        require(
+            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
+            "Payer not verified"
+        );
         Pledge storage pledge = pledges[pledgeId];
 
         require(pledge.id != 0, "Pledge does not exist");
@@ -589,6 +637,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     ///      immediately. If paid after the due date but within grace, marked late.
     /// @param recurringId ID of the recurring pledge
     function payInstallment(uint256 recurringId) external nonReentrant whenNotPaused {
+        require(
+            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
+            "Payer not verified"
+        );
         RecurringPledge storage rp = recurringPledges[recurringId];
 
         require(rp.id != 0, "Recurring pledge does not exist");
@@ -659,6 +711,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     ///      For paying ALL outstanding debt at the end of the contract, use settleDebt instead.
     /// @param recurringId ID of the recurring pledge
     function payMissedInstallment(uint256 recurringId) external nonReentrant whenNotPaused {
+        require(
+            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
+            "Payer not verified"
+        );
         RecurringPledge storage rp = recurringPledges[recurringId];
 
         require(rp.id != 0, "Recurring pledge does not exist");
@@ -713,6 +769,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     /// @dev Only callable when status is PENDING_SETTLEMENT.
     /// @param recurringId ID of the recurring pledge
     function settleDebt(uint256 recurringId) external nonReentrant whenNotPaused {
+        require(
+            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
+            "Payer not verified"
+        );
         RecurringPledge storage rp = recurringPledges[recurringId];
 
         require(rp.id != 0, "Recurring pledge does not exist");
@@ -805,6 +865,11 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         address recipient,
         uint256 amount
     ) external nonReentrant whenNotPaused {
+        require(
+            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE
+                || isMerchantVerified[msg.sender],
+            "Sender not verified"
+        );
         require(allowedTokens[token], "Token not supported");
         require(recipient != address(0), "Invalid recipient address");
         require(recipient != msg.sender, "Cannot send to yourself");
@@ -937,6 +1002,35 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         feeRecipient = newRecipient;
     }
 
+    /// @notice Set the verification operator address (backend wallet for auto-updates).
+    /// @dev Operator can only call setVerificationBaseline. Pass address(0) to disable.
+    function setVerificationOperator(address newOp) external onlyOwner {
+        emit VerificationOperatorChanged(verificationOperator, newOp);
+        verificationOperator = newOp;
+    }
+
+    /// @notice Set or update an OFW's KYC baseline score.
+    /// @dev Callable by owner OR verification operator. Value must be <= MAX_BASELINE.
+    ///      Typical values: 0 (unverified), 5000 (KYC approved), 6000 (KYC + avatar).
+    function setVerificationBaseline(address ofw, uint256 newScore) external whenNotPaused {
+        require(
+            msg.sender == owner() || msg.sender == verificationOperator,
+            "Not authorized"
+        );
+        require(ofw != address(0), "Invalid OFW address");
+        require(newScore <= MAX_BASELINE, "Baseline exceeds maximum");
+        uint256 oldScore = verificationBaseline[ofw];
+        verificationBaseline[ofw] = newScore;
+        emit VerificationBaselineChanged(ofw, oldScore, newScore);
+    }
+
+    /// @notice Set merchant verification flag. Owner-only — operator cannot do this.
+    function setMerchantVerified(address merchant, bool verified) external onlyOwner {
+        require(merchant != address(0), "Invalid merchant address");
+        isMerchantVerified[merchant] = verified;
+        emit MerchantVerificationChanged(merchant, verified);
+    }
+
     // ── View Functions ─────────────────────────────────────────────────────────
 
     /// @notice Service fee rate (basis points) for a given payer based on their trust score.
@@ -974,10 +1068,14 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @dev Single source of truth for the trust score (basis points, 0-10000).
+    ///      Returns max(verificationBaseline, behavioral) so KYC sets a floor that
+    ///      behavior can only raise above — never below — until admin downgrades.
     function _trustScore(address wallet) internal view returns (uint256) {
         Reputation storage rep = reputations[wallet];
-        if (rep.totalWeight == 0) return 0;
-        return rep.weightedScore / rep.totalWeight;
+        uint256 baseline = verificationBaseline[wallet];
+        if (rep.totalWeight == 0) return baseline;
+        uint256 behavioral = rep.weightedScore / rep.totalWeight;
+        return behavioral > baseline ? behavioral : baseline;
     }
 
     /// @notice Trust score for a wallet, 0-10000 (divide by 100 for a percentage).
@@ -1104,9 +1202,6 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         if (rep.defaultCount >= DEFAULT_LOCKOUT_THRESHOLD) {
             return MAX_ACTIVE_NO_HISTORY;
         }
-        if (rep.totalWeight == 0) {
-            return MAX_ACTIVE_NO_HISTORY;
-        }
 
         uint256 score = _trustScore(payer);
         if (score >= TIER_HIGH) return MAX_ACTIVE_HIGH;
@@ -1115,15 +1210,10 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice Required upfront deposit percentage for a payer, based on their trust score.
-    /// @dev DESIGN NOTE: a brand-new wallet (no resolved history) receives the 20% tier — the
-    ///      same as a proven high-trust payer. This is deliberate: GitRemit assumes wallets
-    ///      are created through off-chain identity verification (face-recognition registration),
-    ///      so a "new" wallet is a verified new human, not an anonymous one.
+    /// @dev Score is `max(verificationBaseline, behavioralScore)`. Unverified wallets have
+    ///      baseline 0 and no history, putting them in the RISK tier (50% deposit) — but
+    ///      they cannot transact at all until KYC raises their baseline to MIN_TRANSACT_BASELINE.
     function getRequiredDepositPct(address payer) public view returns (uint256) {
-        Reputation storage rep = reputations[payer];
-
-        if (rep.totalWeight == 0) return DEPOSIT_TIER_HIGH;
-
         uint256 score = _trustScore(payer);
         if (score >= TIER_HIGH) return DEPOSIT_TIER_HIGH; // 80%+ -> 20%
         if (score >= TIER_MID)  return DEPOSIT_TIER_MID;  // 50%+ -> 30%

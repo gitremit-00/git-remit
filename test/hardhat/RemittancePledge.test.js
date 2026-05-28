@@ -124,6 +124,179 @@ describe("RemittancePledge", function () {
     // Fund the payer (OFW) with both tokens
     await usdc.faucet(payer.address, UNITS(100000));
     await usdt.faucet(payer.address, UNITS(100000));
+
+    // Default verification setup — all existing tests assume a KYC-approved payer
+    // and merchant. The outsider is also verified as both OFW and merchant so
+    // role/ownership revert tests reach their intended require() instead of the
+    // verification gate. Tests that exercise unverified-user paths set their own state.
+    await pledge.connect(owner).setVerificationBaseline(payer.address, 5000);
+    await pledge.connect(owner).setVerificationBaseline(outsider.address, 5000);
+    await pledge.connect(owner).setMerchantVerified(merchant.address, true);
+    await pledge.connect(owner).setMerchantVerified(outsider.address, true);
+    // Merchant also gets an OFW baseline so "merchant as payer" tests reach
+    // their intended require check, not the verification gate.
+    await pledge.connect(owner).setVerificationBaseline(merchant.address, 5000);
+  });
+
+  // ── Verification (KYC) ────────────────────────────────────────────────────────
+  describe("verification", function () {
+    let fresh; // a signer with no verification state from beforeEach
+
+    beforeEach(async function () {
+      fresh = (await ethers.getSigners())[10];
+      await usdc.faucet(fresh.address, UNITS(10000));
+    });
+
+    describe("setVerificationBaseline", function () {
+      it("owner can set an OFW's baseline to KYC level (5000)", async function () {
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 5000);
+        expect(await pledge.verificationBaseline(fresh.address)).to.equal(5000);
+        expect(await pledge.getTrustScore(fresh.address)).to.equal(5000);
+      });
+
+      it("owner can set baseline to KYC+avatar level (6000)", async function () {
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 6000);
+        expect(await pledge.getTrustScore(fresh.address)).to.equal(6000);
+      });
+
+      it("operator can set baseline", async function () {
+        await pledge.connect(owner).setVerificationOperator(outsider.address);
+        await pledge.connect(outsider).setVerificationBaseline(fresh.address, 6000);
+        expect(await pledge.verificationBaseline(fresh.address)).to.equal(6000);
+      });
+
+      it("non-owner non-operator cannot set baseline", async function () {
+        await expect(pledge.connect(outsider).setVerificationBaseline(fresh.address, 5000))
+          .to.be.revertedWith("Not authorized");
+      });
+
+      it("reverts on baseline above MAX_BASELINE", async function () {
+        await expect(pledge.connect(owner).setVerificationBaseline(fresh.address, 6001))
+          .to.be.revertedWith("Baseline exceeds maximum");
+      });
+
+      it("reverts on zero address", async function () {
+        await expect(pledge.connect(owner).setVerificationBaseline(ethers.ZeroAddress, 5000))
+          .to.be.revertedWith("Invalid OFW address");
+      });
+
+      it("emits VerificationBaselineChanged", async function () {
+        await expect(pledge.connect(owner).setVerificationBaseline(fresh.address, 5000))
+          .to.emit(pledge, "VerificationBaselineChanged")
+          .withArgs(fresh.address, 0, 5000);
+      });
+
+      it("downgrading baseline to 0 fully revokes verification", async function () {
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 5000);
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 0);
+        expect(await pledge.getTrustScore(fresh.address)).to.equal(0);
+      });
+    });
+
+    describe("setMerchantVerified", function () {
+      it("owner can verify a merchant", async function () {
+        await pledge.connect(owner).setMerchantVerified(fresh.address, true);
+        expect(await pledge.isMerchantVerified(fresh.address)).to.equal(true);
+      });
+
+      it("owner can revoke merchant verification", async function () {
+        await pledge.connect(owner).setMerchantVerified(fresh.address, true);
+        await pledge.connect(owner).setMerchantVerified(fresh.address, false);
+        expect(await pledge.isMerchantVerified(fresh.address)).to.equal(false);
+      });
+
+      it("operator cannot verify merchants (owner only)", async function () {
+        await pledge.connect(owner).setVerificationOperator(outsider.address);
+        await expect(pledge.connect(outsider).setMerchantVerified(fresh.address, true))
+          .to.be.revertedWithCustomError(pledge, "OwnableUnauthorizedAccount");
+      });
+
+      it("emits MerchantVerificationChanged", async function () {
+        await expect(pledge.connect(owner).setMerchantVerified(fresh.address, true))
+          .to.emit(pledge, "MerchantVerificationChanged")
+          .withArgs(fresh.address, true);
+      });
+    });
+
+    describe("setVerificationOperator", function () {
+      it("owner can set operator", async function () {
+        await pledge.connect(owner).setVerificationOperator(outsider.address);
+        expect(await pledge.verificationOperator()).to.equal(outsider.address);
+      });
+
+      it("non-owner cannot set operator", async function () {
+        await expect(pledge.connect(outsider).setVerificationOperator(payer.address))
+          .to.be.revertedWithCustomError(pledge, "OwnableUnauthorizedAccount");
+      });
+
+      it("emits VerificationOperatorChanged", async function () {
+        await expect(pledge.connect(owner).setVerificationOperator(outsider.address))
+          .to.emit(pledge, "VerificationOperatorChanged")
+          .withArgs(ethers.ZeroAddress, outsider.address);
+      });
+    });
+
+    describe("trust score with baseline", function () {
+      it("baseline floors the trust score", async function () {
+        await pledge.connect(owner).setVerificationBaseline(fresh.address, 5000);
+        // No history → score equals baseline
+        expect(await pledge.getTrustScore(fresh.address)).to.equal(5000);
+      });
+
+      it("behavioral score above baseline wins", async function () {
+        // payer has baseline 5000 and pays one full pledge → behavioral = 10000
+        await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(10), (await time.latest()) + 30 * DAY);
+        const gross = await pledge.grossAmountForPledge(1);
+        await usdc.connect(payer).approve(pledgeAddr, gross);
+        await pledge.connect(payer).submitDeposit(1, gross);
+        expect(await pledge.getTrustScore(payer.address)).to.be.gte(8000);
+      });
+    });
+
+    describe("transaction gating", function () {
+      it("createPledge reverts when merchant is not verified", async function () {
+        const deadline = (await time.latest()) + 30 * DAY;
+        await expect(pledge.connect(fresh).createPledge(usdcAddr, payer.address, UNITS(150), deadline))
+          .to.be.revertedWith("Merchant not verified");
+      });
+
+      it("createPledge reverts when payer is not verified", async function () {
+        const deadline = (await time.latest()) + 30 * DAY;
+        await expect(pledge.connect(merchant).createPledge(usdcAddr, fresh.address, UNITS(150), deadline))
+          .to.be.revertedWith("Payer not verified");
+      });
+
+      it("submitDeposit reverts when payer's baseline drops below threshold", async function () {
+        await createStandardPledge();
+        // Admin revokes the payer's verification
+        await pledge.connect(owner).setVerificationBaseline(payer.address, 0);
+        const gross = await pledge.grossAmountForPledge(1);
+        const remaining = gross - ((gross * 40n) / 100n);
+        await usdc.connect(payer).approve(pledgeAddr, remaining);
+        await expect(pledge.connect(payer).submitDeposit(1, remaining))
+          .to.be.revertedWith("Payer not verified");
+      });
+
+      it("sendP2P reverts when sender is not verified", async function () {
+        await usdc.connect(fresh).approve(pledgeAddr, UNITS(20));
+        await expect(pledge.connect(fresh).sendP2P(usdcAddr, payer.address, UNITS(10)))
+          .to.be.revertedWith("Sender not verified");
+      });
+
+      it("sendP2P works for a verified merchant even without OFW baseline", async function () {
+        await pledge.connect(owner).setMerchantVerified(fresh.address, true);
+        await usdc.connect(fresh).approve(pledgeAddr, UNITS(20));
+        await pledge.connect(fresh).sendP2P(usdcAddr, payer.address, UNITS(10));
+      });
+
+      it("reclaimDeposit works even when payer is unverified (wind-down)", async function () {
+        const { deadline } = await createStandardPledge();
+        await pledge.connect(owner).setVerificationBaseline(payer.address, 0);
+        await time.increaseTo(deadline + GRACE_PERIOD + CLAIM_WINDOW + TIME_BUFFER + 1);
+        await pledge.connect(payer).reclaimDeposit(1);
+        expect((await pledge.getPledge(1)).status).to.equal(2); // DEFAULTED
+      });
+    });
   });
 
   // ── Constructor ───────────────────────────────────────────────────────────────
@@ -372,51 +545,48 @@ describe("RemittancePledge", function () {
     });
 
     it("enforces the active pledge limit on the payer", async function () {
-      // Create 2 pledges and have payer deposit on both (hits limit of 2)
+      // KYC-verified payer is at MID tier (cap = 3). Create 4 pledges and have
+      // payer deposit on the first 3, then the 4th should fail.
       const deadline = (await time.latest()) + 30 * DAY;
-      await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(150), deadline);
-      await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(150), deadline);
-      await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(150), deadline);
+      for (let i = 0; i < 4; i++) {
+        await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(150), deadline);
+      }
 
-      const gross1 = await pledge.grossAmountForPledge(1);
-      const dep1 = (gross1 * 40n) / 100n;
-      await usdc.connect(payer).approve(pledgeAddr, dep1);
-      await pledge.connect(payer).submitDeposit(1, dep1);
+      for (let i = 1; i <= 3; i++) {
+        const gross = await pledge.grossAmountForPledge(i);
+        const dep = (gross * 40n) / 100n;
+        await usdc.connect(payer).approve(pledgeAddr, dep);
+        await pledge.connect(payer).submitDeposit(i, dep);
+      }
 
-      const gross2 = await pledge.grossAmountForPledge(2);
-      const dep2 = (gross2 * 40n) / 100n;
-      await usdc.connect(payer).approve(pledgeAddr, dep2);
-      await pledge.connect(payer).submitDeposit(2, dep2);
-
-      // 3rd deposit should fail — payer is at limit
-      const gross3 = await pledge.grossAmountForPledge(3);
-      const dep3 = (gross3 * 40n) / 100n;
-      await usdc.connect(payer).approve(pledgeAddr, dep3);
-      await expect(pledge.connect(payer).submitDeposit(3, dep3))
+      // 4th deposit should fail — payer is at MID cap
+      const gross4 = await pledge.grossAmountForPledge(4);
+      const dep4 = (gross4 * 40n) / 100n;
+      await usdc.connect(payer).approve(pledgeAddr, dep4);
+      await expect(pledge.connect(payer).submitDeposit(4, dep4))
         .to.be.revertedWith("Active pledge limit reached - full payment required to proceed");
     });
 
     it("allows full payment when payer is at active pledge limit", async function () {
+      // KYC-verified payer at MID cap (3). Fill cap, then full-pay a 4th pledge.
       const deadline = (await time.latest()) + 30 * DAY;
-      await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(150), deadline);
-      await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(150), deadline);
+      for (let i = 0; i < 3; i++) {
+        await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(150), deadline);
+      }
       await pledge.connect(merchant).createPledge(usdcAddr, payer.address, UNITS(100), deadline);
 
-      const gross1 = await pledge.grossAmountForPledge(1);
-      const dep1 = (gross1 * 40n) / 100n;
-      await usdc.connect(payer).approve(pledgeAddr, dep1);
-      await pledge.connect(payer).submitDeposit(1, dep1);
+      for (let i = 1; i <= 3; i++) {
+        const gross = await pledge.grossAmountForPledge(i);
+        const dep = (gross * 40n) / 100n;
+        await usdc.connect(payer).approve(pledgeAddr, dep);
+        await pledge.connect(payer).submitDeposit(i, dep);
+      }
 
-      const gross2 = await pledge.grossAmountForPledge(2);
-      const dep2 = (gross2 * 40n) / 100n;
-      await usdc.connect(payer).approve(pledgeAddr, dep2);
-      await pledge.connect(payer).submitDeposit(2, dep2);
-
-      // Pay pledge 3 in full — bypasses the limit
-      const gross3 = await pledge.grossAmountForPledge(3);
-      await usdc.connect(payer).approve(pledgeAddr, gross3);
-      await pledge.connect(payer).submitDeposit(3, gross3);
-      expect((await pledge.getPledge(3)).status).to.equal(1); // COMPLETED
+      // Pay pledge 4 in full — bypasses the limit
+      const gross4 = await pledge.grossAmountForPledge(4);
+      await usdc.connect(payer).approve(pledgeAddr, gross4);
+      await pledge.connect(payer).submitDeposit(4, gross4);
+      expect((await pledge.getPledge(4)).status).to.equal(1); // COMPLETED
     });
   });
 
@@ -869,25 +1039,36 @@ describe("RemittancePledge", function () {
       await time.increaseTo(deadline2 + GRACE_PERIOD + TIME_BUFFER + 1);
       await pledge.connect(merchant).claimDefaultedDeposit(2);
 
-      // Score is now low — deposit requirement should be higher
-      const score = await pledge.getTrustScore(payer.address);
-      expect(score).to.be.lt(5000n);
+      // Behavioral score has dropped, but the displayed score is floored at the
+      // KYC baseline (5000). Verify the underlying weighted reputation degraded
+      // and the deposit requirement is at MID tier or stricter.
+      const rep = await pledge.reputations(payer.address);
+      const behavioral = rep.totalWeight > 0n ? rep.weightedScore / rep.totalWeight : 0n;
+      expect(behavioral).to.be.lt(5000n);
       expect(await pledge.getRequiredDepositPct(payer.address)).to.be.gte(30);
     });
   });
 
   // ── Views and fee tiers ───────────────────────────────────────────────────────
   describe("views and fee tiers", function () {
-    it("new payer gets the standard 1% fee", async function () {
+    it("KYC-verified payer gets the standard 1% fee", async function () {
       expect(await pledge.getServiceFeeBps(payer.address)).to.equal(100);
     });
 
-    it("new payer gets the 20% deposit tier", async function () {
-      expect(await pledge.getRequiredDepositPct(payer.address)).to.equal(20);
+    it("KYC-verified payer gets the MID 30% deposit tier", async function () {
+      // baseline 5000 (KYC approved) puts them in MID tier — 30%, not the old "no-history default of 20%"
+      expect(await pledge.getRequiredDepositPct(payer.address)).to.equal(30);
     });
 
-    it("new payer gets the no-history active limit of 2", async function () {
-      expect(await pledge.getMaxActivePledges(payer.address)).to.equal(2);
+    it("KYC-verified payer gets the MID active limit of 3", async function () {
+      expect(await pledge.getMaxActivePledges(payer.address)).to.equal(3);
+    });
+
+    it("unverified wallet gets the RISK 50% deposit tier and lowest cap", async function () {
+      const fresh = (await ethers.getSigners())[10];
+      expect(await pledge.getRequiredDepositPct(fresh.address)).to.equal(50);
+      expect(await pledge.getMaxActivePledges(fresh.address)).to.equal(2);
+      expect(await pledge.getTrustScore(fresh.address)).to.equal(0);
     });
 
     it("getPledge reverts on a nonexistent pledge", async function () {
@@ -903,8 +1084,9 @@ describe("RemittancePledge", function () {
       expect(await pledge.grossAmountForPledge(1)).to.equal(gross);
     });
 
-    it("getTrustScore returns 0 for a new wallet", async function () {
-      expect(await pledge.getTrustScore(payer.address)).to.equal(0);
+    it("getTrustScore returns the KYC baseline for a verified wallet", async function () {
+      // payer has baseline 5000 (KYC approved) — score floors at the baseline.
+      expect(await pledge.getTrustScore(payer.address)).to.equal(5000);
     });
 
     it("pagination returns the correct slice", async function () {
@@ -996,6 +1178,9 @@ describe("RemittancePledge", function () {
       await time.increaseTo(deadline2 + GRACE_PERIOD + TIME_BUFFER + 1);
       await pledge.connect(merchant).claimDefaultedDeposit(2);
 
+      // Verified payer has a 5000 baseline floor — displayed score won't drop below it.
+      // To actually exercise the LOW tier (40% deposit), unverify them so behavioral score is exposed.
+      await pledge.connect(owner).setVerificationBaseline(payer.address, 0);
       const score = await pledge.getTrustScore(payer.address);
       expect(score).to.be.gte(2000n);
       expect(score).to.be.lt(5000n);
@@ -1129,17 +1314,17 @@ describe("RemittancePledge", function () {
     });
 
     it("reverts on first installment when payer active pledge limit is reached", async function () {
-      // Fill the no-history slot cap (2) with partial one-shot deposits, which don't
-      // build reputation until the pledge completes.
+      // KYC-verified payer is at MID cap (3). Fill it with partial one-shot deposits.
       await createStandardPledge();
       await createStandardPledge();
-      expect(await pledge.activePledgeCount(payer.address)).to.equal(2);
+      await createStandardPledge();
+      expect(await pledge.activePledgeCount(payer.address)).to.equal(3);
 
       // Now create a recurring pledge — creation does NOT consume a slot
       const r = await createStandardRecurring();
       await time.increaseTo(r.firstDueDate);
 
-      // First installment should revert: payer is already at no-history cap
+      // First installment should revert: payer is already at MID cap
       const feeBps = (await pledge.recurringPledges(1)).appliedFeeBps;
       const gross = r.amount + (r.amount * feeBps) / 10000n;
       await usdc.connect(payer).approve(pledgeAddr, gross);
@@ -1278,6 +1463,9 @@ describe("RemittancePledge", function () {
       const { firstDueDate } = await createStandardRecurring();
       await time.increaseTo(firstDueDate + GRACE_PERIOD + TIME_BUFFER + 1);
       await pledge.connect(merchant).markMissedInstallment(1);
+
+      // Strip the KYC baseline so we can observe the raw behavioral state.
+      await pledge.connect(owner).setVerificationBaseline(payer.address, 0);
       const rep = await pledge.getReputation(payer.address);
       expect(rep.defaultCount).to.equal(0);
       expect(rep.basisPoints).to.equal(0);
@@ -1458,10 +1646,11 @@ describe("RemittancePledge", function () {
     });
 
     it("reverts on first engagement if payer is at slot cap", async function () {
-      // Fill the no-history cap with one-shot partial deposits
+      // KYC-verified payer is at MID cap (3). Fill it with one-shot partial deposits.
       await createStandardPledge();
       await createStandardPledge();
-      expect(await pledge.activePledgeCount(payer.address)).to.equal(2);
+      await createStandardPledge();
+      expect(await pledge.activePledgeCount(payer.address)).to.equal(3);
 
       // Now a recurring pledge gets a missed installment, payer tries to catch up
       const { amount, firstDueDate } = await createStandardRecurring();
