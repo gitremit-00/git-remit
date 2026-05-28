@@ -302,7 +302,10 @@ function NewTransferContent() {
     setLoading(true); setTxError("");
     try {
       const amt = ethers.parseUnits(parseFloat(form.totalAmount).toFixed(6), 6);
-      const approveTx = await tokenWrite.approve(CONTRACTS.REMITTANCE_PLEDGE, amt);
+      // Approve gross amount (amount + service fee) so the contract can pull the full debit
+      const feeBps = await pledgeRead.getServiceFeeBps(account) as bigint;
+      const gross = amt + (amt * feeBps) / 10000n;
+      const approveTx = await tokenWrite.approve(CONTRACTS.REMITTANCE_PLEDGE, gross);
       await approveTx.wait();
       const sendTx = await pledgeWrite.sendP2P(tokenAddress, form.merchant, amt);
       const receipt = await sendTx.wait();
