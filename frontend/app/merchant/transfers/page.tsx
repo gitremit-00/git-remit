@@ -2,13 +2,14 @@
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Search, ArrowLeft, Clock, CheckCircle2, AlertCircle, XCircle, ChevronRight, ShieldCheck } from "lucide-react";
+import { Search, ArrowLeft, Clock, CheckCircle2, AlertCircle, XCircle, ChevronRight, ShieldCheck, RefreshCw, FileText } from "lucide-react";
 import Header from "../../../components/Header";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { useWallet } from "../../../context/WalletContext";
-import { useCurrency } from "../../../context/CurrencyContext";
+
 import { getPledgeMeta } from "../../../lib/pledgeMeta";
 import { CONTRACTS } from "../../../contracts/addresses";
+import { getMerchantTransferRequests, type TransferRequest } from "../../../lib/supabase";
 
 interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
 
@@ -34,11 +35,32 @@ const AVATAR_COLORS = ["#DDE048", "#60a5fa", "#f59e0b", "#22c55e", "#f87171", "#
 function avatarColor(addr: string) { return AVATAR_COLORS[parseInt(addr.slice(2, 4), 16) % AVATAR_COLORS.length]; }
 function initials(addr: string) { return addr.slice(2, 4).toUpperCase(); }
 
-const FILTERS = ["ALL", "PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
+const FILTERS = ["ALL", "REQUEST_PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
+const FILTER_LABEL: Record<string, string> = {
+  ALL: "All",
+  REQUEST_PENDING: "Request",
+  COMPLETED: "Completed",
+  DEFAULTED: "Defaulted",
+  CANCELLED: "Cancelled",
+};
+
+const TR_STATUS_LABEL: Record<string, string> = {
+  pending: "Request Pending", renegotiating: "Renegotiating", accepted: "Accepted",
+  rejected: "Rejected", cancelled: "Cancelled", confirmed: "Confirmed",
+};
+const TR_STATUS_COLOR: Record<string, string> = {
+  pending: "#f59e0b", renegotiating: "#60a5fa", accepted: "#22c55e",
+  rejected: "#ef4444", cancelled: "#888", confirmed: "#22c55e",
+};
+const TR_STATUS_BG: Record<string, string> = {
+  pending: "#f59e0b22", renegotiating: "#60a5fa22", accepted: "#22c55e22",
+  rejected: "#ef444422", cancelled: "#88888822", confirmed: "#22c55e22",
+};
 
 export default function MerchantTransfers() {
-  const { account, connect, pledgeRead, walletLoading } = useWallet();
+  const { account, connect, pledgeRead } = useWallet();
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
+  const [transferRequests, setTransferRequests] = useState<TransferRequest[]>([]);
   const [senderReps, setSenderReps] = useState<Record<string, SenderRep>>({});
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("ALL");
@@ -49,9 +71,13 @@ export default function MerchantTransfers() {
   async function loadData() {
     setLoading(true);
     try {
-      const ids = await pledgeRead.getMerchantPledges(account) as bigint[];
+      const [ids, trData] = await Promise.all([
+        pledgeRead.getMerchantPledges(account) as Promise<bigint[]>,
+        getMerchantTransferRequests(account!),
+      ]);
       const details = await Promise.all(ids.map((id) => pledgeRead.getPledge(id))) as PledgeRaw[];
       setPledges(details.reverse());
+      setTransferRequests(trData);
       const uniqueSenders = [...new Set(details.map((p) => p.sender.toLowerCase()))];
       const reps = await Promise.all(uniqueSenders.map((s) => pledgeRead.getReputation(s)));
       const repMap: Record<string, SenderRep> = {};
@@ -63,9 +89,14 @@ export default function MerchantTransfers() {
     } finally { setLoading(false); }
   }
 
-  const filtered = pledges.filter((p) => {
+  const activeRequests = transferRequests.filter(r => r.status === "pending" || r.status === "renegotiating");
+  const cancelledRequests = transferRequests.filter(r => r.status === "cancelled");
+
+  const filteredPledges = pledges.filter((p) => {
     const s = STATUS[p.status];
-    if (filter !== "ALL" && s !== filter) return false;
+    if (filter === "ALL") { /* include all */ }
+    else if (filter === "REQUEST_PENDING") return false;
+    else if (s !== filter) return false;
     if (search) {
       const q = search.toLowerCase();
       return p.sender.toLowerCase().includes(q) || p.id.toString().includes(q);
@@ -73,8 +104,24 @@ export default function MerchantTransfers() {
     return true;
   });
 
-  const counts: Record<string, number> = { ALL: pledges.length };
+  const requestsForFilter = filter === "ALL"
+    ? [...activeRequests, ...cancelledRequests]
+    : filter === "REQUEST_PENDING"
+    ? activeRequests
+    : filter === "CANCELLED"
+    ? cancelledRequests
+    : [];
+
+  const filteredRequests = requestsForFilter.filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return r.sender_address.toLowerCase().includes(q);
+  });
+
+  const counts: Record<string, number> = { REQUEST_PENDING: activeRequests.length };
   pledges.forEach((p) => { const s = STATUS[p.status]; counts[s] = (counts[s] ?? 0) + 1; });
+  counts.CANCELLED = (counts.CANCELLED ?? 0) + cancelledRequests.length;
+  counts.ALL = (activeRequests.length + cancelledRequests.length) + pledges.length;
 
   /* ── DESKTOP ── */
   const DesktopView = (
@@ -113,8 +160,8 @@ export default function MerchantTransfers() {
               filter === f ? "bg-[#DDE048]/10 border-[#DDE048] text-[#DDE048]" : "bg-transparent border-[#1e2230] text-[#555] hover:text-[#888]"
             }`}
           >
-            {f === "ALL" ? "All" : f.charAt(0) + f.slice(1).toLowerCase()}
-            {counts[f] > 0 && (
+            {FILTER_LABEL[f]}
+            {(counts[f] ?? 0) > 0 && (
               <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${filter === f ? "bg-[#DDE048] text-black" : "bg-[#1e2230] text-[#555]"}`}>
                 {counts[f]}
               </span>
@@ -130,65 +177,141 @@ export default function MerchantTransfers() {
         </div>
       ) : loading ? (
         <LoadingSpinner />
-      ) : filtered.length === 0 ? (
+      ) : (filteredRequests.length === 0 && filteredPledges.length === 0) ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
+          <FileText size={32} color="#333" className="mb-3" />
           <div className="font-bold text-white mb-1.5">No transfers found</div>
-          <div className="text-[#555] text-sm">Pledges sent to your address will appear here</div>
+          <div className="text-[#555] text-sm">
+            {filter === "REQUEST_PENDING" ? "No pending requests from senders." : "Pledges and requests will appear here."}
+          </div>
         </div>
       ) : (
-        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[#1e2230]">
-                {["SENDER · TRUST", "PLEDGE ID", "TOTAL", "LOCKED", "REMAINING", "STATUS", "DUE DATE", ""].map((h) => (
-                  <th key={h} className="px-5 py-3 text-left text-[10px] text-[#444] tracking-[1.5px] font-semibold">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((p) => {
-                const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
-                const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
-                const feeBps = Number(p.appliedFeeBps);
-                const gross = total * (1 + feeBps / 10000);
-                const remaining = Math.max(0, parseFloat((gross - locked).toFixed(6)));
-                const sym = tokenSymbol(p.token);
-                const status = STATUS[p.status];
-                const rep = senderReps[p.sender.toLowerCase()];
-                const meta = getPledgeMeta(p.sender);
-                return (
-                  <tr key={p.id.toString()} className="border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors group">
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-black shrink-0" style={{ background: avatarColor(p.sender) }}>
-                          {initials(p.sender)}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-white text-xs">{meta?.name || shortAddr(p.sender)}</div>
-                          {rep && <div className="flex items-center gap-1 mt-0.5"><ShieldCheck size={11} color="#DDE048" /><span className="text-[10px] text-[#555]">{rep.score}/100</span></div>}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 font-mono text-[#555] text-xs">#{p.id.toString()}</td>
-                    <td className="px-5 py-4 font-bold text-white">{total.toFixed(2)} <span className="text-[#555] text-xs font-normal">{sym}</span></td>
-                    <td className="px-5 py-4 text-[#888]">{locked.toFixed(2)}</td>
-                    <td className="px-5 py-4 text-[#888]">{remaining.toFixed(2)}</td>
-                    <td className="px-5 py-4">
-                      <span className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full w-fit" style={{ color: STATUS_COLOR[status], background: STATUS_BG[status] }}>
-                        {STATUS_ICON[status]} {status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-[#555] text-xs">{fmtDate(p.commitmentDate)}</td>
-                    <td className="px-5 py-4">
-                      <Link href={`/merchant/transfers/${p.id.toString()}`} className="opacity-0 group-hover:opacity-100 transition-opacity text-[#DDE048] text-xs font-semibold hover:underline">
-                        View <ChevronRight size={13} />
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-5">
+          {/* Transfer Requests section */}
+          {filteredRequests.length > 0 && (
+            <div>
+              {(filter === "ALL" || filter === "CANCELLED") && (
+                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3 font-semibold">
+                  {filter === "CANCELLED" ? "CANCELLED REQUESTS" : "REQUEST"}
+                </div>
+              )}
+              <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[#1e2230]">
+                      {["SENDER", "TYPE", "AMOUNT / TERMS", "STATUS", "RECEIVED", ""].map((h) => (
+                        <th key={h} className="px-5 py-3 text-left text-[10px] text-[#444] tracking-[1.5px] font-semibold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRequests.map((r) => {
+                      const meta = getPledgeMeta(r.sender_address);
+                      const termsSummary = r.type === "installment"
+                        ? `${r.amount_per_period?.toFixed(2) ?? "—"} ${r.token} × ${r.total_periods ?? "?"}`
+                        : `${r.total_amount?.toFixed(2) ?? "—"} ${r.token}`;
+                      return (
+                        <tr key={r.id} className="border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors group">
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-black shrink-0" style={{ background: avatarColor(r.sender_address) }}>
+                                {initials(r.sender_address)}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-white text-xs">{meta?.name || shortAddr(r.sender_address)}</div>
+                                <div className="text-[10px] text-[#555] font-mono">{shortAddr(r.sender_address)}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 text-[#888] text-xs capitalize">{r.type}</td>
+                          <td className="px-5 py-4 font-bold text-white text-xs">{termsSummary}</td>
+                          <td className="px-5 py-4">
+                            <span className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full w-fit"
+                              style={{ color: TR_STATUS_COLOR[r.status], background: TR_STATUS_BG[r.status] }}>
+                              {r.status === "renegotiating" ? <RefreshCw size={11} /> : r.status === "cancelled" ? <XCircle size={11} /> : <Clock size={11} />}
+                              {TR_STATUS_LABEL[r.status]}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-[#555] text-xs">
+                            {new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </td>
+                          <td className="px-5 py-4">
+                            <Link href={`/merchant/transfers/requests/${r.id}`}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-[#DDE048] text-xs font-semibold hover:underline flex items-center gap-0.5">
+                              Review <ChevronRight size={13} />
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* On-chain Pledges section */}
+          {filteredPledges.length > 0 && (
+            <div>
+              {filter === "ALL" && filteredRequests.length > 0 && (
+                <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3 font-semibold">ON-CHAIN PLEDGES</div>
+              )}
+              <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[#1e2230]">
+                      {["SENDER · TRUST", "PLEDGE ID", "TOTAL", "LOCKED", "REMAINING", "STATUS", "DUE DATE", ""].map((h) => (
+                        <th key={h} className="px-5 py-3 text-left text-[10px] text-[#444] tracking-[1.5px] font-semibold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPledges.map((p) => {
+                      const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
+                      const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
+                      const feeBps = Number(p.appliedFeeBps);
+                      const gross = total * (1 + feeBps / 10000);
+                      const remaining = Math.max(0, parseFloat((gross - locked).toFixed(6)));
+                      const sym = tokenSymbol(p.token);
+                      const status = STATUS[p.status];
+                      const rep = senderReps[p.sender.toLowerCase()];
+                      const meta = getPledgeMeta(p.sender);
+                      return (
+                        <tr key={p.id.toString()} className="border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors group">
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-black shrink-0" style={{ background: avatarColor(p.sender) }}>
+                                {initials(p.sender)}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-white text-xs">{meta?.name || shortAddr(p.sender)}</div>
+                                {rep && <div className="flex items-center gap-1 mt-0.5"><ShieldCheck size={11} color="#DDE048" /><span className="text-[10px] text-[#555]">{rep.score}/100</span></div>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 font-mono text-[#555] text-xs">#{p.id.toString()}</td>
+                          <td className="px-5 py-4 font-bold text-white">{total.toFixed(2)} <span className="text-[#555] text-xs font-normal">{sym}</span></td>
+                          <td className="px-5 py-4 text-[#888]">{locked.toFixed(2)}</td>
+                          <td className="px-5 py-4 text-[#888]">{remaining.toFixed(2)}</td>
+                          <td className="px-5 py-4">
+                            <span className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full w-fit" style={{ color: STATUS_COLOR[status], background: STATUS_BG[status] }}>
+                              {STATUS_ICON[status]} {status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-[#555] text-xs">{fmtDate(p.commitmentDate)}</td>
+                          <td className="px-5 py-4">
+                            <Link href={`/merchant/transfers/${p.id.toString()}`} className="opacity-0 group-hover:opacity-100 transition-opacity text-[#DDE048] text-xs font-semibold hover:underline flex items-center gap-0.5">
+                              View <ChevronRight size={13} />
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -220,7 +343,7 @@ export default function MerchantTransfers() {
                 filter === f ? "bg-[#DDE048]/10 border-[#DDE048] text-[#DDE048]" : "border-[#1F2127] text-[#555]"
               }`}
             >
-              {f === "ALL" ? "All" : f.charAt(0) + f.slice(1).toLowerCase()} {counts[f] ? `(${counts[f]})` : ""}
+              {FILTER_LABEL[f]} {(counts[f] ?? 0) ? `(${counts[f]})` : ""}
             </button>
           ))}
         </div>
@@ -232,47 +355,104 @@ export default function MerchantTransfers() {
           </div>
         )}
         {loading && <LoadingSpinner />}
-        {!loading && account && filtered.length === 0 && (
+
+        {!loading && account && filteredRequests.length === 0 && filteredPledges.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="font-bold mb-1">No transfers</div>
-            <div className="text-[#888] text-sm">Incoming pledges will appear here</div>
+            <FileText size={28} color="#333" className="mb-3" />
+            <div className="font-bold mb-1">{filter === "REQUEST_PENDING" ? "No pending requests" : "No transfers found"}</div>
+            <div className="text-[#888] text-sm">{filter === "REQUEST_PENDING" ? "Sender requests appear here" : "Incoming pledges will appear here"}</div>
           </div>
         )}
-        {filtered.map((p) => {
-          const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
-          const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
-          const sym = tokenSymbol(p.token);
-          const status = STATUS[p.status];
-          const rep = senderReps[p.sender.toLowerCase()];
-          const meta = getPledgeMeta(p.sender);
-          return (
-            <Link key={p.id.toString()} href={`/merchant/transfers/${p.id.toString()}`} className="block no-underline text-inherit">
-              <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 mb-3">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black text-black shrink-0" style={{ background: avatarColor(p.sender) }}>
-                      {initials(p.sender)}
-                    </div>
-                    <div>
-                      <div className="font-semibold text-white text-sm">{meta?.name || shortAddr(p.sender)}</div>
-                      {rep && <div className="text-[11px] text-[#666]">Trust {rep.score}/100</div>}
-                    </div>
-                  </div>
-                  <span className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ color: STATUS_COLOR[status], background: STATUS_BG[status] }}>
-                    {STATUS_ICON[status]} {status}
-                  </span>
-                </div>
-                <div className="flex justify-between items-end">
-                  <div>
-                    <div className="text-xl font-extrabold text-white">{total.toFixed(2)} <span className="text-sm text-[#888] font-normal">{sym}</span></div>
-                    <div className="text-xs text-[#666] mt-0.5">Locked: {locked.toFixed(2)} {sym} · Due {fmtDate(p.commitmentDate)}</div>
-                  </div>
-                  <span className="flex items-center gap-0.5 text-[#DDE048] text-xs font-semibold">View <ChevronRight size={13} /></span>
-                </div>
+
+        {/* Mobile — Request Pending cards */}
+        {!loading && account && filteredRequests.length > 0 && (
+          <>
+            {(filter === "ALL" || filter === "CANCELLED") && (
+              <div className="text-[11px] text-[#555] tracking-[1px] mb-2 font-semibold">
+                {filter === "CANCELLED" ? "CANCELLED REQUESTS" : "REQUEST"}
               </div>
-            </Link>
-          );
-        })}
+            )}
+            {filteredRequests.map((r) => {
+              const meta = getPledgeMeta(r.sender_address);
+              const termsSummary = r.type === "installment"
+                ? `${r.amount_per_period?.toFixed(2) ?? "—"} ${r.token} × ${r.total_periods ?? "?"}`
+                : `${r.total_amount?.toFixed(2) ?? "—"} ${r.token}`;
+              return (
+                <Link key={r.id} href={`/merchant/transfers/requests/${r.id}`} className="block no-underline text-inherit">
+                  <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 mb-3">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black text-black shrink-0" style={{ background: avatarColor(r.sender_address) }}>
+                          {initials(r.sender_address)}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-white text-sm">{meta?.name || shortAddr(r.sender_address)}</div>
+                          <div className="text-[11px] text-[#666] capitalize">{r.type}</div>
+                        </div>
+                      </div>
+                      <span className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full"
+                        style={{ color: TR_STATUS_COLOR[r.status], background: TR_STATUS_BG[r.status] }}>
+                        {r.status === "renegotiating" ? <RefreshCw size={11} /> : r.status === "cancelled" ? <XCircle size={11} /> : <Clock size={11} />}
+                        {TR_STATUS_LABEL[r.status]}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-end">
+                      <div>
+                        <div className="text-lg font-extrabold text-white">{termsSummary}</div>
+                        <div className="text-xs text-[#666] mt-0.5">Received {new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                      </div>
+                      <span className="flex items-center gap-0.5 text-[#DDE048] text-xs font-semibold">Review <ChevronRight size={13} /></span>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </>
+        )}
+
+        {/* Mobile — On-chain Pledge cards */}
+        {!loading && account && filteredPledges.length > 0 && (
+          <>
+            {filter === "ALL" && filteredRequests.length > 0 && (
+              <div className="text-[11px] text-[#555] tracking-[1px] mb-2 font-semibold mt-2">ON-CHAIN PLEDGES</div>
+            )}
+            {filteredPledges.map((p) => {
+              const total = parseFloat(ethers.formatUnits(p.totalAmount, 6));
+              const locked = parseFloat(ethers.formatUnits(p.depositedAmount, 6));
+              const sym = tokenSymbol(p.token);
+              const status = STATUS[p.status];
+              const rep = senderReps[p.sender.toLowerCase()];
+              const meta = getPledgeMeta(p.sender);
+              return (
+                <Link key={p.id.toString()} href={`/merchant/transfers/${p.id.toString()}`} className="block no-underline text-inherit">
+                  <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 mb-3">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black text-black shrink-0" style={{ background: avatarColor(p.sender) }}>
+                          {initials(p.sender)}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-white text-sm">{meta?.name || shortAddr(p.sender)}</div>
+                          {rep && <div className="text-[11px] text-[#666]">Trust {rep.score}/100</div>}
+                        </div>
+                      </div>
+                      <span className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ color: STATUS_COLOR[status], background: STATUS_BG[status] }}>
+                        {STATUS_ICON[status]} {status}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-end">
+                      <div>
+                        <div className="text-xl font-extrabold text-white">{total.toFixed(2)} <span className="text-sm text-[#888] font-normal">{sym}</span></div>
+                        <div className="text-xs text-[#666] mt-0.5">Locked: {locked.toFixed(2)} {sym} · Due {fmtDate(p.commitmentDate)}</div>
+                      </div>
+                      <span className="flex items-center gap-0.5 text-[#DDE048] text-xs font-semibold">View <ChevronRight size={13} /></span>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </>
+        )}
       </div>
     </div>
   );
