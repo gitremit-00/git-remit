@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useWallet } from "./WalletContext";
-import { fetchUserRole, getUserProfile, Role } from "../lib/supabase";
+import { getUserProfile, Role } from "../lib/supabase";
 import { isSenderOnly, isMerchantOnly, isAdminOnly, isPublic } from "../lib/routes";
 
 interface RoleContextValue {
@@ -10,7 +10,7 @@ interface RoleContextValue {
   loading: boolean;
   isNewUser: boolean;
   displayName: string | null;
-  setDisplayName: (name: string) => void;
+  setDisplayName: (name: string | null) => void;
   avatarUrl: string | null;
   setAvatarUrl: (url: string | null) => void;
 }
@@ -44,28 +44,27 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setIsNewUser(false);
 
-    // Always re-fetch role from Supabase — never trust cookie alone
-    fetchUserRole(account).then(async (r) => {
-      if (!r) {
-        setIsNewUser(true);
-        if (!isPublic(pathname) && pathname !== "/onboarding") {
-          router.replace("/signup");
-        }
-      } else {
-        setRole(r);
-        document.cookie = `rs_role=${r}; path=/; max-age=2592000`;
-
-        // Redirect if on login/signup/onboarding with a known role
-        if (isPublic(pathname) || pathname === "/onboarding") {
-          if (r === "admin") router.replace("/admin");
-          else if (r === "merchant") router.replace("/merchant");
-          else router.replace("/");
-        }
-
-        const profile = await getUserProfile(account);
-        if (profile?.name) setDisplayName(profile.name);
-        if (profile?.avatar_url) setAvatarUrl(profile.avatar_url);
+    fetch("/api/auth/me").then(async (res) => {
+      if (!res.ok) {
+        setRole(null);
+        setLoading(false);
+        if (!isPublic(pathname)) router.replace("/login");
+        return;
       }
+
+      const { userId, role: r } = await res.json() as { userId: string; role: Role };
+      setRole(r);
+      document.cookie = `rs_role=${r}; path=/; max-age=2592000`;
+
+      if (isPublic(pathname) || pathname === "/onboarding") {
+        if (r === "admin") router.replace("/admin");
+        else if (r === "merchant") router.replace("/merchant");
+        else router.replace("/");
+      }
+
+      const profile = await getUserProfile(userId);
+      if (profile?.name) setDisplayName(profile.name);
+      if (profile?.avatar_url) setAvatarUrl(profile.avatar_url);
       setLoading(false);
     });
   }, [account, walletLoading]);

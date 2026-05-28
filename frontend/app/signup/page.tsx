@@ -1,468 +1,324 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
-import { ArrowRight, Check, Loader, PlaneTakeoff, Store, Upload, X } from "lucide-react";
-import { useWallet } from "../../context/WalletContext";
-import { fetchUserRole } from "../../lib/supabase";
+import Link from "next/link";
+import { FormEvent, useMemo, useState } from "react";
+import { ArrowRight, Check, CheckCircle2, Loader, PlaneTakeoff, Store, Upload, X } from "lucide-react";
 
 type Role = "sender" | "merchant";
 
-const OFW_COUNTRIES = [
-  "Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Bahrain", "Oman",
-  "Singapore", "Hong Kong", "Japan", "South Korea", "Taiwan", "Malaysia",
-  "United States", "Canada", "United Kingdom", "Italy", "Spain", "Germany",
-  "Australia", "New Zealand", "Israel", "Other",
-];
+const COUNTRIES = ["Philippines", "United States", "Canada", "Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Singapore", "Hong Kong", "Japan", "South Korea", "Taiwan", "Malaysia", "United Kingdom", "Italy", "Australia", "Other"];
+const ID_TYPES = ["Passport", "Driver's License", "National ID", "PhilSys National ID", "UMID", "Voter's ID", "SSS ID", "Other"];
+const BUSINESS_TYPES = ["Retail", "Restaurant / Food", "Grocery", "School / Education", "Medical / Pharmacy", "Services", "Rentals / Housing", "Other"];
 
-const BUSINESS_TYPES = [
-  "Retail", "Restaurant / Food", "Grocery / Sari-sari", "School / Educational",
-  "Pharmacy / Medical", "Services", "Transportation", "Entertainment", "Other",
-];
-
-const ID_TYPES = ["Passport", "Driver's License", "UMID", "PhilSys (National ID)", "Voter's ID", "SSS ID"];
-
-const STEPS = ["Connect", "Choose role", "Your details", "Review"];
-
-interface OFWForm {
-  full_name: string; phone: string; country_work: string;
-  country_origin: string; id_type: string; id_number: string;
-  id_photo: File | null;
+interface FormState {
+  role: Role | "";
+  username: string;
+  password: string;
+  confirmPassword: string;
+  fullName: string;
+  phone: string;
+  email: string;
+  countryWork: string;
+  countryOrigin: string;
+  idType: string;
+  idNumber: string;
+  idPhoto: File | null;
+  businessName: string;
+  businessType: string;
+  businessAddress: string;
+  city: string;
+  businessPermit: File | null;
 }
 
-interface MerchantForm {
-  business_name: string; business_type: string; owner_name: string;
-  phone: string; business_address: string; city: string;
-  business_permit: File | null; id_type: string; id_number: string;
+const initialForm: FormState = {
+  role: "",
+  username: "",
+  password: "",
+  confirmPassword: "",
+  fullName: "",
+  phone: "",
+  email: "",
+  countryWork: "",
+  countryOrigin: "Philippines",
+  idType: "",
+  idNumber: "",
+  idPhoto: null,
+  businessName: "",
+  businessType: "",
+  businessAddress: "",
+  city: "",
+  businessPermit: null,
+};
+
+function passwordIssues(password: string) {
+  const issues: string[] = [];
+  if (password.length < 8) issues.push("8+ characters");
+  if (!/[A-Z]/.test(password)) issues.push("uppercase");
+  if (!/[a-z]/.test(password)) issues.push("lowercase");
+  if (!/[0-9]/.test(password)) issues.push("number");
+  if (!/[^A-Za-z0-9]/.test(password)) issues.push("special");
+  return issues;
+}
+
+function validFile(file: File | null) {
+  if (!file) return false;
+  return ["image/jpeg", "image/png", "application/pdf"].includes(file.type) && file.size <= 5 * 1024 * 1024;
+}
+
+async function postForm(path: string, form: FormData) {
+  const response = await fetch(path, { method: "POST", body: form });
+  const json = await response.json();
+  if (!response.ok) throw new Error(json.error || "Something went wrong.");
+  return json;
+}
+
+async function postJson(path: string, body: unknown) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await response.json();
+  if (!response.ok) throw new Error(json.error || "Something went wrong.");
+  return json;
 }
 
 export default function Signup() {
-  const { account, connect, walletLoading } = useWallet();
-  const router = useRouter();
-  const [step, setStep] = useState(0);
-  const [role, setRole] = useState<Role | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<FormState>(initialForm);
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [verificationReady, setVerificationReady] = useState(false);
 
-  const [ofw, setOfw] = useState<OFWForm>({
-    full_name: "", phone: "", country_work: "", country_origin: "Philippines",
-    id_type: "", id_number: "", id_photo: null,
-  });
+  const issues = useMemo(() => passwordIssues(form.password), [form.password]);
+  const canSubmit = Boolean(
+    form.role &&
+    form.username &&
+    form.password &&
+    form.confirmPassword &&
+    form.fullName &&
+    form.phone &&
+    form.email &&
+    form.countryWork &&
+    form.countryOrigin &&
+    form.idType &&
+    form.idNumber &&
+    validFile(form.idPhoto) &&
+    issues.length === 0 &&
+    form.password === form.confirmPassword &&
+    (form.role === "sender" || (form.businessName && form.businessType && form.businessAddress && form.city && validFile(form.businessPermit)))
+  );
 
-  const [merchant, setMerchant] = useState<MerchantForm>({
-    business_name: "", business_type: "", owner_name: "", phone: "",
-    business_address: "", city: "", business_permit: null, id_type: "", id_number: "",
-  });
-
-  const idPhotoRef = useRef<HTMLInputElement>(null);
-  const permitRef = useRef<HTMLInputElement>(null);
-
-  // If wallet already has an account, redirect to login (existing user)
-  useEffect(() => {
-    if (!account || walletLoading) return;
-    fetchUserRole(account).then((r) => {
-      if (r) {
-        document.cookie = `rs_role=${r}; path=/; max-age=2592000`;
-        router.replace(r === "admin" ? "/admin" : r === "merchant" ? "/merchant" : "/");
-      } else {
-        // confirmed new user
-        if (step === 0) setStep(1);
-      }
-    });
-  }, [account, walletLoading]);
-
-  function ofwValid() {
-    return ofw.full_name && ofw.phone && ofw.country_work && ofw.country_origin &&
-      ofw.id_type && ofw.id_number && ofw.id_photo;
+  function set<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function merchantValid() {
-    return merchant.business_name && merchant.business_type && merchant.owner_name &&
-      merchant.phone && merchant.business_address && merchant.city &&
-      merchant.business_permit && merchant.id_type && merchant.id_number;
-  }
-
-  async function handleSubmit() {
-    if (!account || !role) return;
-    setSaving(true);
-    setError("");
-
+  async function submitRegistration(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true); setError(""); setMessage("");
     try {
-      const form = new FormData();
-      form.append("role", role);
-      form.append("wallet_address", account);
-
-      if (role === "sender") {
-        form.append("full_name", ofw.full_name);
-        form.append("phone", ofw.phone);
-        form.append("country_work", ofw.country_work);
-        form.append("country_origin", ofw.country_origin);
-        form.append("id_type", ofw.id_type);
-        form.append("id_number", ofw.id_number);
-        if (ofw.id_photo) form.append("id_photo", ofw.id_photo);
-      } else {
-        form.append("business_name", merchant.business_name);
-        form.append("business_type", merchant.business_type);
-        form.append("owner_name", merchant.owner_name);
-        form.append("phone", merchant.phone);
-        form.append("business_address", merchant.business_address);
-        form.append("city", merchant.city);
-        form.append("id_type", merchant.id_type);
-        form.append("id_number", merchant.id_number);
-        if (merchant.business_permit) form.append("business_permit", merchant.business_permit);
-      }
-
-      const res = await fetch("/api/signup", { method: "POST", body: form });
-      const json = await res.json();
-
-      if (!res.ok) throw new Error(json.error || "Signup failed");
-
-      document.cookie = `rs_role=${role}; path=/; max-age=2592000`;
-      router.replace(role === "merchant" ? "/merchant" : "/");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
+      const data = new FormData();
+      Object.entries(form).forEach(([key, value]) => {
+        if (value instanceof File) data.append(key, value);
+        else if (value !== null) data.append(key, String(value));
+      });
+      const result = await postForm("/api/auth/register", data);
+      setMessage(result.message);
+      setVerificationReady(true);
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-[#0e1014] flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-lg">
-        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
-
-          {/* Logo */}
-          <div className="flex flex-col items-center mb-6">
-            <Image src="/logo.png" alt="RemitSafe" width={44} height={44} style={{ objectFit: "contain" }} />
-            <span className="text-white font-extrabold text-base mt-2.5">RemitSafe</span>
+    <div className="min-h-screen bg-[#0e1014] flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-3xl">
+        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-5 md:p-8 shadow-2xl">
+          <div className="flex flex-col items-center mb-7">
+            <Image src="/logo.png" alt="RemitSafe" width={48} height={48} style={{ objectFit: "contain" }} />
+            <span className="text-white font-extrabold text-lg mt-3">Create your RemitSafe account</span>
+            <span className="text-[#666] text-xs mt-1 text-center">Secure registration for OFW senders and verified merchants</span>
           </div>
 
-          {/* Step pills */}
-          <div className="flex items-center justify-center gap-1 mb-6 flex-wrap">
-            {STEPS.map((label, i) => (
-              <div key={label} className="flex items-center gap-1">
-                <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
-                  i < step ? "text-[#DDE048]" : i === step ? "bg-[#DDE048]/10 border border-[#DDE048]/40 text-[#DDE048]" : "text-[#333]"
-                }`}>
-                  {i < step ? <Check size={10} strokeWidth={3} /> : null}
-                  {label}
-                </div>
-                {i < STEPS.length - 1 && <div className={`w-4 h-px ${i < step ? "bg-[#DDE048]/30" : "bg-[#1e2230]"}`} />}
+          {error && <Alert tone="error" text={error} />}
+          {message && <Alert tone="success" text={message} />}
+
+          {verificationReady ? (
+            <div className="max-w-sm mx-auto text-center">
+              <div className="w-14 h-14 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 size={24} color="#22c55e" />
               </div>
-            ))}
+              <h2 className="text-white font-extrabold text-lg mb-2">Check your email</h2>
+              <p className="text-[#888] text-sm leading-relaxed mb-5">
+                Supabase sent a verification link to <span className="text-white font-semibold">{form.email}</span>.
+                Open that link, then return to log in.
+              </p>
+              <Link href="/login" className="w-full bg-[#DDE048] text-black font-extrabold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2">
+                Go to Login <ArrowRight size={15} />
+              </Link>
+            </div>
+          ) : (
+            <form onSubmit={submitRegistration} className="space-y-6">
+              <section>
+                <SectionTitle title="Choose Role" />
+                <div className="grid md:grid-cols-2 gap-3">
+                  <RoleButton active={form.role === "sender"} title="OFW / Sender" desc="Send remittance pledges to people or merchants" Icon={PlaneTakeoff} onClick={() => set("role", "sender")} />
+                  <RoleButton active={form.role === "merchant"} title="Merchant" desc="Receive customer pledges and payment requests" Icon={Store} onClick={() => set("role", "merchant")} />
+                </div>
+              </section>
+
+              <section>
+                <SectionTitle title="Login Credentials" />
+                <div className="grid md:grid-cols-2 gap-3">
+                  <Field label="Username">
+                    <input className={inputCls} placeholder="juan.ofw" value={form.username} onChange={(e) => set("username", e.target.value)} />
+                  </Field>
+                  <Field label="Email Address">
+                    <input className={inputCls} type="email" placeholder="you@gmail.com" value={form.email} onChange={(e) => set("email", e.target.value)} />
+                  </Field>
+                  <Field label="Password">
+                    <input className={inputCls} type="password" placeholder="Strong password" value={form.password} onChange={(e) => set("password", e.target.value)} />
+                    {form.password && <p className={`text-[11px] mt-1.5 ${issues.length ? "text-amber-400" : "text-green-400"}`}>{issues.length ? `Needs: ${issues.join(", ")}` : "Password strength looks good."}</p>}
+                  </Field>
+                  <Field label="Confirm Password">
+                    <input className={inputCls} type="password" placeholder="Repeat password" value={form.confirmPassword} onChange={(e) => set("confirmPassword", e.target.value)} />
+                    {form.confirmPassword && form.password !== form.confirmPassword && <p className="text-red-400 text-[11px] mt-1.5">Passwords do not match.</p>}
+                  </Field>
+                </div>
+              </section>
+
+              <section>
+                <SectionTitle title={form.role === "merchant" ? "Merchant Owner Details" : "OFW / Sender Details"} />
+                <div className="grid md:grid-cols-2 gap-3">
+                  <Field label="Full Name">
+                    <input className={inputCls} placeholder="Juan Dela Cruz" value={form.fullName} onChange={(e) => set("fullName", e.target.value)} />
+                  </Field>
+                  <Field label="Phone Number">
+                    <input className={inputCls} type="tel" placeholder="+63 9XX XXX XXXX" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+                  </Field>
+                  <Field label="Country of Work">
+                    <select className={inputCls} value={form.countryWork} onChange={(e) => set("countryWork", e.target.value)}>
+                      <option value="">Select country</option>
+                      {COUNTRIES.map((country) => <option key={country}>{country}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Country of Origin">
+                    <select className={inputCls} value={form.countryOrigin} onChange={(e) => set("countryOrigin", e.target.value)}>
+                      {COUNTRIES.map((country) => <option key={country}>{country}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Government ID Type">
+                    <select className={inputCls} value={form.idType} onChange={(e) => set("idType", e.target.value)}>
+                      <option value="">Select ID type</option>
+                      {ID_TYPES.map((type) => <option key={type}>{type}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="ID Number">
+                    <input className={inputCls} placeholder="ID number" value={form.idNumber} onChange={(e) => set("idNumber", e.target.value)} />
+                  </Field>
+                </div>
+                <FilePicker label="Government ID Photo" file={form.idPhoto} onChange={(file) => set("idPhoto", file)} />
+              </section>
+
+              {form.role === "merchant" && (
+                <section>
+                  <SectionTitle title="Business Details" />
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <Field label="Business Name">
+                      <input className={inputCls} placeholder="Dela Cruz Store" value={form.businessName} onChange={(e) => set("businessName", e.target.value)} />
+                    </Field>
+                    <Field label="Business Type">
+                      <select className={inputCls} value={form.businessType} onChange={(e) => set("businessType", e.target.value)}>
+                        <option value="">Select business type</option>
+                        {BUSINESS_TYPES.map((type) => <option key={type}>{type}</option>)}
+                      </select>
+                    </Field>
+                    <Field label="Business Address">
+                      <input className={inputCls} placeholder="Street, barangay, province" value={form.businessAddress} onChange={(e) => set("businessAddress", e.target.value)} />
+                    </Field>
+                    <Field label="City / Municipality">
+                      <input className={inputCls} placeholder="Quezon City" value={form.city} onChange={(e) => set("city", e.target.value)} />
+                    </Field>
+                  </div>
+                  <FilePicker label="Business Permit Upload" file={form.businessPermit} onChange={(file) => set("businessPermit", file)} />
+                </section>
+              )}
+
+              <button disabled={!canSubmit || loading} className="w-full bg-[#DDE048] text-black font-extrabold rounded-xl py-4 text-sm flex items-center justify-center gap-2 disabled:opacity-40">
+                {loading ? <Loader size={15} className="animate-spin" /> : <ArrowRight size={15} />}
+                {loading ? "Creating account..." : "Create Account and Send Verification"}
+              </button>
+            </form>
+          )}
+
+          <div className="mt-6 pt-5 border-t border-[#1e2230] text-center">
+            <span className="text-[#555] text-xs">Already registered? </span>
+            <Link href="/login" className="text-[#DDE048] text-xs font-bold">Log in</Link>
           </div>
-
-          {/* Step 0 — Connect */}
-          {step === 0 && (
-            <div>
-              <h2 className="text-lg font-extrabold text-white mb-1 text-center">Connect your wallet</h2>
-              <p className="text-[#555] text-xs text-center mb-6">Your MetaMask wallet address is your identity.</p>
-              {walletLoading ? (
-                <div className="flex justify-center py-4"><Loader size={18} className="animate-spin text-[#DDE048]" /></div>
-              ) : !account ? (
-                <button
-                  onClick={connect}
-                  className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2 hover:bg-[#c8ce30] transition-colors"
-                >
-                  Connect MetaMask
-                </button>
-              ) : (
-                <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-3.5 py-3 flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                  <span className="font-mono text-xs text-[#888] truncate">{account}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 1 — Choose role */}
-          {step === 1 && (
-            <div>
-              <h2 className="text-lg font-extrabold text-white mb-1 text-center">Who are you?</h2>
-              <p className="text-[#555] text-xs text-center mb-5">Choose your account type. This is tied to your wallet.</p>
-              <div className="space-y-2.5 mb-5">
-                {([
-                  { r: "sender" as Role, Icon: PlaneTakeoff, title: "OFW / Sender", sub: "I'm sending money to the Philippines" },
-                  { r: "merchant" as Role, Icon: Store, title: "Merchant", sub: "I'm a business receiving remittances" },
-                ]).map(({ r, Icon, title, sub }) => (
-                  <button
-                    key={r}
-                    onClick={() => setRole(r)}
-                    className={`w-full flex items-center gap-3.5 p-4 rounded-xl border-2 text-left transition-all ${
-                      role === r ? "border-[#DDE048] bg-[#DDE048]/5" : "border-[#1e2230] hover:border-[#2a2d36]"
-                    }`}
-                  >
-                    <Icon size={22} color="#DDE048" className="shrink-0" />
-                    <div className="flex-1">
-                      <div className={`font-bold text-sm ${role === r ? "text-white" : "text-[#888]"}`}>{title}</div>
-                      <div className="text-[11px] text-[#555] mt-0.5">{sub}</div>
-                    </div>
-                    <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
-                      role === r ? "border-[#DDE048] bg-[#DDE048]" : "border-[#333]"
-                    }`}>
-                      {role === r && <Check size={9} color="black" strokeWidth={3} />}
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <button
-                disabled={!role}
-                onClick={() => setStep(2)}
-                className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2 hover:bg-[#c8ce30] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Continue <ArrowRight size={14} />
-              </button>
-            </div>
-          )}
-
-          {/* Step 2 — Details form */}
-          {step === 2 && role === "sender" && (
-            <div>
-              <h2 className="text-lg font-extrabold text-white mb-1 text-center">OFW / Sender Details</h2>
-              <p className="text-[#555] text-xs text-center mb-5">Required for KYC verification.</p>
-              <div className="space-y-3">
-                <Field label="Full Name" required>
-                  <input className={inputCls} placeholder="Juan Dela Cruz" value={ofw.full_name}
-                    onChange={e => setOfw({ ...ofw, full_name: e.target.value })} />
-                </Field>
-                <Field label="Phone Number" required>
-                  <input className={inputCls} type="tel" placeholder="+63 9XX XXX XXXX" value={ofw.phone}
-                    onChange={e => setOfw({ ...ofw, phone: e.target.value })} />
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Country of Work" required>
-                    <select className={inputCls} value={ofw.country_work}
-                      onChange={e => setOfw({ ...ofw, country_work: e.target.value })}>
-                      <option value="">Select…</option>
-                      {OFW_COUNTRIES.map(c => <option key={c}>{c}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Country of Origin" required>
-                    <select className={inputCls} value={ofw.country_origin}
-                      onChange={e => setOfw({ ...ofw, country_origin: e.target.value })}>
-                      <option value="Philippines">Philippines</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </Field>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Gov. ID Type" required>
-                    <select className={inputCls} value={ofw.id_type}
-                      onChange={e => setOfw({ ...ofw, id_type: e.target.value })}>
-                      <option value="">Select…</option>
-                      {ID_TYPES.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="ID Number" required>
-                    <input className={inputCls} placeholder="A12-3456789" value={ofw.id_number}
-                      onChange={e => setOfw({ ...ofw, id_number: e.target.value })} />
-                  </Field>
-                </div>
-                <Field label="Government ID Photo" required>
-                  <input ref={idPhotoRef} type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden"
-                    onChange={e => setOfw({ ...ofw, id_photo: e.target.files?.[0] ?? null })} />
-                  {ofw.id_photo ? (
-                    <div className="flex items-center gap-2 bg-[#0e1014] border border-[#DDE048]/30 rounded-xl px-4 py-3">
-                      <Check size={14} color="#DDE048" />
-                      <span className="text-sm text-white truncate flex-1">{ofw.id_photo.name}</span>
-                      <button onClick={() => setOfw({ ...ofw, id_photo: null })} className="text-[#555] hover:text-red-400">
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={() => idPhotoRef.current?.click()}
-                      className="w-full flex items-center gap-2 bg-[#0e1014] border border-dashed border-[#333] rounded-xl px-4 py-3 text-[#555] text-sm hover:border-[#555] transition-colors">
-                      <Upload size={14} /> Upload photo (JPG / PNG / PDF)
-                    </button>
-                  )}
-                </Field>
-              </div>
-              <div className="flex gap-2 mt-5">
-                <button onClick={() => setStep(1)} className="flex-1 border border-[#1e2230] text-[#555] rounded-xl py-3 text-sm hover:border-[#333] transition-colors">
-                  ← Back
-                </button>
-                <button
-                  disabled={!ofwValid()}
-                  onClick={() => setStep(3)}
-                  className="flex-1 bg-[#DDE048] text-black font-bold rounded-xl py-3 text-sm hover:bg-[#c8ce30] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Review →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 2 && role === "merchant" && (
-            <div>
-              <h2 className="text-lg font-extrabold text-white mb-1 text-center">Merchant Details</h2>
-              <p className="text-[#555] text-xs text-center mb-5">Required for KYC verification.</p>
-              <div className="space-y-3">
-                <Field label="Business Name" required>
-                  <input className={inputCls} placeholder="Dela Cruz General Store" value={merchant.business_name}
-                    onChange={e => setMerchant({ ...merchant, business_name: e.target.value })} />
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Business Type" required>
-                    <select className={inputCls} value={merchant.business_type}
-                      onChange={e => setMerchant({ ...merchant, business_type: e.target.value })}>
-                      <option value="">Select…</option>
-                      {BUSINESS_TYPES.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Owner Full Name" required>
-                    <input className={inputCls} placeholder="Maria Dela Cruz" value={merchant.owner_name}
-                      onChange={e => setMerchant({ ...merchant, owner_name: e.target.value })} />
-                  </Field>
-                </div>
-                <Field label="Phone Number" required>
-                  <input className={inputCls} type="tel" placeholder="+63 9XX XXX XXXX" value={merchant.phone}
-                    onChange={e => setMerchant({ ...merchant, phone: e.target.value })} />
-                </Field>
-                <Field label="Business Address" required>
-                  <input className={inputCls} placeholder="123 Main St, Barangay…" value={merchant.business_address}
-                    onChange={e => setMerchant({ ...merchant, business_address: e.target.value })} />
-                </Field>
-                <Field label="City / Municipality" required>
-                  <input className={inputCls} placeholder="Quezon City" value={merchant.city}
-                    onChange={e => setMerchant({ ...merchant, city: e.target.value })} />
-                </Field>
-                <Field label="Business Permit" required>
-                  <input ref={permitRef} type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden"
-                    onChange={e => setMerchant({ ...merchant, business_permit: e.target.files?.[0] ?? null })} />
-                  {merchant.business_permit ? (
-                    <div className="flex items-center gap-2 bg-[#0e1014] border border-[#DDE048]/30 rounded-xl px-4 py-3">
-                      <Check size={14} color="#DDE048" />
-                      <span className="text-sm text-white truncate flex-1">{merchant.business_permit.name}</span>
-                      <button onClick={() => setMerchant({ ...merchant, business_permit: null })} className="text-[#555] hover:text-red-400">
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={() => permitRef.current?.click()}
-                      className="w-full flex items-center gap-2 bg-[#0e1014] border border-dashed border-[#333] rounded-xl px-4 py-3 text-[#555] text-sm hover:border-[#555] transition-colors">
-                      <Upload size={14} /> Upload permit (JPG / PNG / PDF)
-                    </button>
-                  )}
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Gov. ID Type" required>
-                    <select className={inputCls} value={merchant.id_type}
-                      onChange={e => setMerchant({ ...merchant, id_type: e.target.value })}>
-                      <option value="">Select…</option>
-                      {ID_TYPES.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="ID Number" required>
-                    <input className={inputCls} placeholder="A12-3456789" value={merchant.id_number}
-                      onChange={e => setMerchant({ ...merchant, id_number: e.target.value })} />
-                  </Field>
-                </div>
-              </div>
-              <div className="flex gap-2 mt-5">
-                <button onClick={() => setStep(1)} className="flex-1 border border-[#1e2230] text-[#555] rounded-xl py-3 text-sm hover:border-[#333] transition-colors">
-                  ← Back
-                </button>
-                <button
-                  disabled={!merchantValid()}
-                  onClick={() => setStep(3)}
-                  className="flex-1 bg-[#DDE048] text-black font-bold rounded-xl py-3 text-sm hover:bg-[#c8ce30] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Review →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3 — Review */}
-          {step === 3 && (
-            <div>
-              <h2 className="text-lg font-extrabold text-white mb-1 text-center">Review & confirm</h2>
-              <p className="text-[#555] text-xs text-center mb-5">Check your details before submitting.</p>
-
-              <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-3.5 py-3 flex items-center gap-2.5 mb-4">
-                <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                <span className="font-mono text-xs text-[#888] truncate">{account}</span>
-              </div>
-
-              <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl divide-y divide-[#1e2230] mb-4">
-                {role === "sender" ? (
-                  <>
-                    <ReviewRow label="Role" value="OFW / Sender" />
-                    <ReviewRow label="Name" value={ofw.full_name} />
-                    <ReviewRow label="Phone" value={ofw.phone} />
-                    <ReviewRow label="Country of Work" value={ofw.country_work} />
-                    <ReviewRow label="Country of Origin" value={ofw.country_origin} />
-                    <ReviewRow label="ID Type" value={ofw.id_type} />
-                    <ReviewRow label="ID Number" value={ofw.id_number} />
-                    <ReviewRow label="ID Photo" value={ofw.id_photo?.name ?? "—"} />
-                  </>
-                ) : (
-                  <>
-                    <ReviewRow label="Role" value="Merchant" />
-                    <ReviewRow label="Business" value={merchant.business_name} />
-                    <ReviewRow label="Type" value={merchant.business_type} />
-                    <ReviewRow label="Owner" value={merchant.owner_name} />
-                    <ReviewRow label="Phone" value={merchant.phone} />
-                    <ReviewRow label="Address" value={merchant.business_address} />
-                    <ReviewRow label="City" value={merchant.city} />
-                    <ReviewRow label="Permit" value={merchant.business_permit?.name ?? "—"} />
-                    <ReviewRow label="ID Type" value={merchant.id_type} />
-                    <ReviewRow label="ID Number" value={merchant.id_number} />
-                  </>
-                )}
-              </div>
-
-              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs rounded-xl px-3.5 py-2.5 mb-4">
-                Your KYC will be reviewed by an admin. You won't be able to transact until approved.
-              </div>
-
-              {error && (
-                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl px-3.5 py-2.5 mb-4">
-                  {error}
-                </div>
-              )}
-
-              <button
-                onClick={handleSubmit}
-                disabled={saving}
-                className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2 hover:bg-[#c8ce30] transition-colors disabled:opacity-50"
-              >
-                {saving ? <><Loader size={14} className="animate-spin" /> Creating account…</> : <>Create account <ArrowRight size={14} /></>}
-              </button>
-
-              <button onClick={() => setStep(2)} className="w-full text-[#444] text-xs mt-3 hover:text-[#666] transition-colors">
-                ← Edit details
-              </button>
-            </div>
-          )}
         </div>
-
-        <p className="text-[#2a2d36] text-[11px] text-center mt-5">
-          Powered by Morph L2 · Secured by smart contracts
-        </p>
       </div>
     </div>
   );
 }
 
-const inputCls = "w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/50 placeholder:text-[#333] transition-colors appearance-none";
+const inputCls = "w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/60 placeholder:text-[#3a3d46] transition-colors appearance-none";
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function SectionTitle({ title }: { title: string }) {
+  return <h2 className="text-white font-extrabold text-sm mb-3">{title}</h2>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <label className="text-xs text-[#555] tracking-[0.5px] block mb-1.5">
-        {label} {required && <span className="text-red-400">*</span>}
-      </label>
+    <label className="block">
+      <span className="text-[#888] text-xs font-semibold block mb-1.5">{label} <span className="text-red-400">*</span></span>
       {children}
+    </label>
+  );
+}
+
+function RoleButton({ active, title, desc, Icon, onClick }: { active: boolean; title: string; desc: string; Icon: React.ComponentType<{ size?: string | number; color?: string }>; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className={`text-left p-4 rounded-2xl border transition-colors flex items-center gap-3 ${active ? "border-[#DDE048] bg-[#DDE048]/10" : "border-[#1e2230] bg-[#0e1014]"}`}>
+      <div className="w-10 h-10 rounded-xl bg-[#DDE048]/10 flex items-center justify-center"><Icon size={20} color="#DDE048" /></div>
+      <div className="flex-1">
+        <div className="text-white font-bold text-sm">{title}</div>
+        <div className="text-[#666] text-xs mt-0.5">{desc}</div>
+      </div>
+      {active && <Check size={16} color="#DDE048" />}
+    </button>
+  );
+}
+
+function FilePicker({ label, file, onChange }: { label: string; file: File | null; onChange: (file: File | null) => void }) {
+  const valid = validFile(file);
+  return (
+    <div className="mt-3">
+      <span className="text-[#888] text-xs font-semibold block mb-1.5">{label} <span className="text-red-400">*</span></span>
+      {file ? (
+        <div className={`flex items-center gap-2 bg-[#0e1014] border rounded-xl px-4 py-3 ${valid ? "border-[#DDE048]/30" : "border-red-500/30"}`}>
+          <Check size={14} color={valid ? "#DDE048" : "#ef4444"} />
+          <span className="text-sm text-white truncate flex-1">{file.name}</span>
+          <span className="text-[#555] text-xs">{(file.size / 1024 / 1024).toFixed(1)}MB</span>
+          <button type="button" onClick={() => onChange(null)} className="text-[#555]"><X size={14} /></button>
+        </div>
+      ) : (
+        <label className="w-full flex items-center gap-2 bg-[#0e1014] border border-dashed border-[#333] rounded-xl px-4 py-3 text-[#666] text-sm cursor-pointer">
+          <Upload size={14} /> Upload JPG, PNG, or PDF up to 5MB
+          <input type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden" onChange={(e) => onChange(e.target.files?.[0] ?? null)} />
+        </label>
+      )}
+      {file && !valid && <p className="text-red-400 text-[11px] mt-1.5">File must be JPG, PNG, or PDF and 5MB or smaller.</p>}
     </div>
   );
 }
 
-function ReviewRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between px-3.5 py-2.5 text-xs">
-      <span className="text-[#555]">{label}</span>
-      <span className="text-white font-medium text-right max-w-[60%] truncate">{value || "—"}</span>
-    </div>
-  );
+function Alert({ text, tone }: { text: string; tone: "error" | "success" | "info" }) {
+  const styles = {
+    error: "bg-red-500/10 border-red-500/20 text-red-400",
+    success: "bg-green-500/10 border-green-500/20 text-green-400",
+    info: "bg-[#DDE048]/10 border-[#DDE048]/20 text-[#DDE048]",
+  };
+  return <div className={`border rounded-xl px-3.5 py-2.5 text-xs mb-4 ${styles[tone]}`}>{text}</div>;
 }

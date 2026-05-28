@@ -1,101 +1,194 @@
 "use client";
-import { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader } from "lucide-react";
-import { useWallet } from "../../context/WalletContext";
-import { fetchUserRole } from "../../lib/supabase";
+import { FormEvent, useState } from "react";
+import { ArrowRight, CheckCircle2, Loader, Mail, ShieldCheck } from "lucide-react";
+
+type Mode = "login" | "otp" | "forgot";
+
+async function postJson(path: string, body: unknown) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await response.json();
+  if (!response.ok) throw new Error(json.error || "Something went wrong.");
+  return json;
+}
 
 export default function Login() {
-  const { account, connect, walletLoading } = useWallet();
   const router = useRouter();
-  const [checking, setChecking] = useState(false);
+  const [mode, setMode] = useState<Mode>("login");
+  const [usernameOrEmail, setUsernameOrEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [devOtp, setDevOtp] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  // When account connects, check DB and redirect
-  useEffect(() => {
-    if (!account || walletLoading) return;
-
-    setChecking(true);
+  function returnToLogin() {
+    setMode("login");
+    setOtp("");
+    setEmail("");
+    setMessage("");
     setError("");
+    setDevOtp("");
+  }
 
-    fetchUserRole(account).then((role) => {
-      if (!role) {
-        // No record → go to signup
-        router.replace("/signup");
-      } else {
-        // Known user → set cookie and redirect to dashboard
-        document.cookie = `rs_role=${role}; path=/; max-age=2592000`;
-        if (role === "admin") router.replace("/admin");
-        else if (role === "merchant") router.replace("/merchant");
-        else router.replace("/");
-      }
-    }).catch(() => {
-      setError("Unable to connect. Please try again.");
-      setChecking(false);
-    });
-  }, [account, walletLoading]);
+  async function submitLogin(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true); setError(""); setMessage(""); setDevOtp("");
+    try {
+      const result = await postJson("/api/auth/login", { usernameOrEmail, password });
+      setEmail(result.email);
+      setDevOtp(result.devOtp ?? "");
+      setMessage(result.message);
+      setMode("otp");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const isLoading = walletLoading || checking;
+  async function submitOtp(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true); setError(""); setMessage("");
+    try {
+      const result = await postJson("/api/auth/verify-login", { email, otp });
+      setMessage("Login verified. Redirecting...");
+      router.replace(result.redirectTo);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitForgot(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true); setError(""); setMessage(""); setDevOtp("");
+    try {
+      const result = await postJson("/api/auth/forgot-password", { email });
+      setMessage(result.message);
+      setMode("login");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-[#0e1014] flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
-
-          {/* Logo */}
-          <div className="flex flex-col items-center mb-8">
-            <Image src="/logo.png" alt="RemitSafe" width={44} height={44} style={{ objectFit: "contain" }} />
-            <span className="text-white font-extrabold text-base mt-2.5">RemitSafe</span>
-            <span className="text-[#555] text-xs mt-1">Blockchain-powered remittance</span>
+    <div className="min-h-screen bg-[#0e1014] flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-[420px]">
+        <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6 shadow-2xl">
+          <div className="flex flex-col items-center mb-7">
+            <Image src="/logo.png" alt="RemitSafe" width={48} height={48} style={{ objectFit: "contain" }} />
+            <span className="text-white font-extrabold text-lg mt-3">RemitSafe</span>
+            <span className="text-[#666] text-xs mt-1">Secure OFW and merchant remittance access</span>
           </div>
 
-          <h2 className="text-lg font-extrabold text-white mb-1 text-center">Welcome back</h2>
-          <p className="text-[#555] text-xs text-center mb-6">Connect your wallet to sign in.</p>
+          <div className="mb-5">
+            <h1 className="text-white text-xl font-extrabold">
+              {mode === "login" && "Welcome back"}
+              {mode === "otp" && "Verify your login"}
+              {mode === "forgot" && "Reset password"}
+            </h1>
+            <p className="text-[#666] text-sm mt-1">
+              {mode === "login" && "Sign in with username or email, then confirm the OTP sent to your Gmail/email."}
+              {mode === "otp" && `Enter the 6-digit code sent to ${email}.`}
+              {mode === "forgot" && "We will send a reset code to your registered email."}
+            </p>
+          </div>
 
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl px-3.5 py-2.5 mb-4 text-center">
-              {error}
-            </div>
+          {error && <Alert tone="error" text={error} />}
+          {message && <Alert tone="success" text={message} />}
+          {devOtp && mode === "otp" && <Alert tone="info" text={`Development OTP: ${devOtp}`} />}
+
+          {mode === "login" && (
+            <form onSubmit={submitLogin} className="space-y-4">
+              <AuthField label="Username or Email">
+                <input className={inputCls} placeholder="juan.ofw or juan@gmail.com" value={usernameOrEmail} onChange={(e) => setUsernameOrEmail(e.target.value)} />
+              </AuthField>
+              <AuthField label="Password">
+                <input className={inputCls} type="password" placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              </AuthField>
+              <button type="button" onClick={() => { setMode("forgot"); setError(""); setMessage(""); }} className="text-[#DDE048] text-xs font-semibold">
+                Forgot Password?
+              </button>
+              <SubmitButton loading={loading} label="Continue" Icon={ArrowRight} />
+            </form>
           )}
 
-          {isLoading ? (
-            <div className="flex flex-col items-center gap-3 py-4">
-              <Loader size={20} className="animate-spin text-[#DDE048]" />
-              <span className="text-[#555] text-xs">
-                {checking ? "Checking your account…" : "Initializing wallet…"}
-              </span>
-            </div>
-          ) : !account ? (
-            <button
-              onClick={connect}
-              className="w-full bg-[#DDE048] text-black font-bold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2 hover:bg-[#c8ce30] transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 318.6 318.6" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M274.1 35.5l-99.7 74.1 18.4-43.6 81.3-30.5z" fill="#E2761B" />
-                <path d="M44.4 35.5l98.9 74.8-17.5-44.3L44.4 35.5z" fill="#E4761B" />
-                <path d="M238.3 206.8l-26.5 40.6 56.7 15.6 16.3-55.3-46.5-.9z" fill="#E4761B" />
-                <path d="M33.9 207.7l16.2 55.3 56.7-15.6-26.5-40.6-46.4.9z" fill="#E4761B" />
-              </svg>
-              Connect MetaMask
-            </button>
-          ) : null}
+          {mode === "otp" && (
+            <form onSubmit={submitOtp} className="space-y-4">
+              <AuthField label="Authentication Code">
+                <input className={`${inputCls} tracking-[0.4em] text-center`} placeholder="000000" inputMode="numeric" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} />
+              </AuthField>
+              <SubmitButton loading={loading} label="Verify and open dashboard" Icon={ShieldCheck} />
+              <button type="button" onClick={returnToLogin} className="w-full text-[#666] text-xs">
+                Use a different account
+              </button>
+            </form>
+          )}
 
-          <div className="mt-6 text-center">
-            <span className="text-[#444] text-xs">New to RemitSafe?{" "}</span>
-            <button
-              onClick={() => router.push("/signup")}
-              className="text-[#DDE048] text-xs font-semibold hover:underline"
-            >
-              Create an account
-            </button>
+          {mode === "forgot" && (
+            <form onSubmit={submitForgot} className="space-y-4">
+              <AuthField label="Registered Email">
+                <input className={inputCls} type="email" placeholder="you@gmail.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </AuthField>
+              <SubmitButton loading={loading} label="Send reset code" Icon={Mail} />
+              <button type="button" onClick={returnToLogin} className="w-full text-[#666] text-xs">
+                Back to login
+              </button>
+            </form>
+          )}
+
+          <div className="mt-6 pt-5 border-t border-[#1e2230] text-center">
+            <span className="text-[#555] text-xs">No account yet? </span>
+            <Link href="/signup" className="text-[#DDE048] text-xs font-bold">Create an Account</Link>
           </div>
         </div>
-
-        <p className="text-[#2a2d36] text-[11px] text-center mt-5">
-          Powered by Morph L2 · Secured by smart contracts
-        </p>
       </div>
+    </div>
+  );
+}
+
+const inputCls = "w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/60 placeholder:text-[#3a3d46] transition-colors";
+
+function AuthField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-[#888] text-xs font-semibold block mb-1.5">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function SubmitButton({ loading, label, Icon }: { loading: boolean; label: string; Icon: React.ComponentType<{ size?: string | number }> }) {
+  return (
+    <button type="submit" disabled={loading} className="w-full bg-[#DDE048] text-black font-extrabold rounded-xl py-3.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+      {loading ? <Loader size={15} className="animate-spin" /> : <Icon size={15} />}
+      {loading ? "Please wait..." : label}
+    </button>
+  );
+}
+
+function Alert({ text, tone }: { text: string; tone: "error" | "success" | "info" }) {
+  const styles = {
+    error: "bg-red-500/10 border-red-500/20 text-red-400",
+    success: "bg-green-500/10 border-green-500/20 text-green-400",
+    info: "bg-[#DDE048]/10 border-[#DDE048]/20 text-[#DDE048]",
+  };
+  return (
+    <div className={`border rounded-xl px-3.5 py-2.5 text-xs mb-4 flex items-start gap-2 ${styles[tone]}`}>
+      {tone === "success" && <CheckCircle2 size={14} className="shrink-0 mt-px" />}
+      <span>{text}</span>
     </div>
   );
 }

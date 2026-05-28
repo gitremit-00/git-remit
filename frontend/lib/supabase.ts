@@ -1,9 +1,12 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(url, key);
+export const hasSupabaseConfig = Boolean(url && key);
+export const supabase: SupabaseClient | null = hasSupabaseConfig
+  ? createClient(url!, key!)
+  : null;
 
 export type Role = "sender" | "merchant" | "admin";
 export type KYCStatus = "pending" | "approved" | "rejected";
@@ -36,37 +39,97 @@ export interface UserProfile {
   permit_url: string | null;
 }
 
-export async function fetchUserRole(walletAddress: string): Promise<Role | null> {
-  const { data, error } = await supabase
-    .from("users")
-    .select("role")
-    .eq("wallet_address", walletAddress.toLowerCase())
-    .single();
-  if (error || !data) return null;
-  return data.role as Role;
+type ProfileRow = {
+  id: string;
+  username: string;
+  role: "ofw_sender" | "merchant";
+  full_name: string | null;
+  phone_number: string | null;
+  email: string | null;
+  country_of_work: string | null;
+  country_of_origin: string | null;
+  gov_id_type: string | null;
+  id_number: string | null;
+  gov_id_photo_url: string | null;
+  business_permit_url: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+function appRole(role: string): Role {
+  return role === "merchant" ? "merchant" : "sender";
 }
 
-export async function getUserProfile(walletAddress: string): Promise<UserProfile | null> {
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("wallet_address", walletAddress.toLowerCase())
-    .single();
+function mapProfile(row: ProfileRow): UserProfile {
+  return {
+    wallet_address: row.id,
+    role: appRole(row.role),
+    name: row.full_name,
+    avatar_url: null,
+    bio: null,
+    phone: row.phone_number,
+    country: row.country_of_origin,
+    country_origin: row.country_of_origin,
+    kyc_status: "pending",
+    kyc_reject_reason: null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    country_work: row.country_of_work,
+    id_type: row.gov_id_type,
+    id_number: row.id_number,
+    id_photo_url: row.gov_id_photo_url,
+    business_name: row.role === "merchant" ? row.full_name : null,
+    business_type: null,
+    owner_name: row.role === "merchant" ? row.full_name : null,
+    business_address: null,
+    city: null,
+    permit_url: row.business_permit_url,
+  };
+}
+
+function profileQuery(identifier: string) {
+  const normalized = identifier.toLowerCase();
+  if (normalized.includes("@")) return supabase!.from("profiles").select("*").eq("email", normalized).single();
+  if (/^[0-9a-f-]{36}$/i.test(normalized)) return supabase!.from("profiles").select("*").eq("id", normalized).single();
+  return supabase!.from("profiles").select("*").eq("username", normalized).single();
+}
+
+export async function fetchUserRole(identifier: string): Promise<Role | null> {
+  if (!supabase) return "sender";
+
+  const { data, error } = await profileQuery(identifier);
   if (error || !data) return null;
-  return data as UserProfile;
+  return appRole((data as ProfileRow).role);
+}
+
+export async function getUserProfile(identifier: string): Promise<UserProfile | null> {
+  if (!supabase) return null;
+
+  const { data, error } = await profileQuery(identifier);
+  if (error || !data) return null;
+  return mapProfile(data as ProfileRow);
 }
 
 export async function updateUserProfile(
   walletAddress: string,
   updates: Partial<Pick<UserProfile, "name" | "avatar_url" | "bio" | "phone" | "country">>
 ): Promise<void> {
+  if (!supabase) return;
+
   await supabase
-    .from("users")
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq("wallet_address", walletAddress.toLowerCase());
+    .from("profiles")
+    .update({
+      full_name: updates.name,
+      phone_number: updates.phone,
+      country_of_origin: updates.country,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", walletAddress.toLowerCase());
 }
 
 export async function uploadAvatar(walletAddress: string, file: File): Promise<string | null> {
+  if (!supabase) return null;
+
   const ext = file.name.split(".").pop();
   const path = `${walletAddress.toLowerCase()}/avatar.${ext}`;
   const { error } = await supabase.storage
@@ -79,65 +142,47 @@ export async function uploadAvatar(walletAddress: string, file: File): Promise<s
 
 // Legacy — kept for compatibility; new signups go through /api/signup
 export async function createUser(walletAddress: string, role: Role, name?: string): Promise<void> {
-  await supabase.from("users").insert({
-    wallet_address: walletAddress.toLowerCase(),
-    role,
-    name: name ?? null,
-  });
+  return;
 }
 
 export async function getUserKYCStatus(walletAddress: string): Promise<KYCStatus | null> {
-  const { data, error } = await supabase
-    .from("users")
-    .select("kyc_status")
-    .eq("wallet_address", walletAddress.toLowerCase())
-    .single();
-  if (error || !data) return null;
-  return data.kyc_status as KYCStatus;
+  return null;
 }
 
 export async function getKYCQueue(): Promise<UserProfile[]> {
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("kyc_status", "pending")
-    .order("created_at", { ascending: true });
-  if (error || !data) return [];
-  return data as UserProfile[];
+  return [];
 }
 
 export async function approveKYC(walletAddress: string): Promise<void> {
-  await supabase
-    .from("users")
-    .update({ kyc_status: "approved", kyc_reject_reason: null, updated_at: new Date().toISOString() })
-    .eq("wallet_address", walletAddress.toLowerCase());
+  return;
 }
 
 export async function rejectKYC(walletAddress: string, reason: string): Promise<void> {
-  await supabase
-    .from("users")
-    .update({ kyc_status: "rejected", kyc_reject_reason: reason, updated_at: new Date().toISOString() })
-    .eq("wallet_address", walletAddress.toLowerCase());
+  return;
 }
 
 export async function getAllSenders(): Promise<UserProfile[]> {
+  if (!supabase) return [];
+
   const { data, error } = await supabase
-    .from("users")
+    .from("profiles")
     .select("*")
-    .eq("role", "sender")
+    .eq("role", "ofw_sender")
     .order("created_at", { ascending: false });
   if (error || !data) return [];
-  return data as UserProfile[];
+  return (data as ProfileRow[]).map(mapProfile);
 }
 
 export async function getAllMerchants(): Promise<UserProfile[]> {
+  if (!supabase) return [];
+
   const { data, error } = await supabase
-    .from("users")
+    .from("profiles")
     .select("*")
     .eq("role", "merchant")
     .order("created_at", { ascending: false });
   if (error || !data) return [];
-  return data as UserProfile[];
+  return (data as ProfileRow[]).map(mapProfile);
 }
 
 export interface PaymentRequest {
@@ -155,6 +200,8 @@ export interface PaymentRequest {
 export async function createPaymentRequest(
   req: Pick<PaymentRequest, "merchant_address" | "merchant_name" | "amount" | "deadline" | "title" | "note">
 ): Promise<PaymentRequest | null> {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from("payment_requests")
     .insert({ ...req, merchant_address: req.merchant_address.toLowerCase(), status: "open" })
@@ -165,6 +212,8 @@ export async function createPaymentRequest(
 }
 
 export async function getPaymentRequest(id: string): Promise<PaymentRequest | null> {
+  if (!supabase) return null;
+
   const { data, error } = await supabase
     .from("payment_requests")
     .select("*")
@@ -175,6 +224,8 @@ export async function getPaymentRequest(id: string): Promise<PaymentRequest | nu
 }
 
 export async function getMerchantPaymentRequests(merchantAddress: string): Promise<PaymentRequest[]> {
+  if (!supabase) return [];
+
   const { data, error } = await supabase
     .from("payment_requests")
     .select("*")
@@ -188,6 +239,8 @@ export async function updatePaymentRequestStatus(
   id: string,
   status: PaymentRequest["status"]
 ): Promise<void> {
+  if (!supabase) return;
+
   await supabase.from("payment_requests").update({ status }).eq("id", id);
 }
 
@@ -204,6 +257,8 @@ export async function sendPaymentRequestNotification(
   requestId: string,
   senderAddress: string
 ): Promise<boolean> {
+  if (!supabase) return false;
+
   const { error } = await supabase
     .from("payment_request_notifications")
     .insert({ request_id: requestId, sender_address: senderAddress.toLowerCase() });
@@ -214,6 +269,8 @@ export async function sendPaymentRequestNotification(
 export async function getSenderNotifications(
   senderAddress: string
 ): Promise<PaymentRequestNotification[]> {
+  if (!supabase) return [];
+
   const { data, error } = await supabase
     .from("payment_request_notifications")
     .select("*, payment_requests(*)")
@@ -224,6 +281,8 @@ export async function getSenderNotifications(
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
+  if (!supabase) return;
+
   await supabase.from("payment_request_notifications").update({ read: true }).eq("id", id);
 }
 

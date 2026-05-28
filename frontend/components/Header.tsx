@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeft, Bell } from "lucide-react";
+import { ArrowLeft, Bell, LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Logo from "./Logo";
@@ -19,7 +19,7 @@ export default function Header({ title, back, onBack }: HeaderProps) {
   const router = useRouter();
   const [hasUnread, setHasUnread] = useState(false);
   const { avatarUrl, displayName } = useRole();
-  const { account } = useWallet();
+  const { account, disconnect } = useWallet();
 
   useEffect(() => {
     function checkUnread() {
@@ -55,12 +55,22 @@ export default function Header({ title, back, onBack }: HeaderProps) {
           )}
         </Link>
         {account && (
-          <Link href="/profile" className="w-9 h-9 rounded-[10px] overflow-hidden bg-[#DDE048] border border-[#1F2127] flex items-center justify-center text-black text-[11px] font-bold shrink-0">
-            {avatarUrl
-              ? <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
-              : (displayName ?? account).slice(0, 1).toUpperCase()
-            }
-          </Link>
+          <>
+            <Link href="/profile" className="w-9 h-9 rounded-[10px] overflow-hidden bg-[#DDE048] border border-[#1F2127] flex items-center justify-center text-black text-[11px] font-bold shrink-0">
+              {avatarUrl
+                ? <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
+                : (displayName ?? account).slice(0, 1).toUpperCase()
+              }
+            </Link>
+            <button
+              type="button"
+              onClick={disconnect}
+              aria-label="Log out"
+              className="bg-red-500/10 rounded-[10px] w-9 h-9 flex items-center justify-center border border-red-500/20"
+            >
+              <LogOut size={17} color="#f87171" />
+            </button>
+          </>
         )}
       </div>
     </div>

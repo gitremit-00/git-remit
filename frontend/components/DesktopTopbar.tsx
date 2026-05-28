@@ -1,5 +1,5 @@
 "use client";
-import { Search, Bell, ChevronRight } from "lucide-react";
+import { Search, Bell, ChevronRight, LogOut } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
 import { useCurrency } from "../context/CurrencyContext";
 import { useRole } from "../context/RoleContext";
@@ -9,9 +9,16 @@ import Link from "next/link";
 
 
 export default function DesktopTopbar() {
-  const { account, pledgeRead } = useWallet();
+  const { account, pledgeRead, disconnect } = useWallet();
   const { currency, toggle } = useCurrency();
   const { avatarUrl, displayName } = useRole();
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    document.cookie = "rs_role=; path=/; max-age=0";
+    disconnect();
+    window.location.replace("/login");
+  }
   const [score, setScore] = useState<number | null>(null);
 
   useEffect(() => {
@@ -56,7 +63,7 @@ export default function DesktopTopbar() {
           <Bell size={16} color="#888" />
         </Link>
 
-        {/* User avatar */}
+        {/* User avatar — only when wallet connected */}
         {account && (
           <Link href="/profile" className="flex items-center gap-2 bg-[#13161c] border border-[#1e2230] rounded-xl px-2.5 py-2">
             <div className="w-7 h-7 rounded-full overflow-hidden bg-[#DDE048] flex items-center justify-center text-black text-[11px] font-bold shrink-0">
@@ -72,6 +79,15 @@ export default function DesktopTopbar() {
             )}
           </Link>
         )}
+
+        {/* Log out — always visible when session exists */}
+        <button
+          type="button"
+          onClick={logout}
+          className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold rounded-xl px-3 py-2 hover:border-red-500/40 transition-colors"
+        >
+          <LogOut size={14} /> Log out
+        </button>
       </div>
     </header>
   );

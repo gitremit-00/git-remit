@@ -11,6 +11,7 @@ import CircularScore from "../components/CircularScore";
 import ProgressBar from "../components/ProgressBar";
 import { useCurrency } from "../context/CurrencyContext";
 import { getPledgeMeta } from "../lib/pledgeMeta";
+import DashboardWalletConfirm from "../components/DashboardWalletConfirm";
 
 interface RepState { score: number; onTime: number; total: number; defaults: number; late: number; }
 interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
@@ -24,7 +25,7 @@ function scoreLabel(s: number) { return s >= 80 ? "Excellent" : s >= 50 ? "Good"
 function scoreColor(s: number) { return s >= 80 ? "#22c55e" : s >= 50 ? "#DDE048" : s >= 20 ? "#f59e0b" : "#ef4444"; }
 
 export default function Home() {
-  const { account, connect, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
+  const { account, connect, confirmWallet, walletVerified, error, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
   const { fmt, fmtAlt, currency } = useCurrency();
   const [usdcBal, setUsdcBal] = useState<string | null>(null);
   const [usdtBal, setUsdtBal] = useState<string | null>(null);
@@ -85,18 +86,15 @@ export default function Home() {
 
   if (walletLoading) return <LoadingSpinner fullScreen />;
 
-  /* ── Connect screen (shared mobile + desktop) ── */
-  if (!account) return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-8 bg-[#0e1014]">
-      <Image src="/logo.png" alt="RemitSafe" width={80} height={80} priority style={{ objectFit: "contain", marginBottom: 24 }} />
-      <h2 className="text-2xl font-bold mb-2.5 text-white">OFW Payment Pledge</h2>
-      <p className="text-[#888] mb-10 text-sm leading-relaxed max-w-[280px] text-center">
-        Secure on-chain remittance commitments, powered by smart contracts
-      </p>
-      <button className="bg-[#DDE048] text-black border-0 rounded-[14px] px-12 py-4 text-base font-bold cursor-pointer" onClick={connect}>
-        Connect MetaMask
-      </button>
-    </div>
+  if (!account || !walletVerified) return (
+    <DashboardWalletConfirm
+      role="sender"
+      account={account}
+      walletLoading={walletLoading}
+      error={error}
+      onConnect={connect}
+      onConfirm={confirmWallet}
+    />
   );
 
   /* ── DESKTOP LAYOUT ── */
