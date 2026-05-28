@@ -11,6 +11,7 @@ import {
   ChevronRight, FileText, User, Store, Zap, CreditCard, CalendarDays,
 } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
+import { CONTRACTS } from "../../contracts/addresses";
 import { useCurrency } from "../../context/CurrencyContext";
 import ProgressBar from "../../components/ProgressBar";
 import { savePledgeMeta, getPledgeMeta } from "../../lib/pledgeMeta";
@@ -53,7 +54,7 @@ export default function NewTransfer() {
 function NewTransferContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { account, pledgeRead, usdcRead, usdtRead } = useWallet();
+  const { account, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();
   const { fmt } = useCurrency();
 
   const [transferMode, setTransferMode] = useState<"merchant" | "p2p">("merchant");
@@ -252,7 +253,11 @@ function NewTransferContent() {
   // All merchant-flow submissions go off-chain to Supabase via sendRequest().
   // The merchant reviews the request and accepts it by calling createPledge on-chain.
   async function submit() {
-    await sendRequest();
+    if (transferMode === "p2p") {
+      await sendP2PTransaction();
+    } else {
+      await sendRequest();
+    }
   }
 
   async function sendRequest() {
@@ -284,6 +289,39 @@ function NewTransferContent() {
       setTimeout(() => router.push("/pledges/requests"), 1800);
     } catch {
       setTxError("Failed to send request. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function sendP2PTransaction() {
+    if (!account || !pledgeWrite) return;
+    const tokenWrite = selectedToken === "USDT" ? usdtWrite : usdcWrite;
+    const tokenAddress = selectedToken === "USDT" ? CONTRACTS.MOCK_USDT : CONTRACTS.MOCK_USDC;
+    if (!tokenWrite) return;
+    setLoading(true); setTxError("");
+    try {
+      const amt = ethers.parseUnits(parseFloat(form.totalAmount).toFixed(6), 6);
+      const approveTx = await tokenWrite.approve(CONTRACTS.REMITTANCE_PLEDGE, amt);
+      await approveTx.wait();
+      const sendTx = await pledgeWrite.sendP2P(tokenAddress, form.merchant, amt);
+      await sendTx.wait();
+      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: "p2p" });
+      setRequestSent(true);
+      setTimeout(() => router.push("/pledges"), 1800);
+    } catch (e: unknown) {
+      console.error("[sendP2P error]", e);
+      const err = e as { reason?: string; code?: string; message?: string };
+      const reason = err.reason ?? err.message ?? String(e);
+      if (reason.includes("user rejected") || err.code === "ACTION_REJECTED") {
+        setTxError("Transaction rejected.");
+      } else if (reason.includes("Sender not verified")) {
+        setTxError("Your wallet is not verified as a sender. Please complete KYC/verification before sending P2P.");
+      } else if (reason.includes("insufficient")) {
+        setTxError("Insufficient token balance to complete this transfer.");
+      } else {
+        setTxError(`Transaction failed: ${reason}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -779,7 +817,27 @@ function NewTransferContent() {
                       )}
                       {txError && <p className="text-red-400 text-[12px] mt-2 text-center">{txError}</p>}
                     </>
-                  ) : null}
+                  ) : (
+                    <>
+                      <div className="flex items-start gap-2 bg-[#DDE048]/5 border border-[#DDE048]/20 rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
+                        <Zap size={13} color="#DDE048" className="shrink-0 mt-0.5" />
+                        Funds will be sent directly to the recipient&apos;s wallet. This action cannot be undone.
+                      </div>
+                      {requestSent ? (
+                        <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2">
+                          <CheckCircle2 size={16} /> Sent! Redirecting…
+                        </div>
+                      ) : (
+                        <button
+                          onClick={sendP2PTransaction} disabled={loading || !pledgeWrite}
+                          className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#c8ce30] transition-colors"
+                        >
+                          {loading ? "Sending…" : "Send Transaction →"}
+                        </button>
+                      )}
+                      {txError && <p className="text-red-400 text-[12px] mt-2 text-center">{txError}</p>}
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -1015,13 +1073,13 @@ function NewTransferContent() {
                 </div>
                 {requestSent && (
                   <div className="bg-[#0d1f0d] border border-green-500/20 rounded-2xl px-4 py-3.5 mb-3">
-                    <TxStep label="Request sent to merchant" state="done" />
-                    <p className="text-green-400 text-xs mt-2 text-center">Redirecting to your requests...</p>
+                    <TxStep label={transferMode === "p2p" ? "Transaction sent!" : "Request sent to merchant"} state="done" />
+                    <p className="text-green-400 text-xs mt-2 text-center">{transferMode === "p2p" ? "Redirecting…" : "Redirecting to your requests..."}</p>
                   </div>
                 )}
                 {txError && (
                   <div className="bg-[#1f0d0d] border border-red-500/20 rounded-2xl px-4 py-3 mb-3">
-                    <p className="text-red-400 text-[13px] font-semibold mb-0.5">Request failed</p>
+                    <p className="text-red-400 text-[13px] font-semibold mb-0.5">{transferMode === "p2p" ? "Transaction failed" : "Request failed"}</p>
                     <p className="text-[#888] text-xs leading-relaxed">{txError}</p>
                   </div>
                 )}
@@ -1050,7 +1108,7 @@ function NewTransferContent() {
                   style={{ opacity: canNext ? 1 : 0.5 }}
                   onClick={step < STEP_REVIEW ? nextStep : submit}
                   disabled={!canNext || loading}>
-                  {loading ? "Processing..." : step < STEP_REVIEW ? "Continue →" : "Send →"}
+                  {loading ? "Processing..." : step < STEP_REVIEW ? "Continue →" : transferMode === "p2p" ? "Send Transaction →" : "Send →"}
                 </button>
               )
             )}
