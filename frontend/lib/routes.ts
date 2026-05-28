@@ -1,12 +1,17 @@
 const PUBLIC_ROUTES = ["/login", "/signup"];
 const ADMIN_PREFIXES = ["/admin"];
 const MERCHANT_PREFIXES = ["/merchant"];
-const SENDER_PREFIXES = [
-  "/",
+
+// Pages only OFW senders can access
+const SENDER_ONLY_PREFIXES = [
   "/new-transfer",
   "/pledges",
   "/pledge",
   "/recipients",
+];
+
+// Pages accessible by both senders and merchants
+const SHARED_PREFIXES = [
   "/wallet",
   "/profile",
   "/settings",
@@ -30,7 +35,11 @@ export function isMerchantOnly(pathname: string) {
   return matches(pathname, MERCHANT_PREFIXES);
 }
 
+export function isShared(pathname: string) {
+  return matches(pathname, SHARED_PREFIXES);
+}
+
 export function isSenderOnly(pathname: string) {
   if (pathname === "/") return true;
-  return matches(pathname, SENDER_PREFIXES.filter((route) => route !== "/"));
+  return matches(pathname, SENDER_ONLY_PREFIXES);
 }
