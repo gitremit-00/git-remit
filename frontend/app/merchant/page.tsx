@@ -11,6 +11,7 @@ import { getPledgeMeta } from "../../lib/pledgeMeta";
 import BottomNav from "../../components/BottomNav";
 import Header from "../../components/Header";
 import { CONTRACTS } from "../../contracts/addresses";
+import DashboardWalletConfirm from "../../components/DashboardWalletConfirm";
 
 interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
 
@@ -33,7 +34,7 @@ const AVATAR_COLORS = ["#DDE048", "#60a5fa", "#f59e0b", "#22c55e", "#f87171", "#
 function avatarColor(addr: string) { return AVATAR_COLORS[parseInt(addr.slice(2, 4), 16) % AVATAR_COLORS.length]; }
 
 export default function MerchantDashboard() {
-  const { account, connect, pledgeRead, walletLoading } = useWallet();
+  const { account, connect, confirmWallet, walletVerified, error, pledgeRead, walletLoading } = useWallet();
   const { fmt } = useCurrency();
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
   const [senderReps, setSenderReps] = useState<Record<string, SenderRep>>({});
@@ -85,12 +86,15 @@ export default function MerchantDashboard() {
 
   if (walletLoading) return <LoadingSpinner fullScreen />;
 
-  if (!account) return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-8 bg-[#0e1014]">
-      <h2 className="text-2xl font-bold mb-2.5 text-white">Merchant Portal</h2>
-      <p className="text-[#888] mb-10 text-sm max-w-[280px] text-center">Connect your wallet to view incoming transfers</p>
-      <button className="bg-[#DDE048] text-black rounded-[14px] px-12 py-4 text-base font-bold" onClick={connect}>Connect MetaMask</button>
-    </div>
+  if (!account || !walletVerified) return (
+    <DashboardWalletConfirm
+      role="merchant"
+      account={account}
+      walletLoading={walletLoading}
+      error={error}
+      onConnect={connect}
+      onConfirm={confirmWallet}
+    />
   );
 
   /* ── DESKTOP ── */

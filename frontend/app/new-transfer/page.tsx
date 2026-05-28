@@ -3,7 +3,7 @@ import Header from "../../components/Header";
 import Image from "next/image";
 import DateTimePicker from "../../components/DateTimePicker";
 import TxGuard from "../../components/TxGuard";
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ethers } from "ethers";
 import { ArrowLeft, Calendar, Check, Info, CheckCircle2, Clock, Loader, Shield, ChevronRight, FileText } from "lucide-react";
@@ -27,6 +27,14 @@ interface FormState {
 }
 
 export default function NewTransfer() {
+  return (
+    <Suspense fallback={<div className="px-4 pt-5 text-[#888] text-sm">Loading transfer...</div>}>
+      <NewTransferContent />
+    </Suspense>
+  );
+}
+
+function NewTransferContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { account, signer, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();

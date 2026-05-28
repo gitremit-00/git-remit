@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isSenderOnly, isMerchantOnly, isAdminOnly, isPublic } from "./lib/routes";
+import { verifySessionCookie } from "./lib/session";
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const role = req.cookies.get("rs_role")?.value;
+  const session = await verifySessionCookie(req.cookies.get("rs_session")?.value);
+  const role = session?.role;
+
+  if (pathname === "/" && !role) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
 
   // Public routes (/login, /signup) — redirect known users to their dashboard
   if (isPublic(pathname)) {
-    if (role) {
-      if (role === "admin") return NextResponse.redirect(new URL("/admin", req.url));
-      if (role === "merchant") return NextResponse.redirect(new URL("/merchant", req.url));
-      return NextResponse.redirect(new URL("/", req.url));
-    }
     return NextResponse.next();
   }
 
@@ -36,7 +37,7 @@ export function middleware(req: NextRequest) {
 
   // Role-based route guards
   if (role === "sender" && isMerchantOnly(pathname)) {
-    return NextResponse.redirect(new URL("/", req.url));
+    return NextResponse.redirect(new URL("/pledges", req.url));
   }
   if (role === "merchant" && isSenderOnly(pathname)) {
     return NextResponse.redirect(new URL("/merchant", req.url));

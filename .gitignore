@@ -13,10 +13,10 @@ coverage/
 coverage.json
 
 # Foundry
-lib/
-out/
-cache_forge/
-.foundry/
+/lib/
+/out/
+/cache_forge/
+/.foundry/
 
 # Slither
 test/slither/results.json

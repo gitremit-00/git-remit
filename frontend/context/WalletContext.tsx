@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, ReactNode } from "react";
-import { ethers, Contract, JsonRpcProvider, BrowserProvider, Signer } from "ethers";
+import { Contract, JsonRpcProvider, BrowserProvider, Signer } from "ethers";
 import { MORPH_TESTNET, CONTRACTS } from "../contracts/addresses";
 import MockUSDCABI from "../contracts/MockTokens.json";
 import RemittancePledgeABI from "../contracts/RemittancePledge.json";
@@ -10,8 +10,10 @@ interface WalletContextType {
   signer: Signer | null;
   provider: JsonRpcProvider;
   error: string | null;
+  walletVerified: boolean;
   walletLoading: boolean;
   connect: () => Promise<void>;
+  confirmWallet: () => Promise<void>;
   disconnect: () => void;
   usdcRead: Contract;
   usdtRead: Contract;
@@ -28,54 +30,113 @@ function getReadProvider(): JsonRpcProvider {
   return new JsonRpcProvider(`${base}/api/rpc`);
 }
 
+function getMetaMaskProvider() {
+  const ethereum = typeof window !== "undefined" ? window.ethereum : undefined;
+  if (!ethereum) return null;
+
+  const providers = ethereum.providers;
+  if (providers?.length) {
+    return providers.find((provider) => provider?.isMetaMask) ?? null;
+  }
+
+  return ethereum.isMetaMask ? ethereum : null;
+}
+
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<string | null>(null);
   const [signer, setSigner] = useState<Signer | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [walletVerified, setWalletVerified] = useState(false);
   const [walletLoading, setWalletLoading] = useState(true);
   const [readProvider] = useState<JsonRpcProvider>(() => getReadProvider());
 
   const connect = useCallback(async () => {
     try {
       sessionStorage.removeItem("rs_disconnected");
-      if (!window.ethereum) { setError("MetaMask not found."); return; }
+      const injectedProvider = getMetaMaskProvider();
+      if (!injectedProvider) {
+        setError("MetaMask not found. Disable other wallet extensions or open this page with MetaMask.");
+        return;
+      }
       try {
-        await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: MORPH_TESTNET.chainId }] });
+        await injectedProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: MORPH_TESTNET.chainId }] });
       } catch (e: unknown) {
         if ((e as { code: number }).code === 4902) {
-          await window.ethereum.request({ method: "wallet_addEthereumChain", params: [MORPH_TESTNET] });
+          await injectedProvider.request({ method: "wallet_addEthereumChain", params: [MORPH_TESTNET] });
         }
       }
-      const provider = new BrowserProvider(window.ethereum);
+      const provider = new BrowserProvider(injectedProvider);
       await provider.send("eth_requestAccounts", []);
       const _signer = await provider.getSigner();
-      setAccount(await _signer.getAddress());
+      const address = await _signer.getAddress();
+      setAccount(address);
       setSigner(_signer);
+      setWalletVerified(sessionStorage.getItem(`rs_wallet_confirmed_${address.toLowerCase()}`) === "1");
       setError(null);
     } catch (err: unknown) {
       setError((err as Error).message);
     }
   }, []);
 
+  const confirmWallet = useCallback(async () => {
+    try {
+      if (!signer) {
+        await connect();
+        return;
+      }
+
+      const address = await signer.getAddress();
+      const message = [
+        "RemitSafe dashboard access",
+        "",
+        "Confirm this wallet to view your on-chain remittance dashboard.",
+        `Wallet: ${address}`,
+        `Time: ${new Date().toISOString()}`,
+      ].join("\n");
+
+      await signer.signMessage(message);
+      sessionStorage.setItem(`rs_wallet_confirmed_${address.toLowerCase()}`, "1");
+      setWalletVerified(true);
+      setError(null);
+    } catch (err: unknown) {
+      setWalletVerified(false);
+      setError((err as Error).message || "MetaMask confirmation was rejected.");
+    }
+  }, [connect, signer]);
+
   const disconnect = useCallback(() => {
-    // Don't mutate state — redirect immediately so the current page never re-renders
-    document.cookie = "rs_role=; path=/; max-age=0";
+    if (account) sessionStorage.removeItem(`rs_wallet_confirmed_${account.toLowerCase()}`);
     sessionStorage.setItem("rs_disconnected", "1");
-    window.location.href = "/onboarding";
-  }, []);
+    setAccount(null);
+    setSigner(null);
+    setWalletVerified(false);
+
+    const injectedProvider = getMetaMaskProvider();
+    if (!injectedProvider) return;
+
+    injectedProvider.request({
+      method: "wallet_revokePermissions",
+      params: [{ eth_accounts: {} }],
+    }).catch(() => {
+      // Some wallets do not support permission revocation — local disconnect still succeeds.
+    });
+  }, [account]);
 
   // Auto-reconnect if MetaMask is already connected (skipped if user explicitly disconnected)
   useEffect(() => {
     async function tryReconnect() {
       try {
-        if (!window.ethereum) return;
+        const injectedProvider = getMetaMaskProvider();
+        if (!injectedProvider) return;
         if (sessionStorage.getItem("rs_disconnected")) return;
-        const accounts = await window.ethereum.request({ method: "eth_accounts" }) as string[];
+        const accounts = await injectedProvider.request({ method: "eth_accounts" }) as string[];
         if (accounts.length === 0) return;
-        const provider = new BrowserProvider(window.ethereum);
+        const provider = new BrowserProvider(injectedProvider);
         const _signer = await provider.getSigner();
-        setAccount(await _signer.getAddress());
+        const address = await _signer.getAddress();
+        setAccount(address);
         setSigner(_signer);
+        setWalletVerified(sessionStorage.getItem(`rs_wallet_confirmed_${address.toLowerCase()}`) === "1");
       } catch {
         // silently fail — user just isn't connected
       } finally {
@@ -95,7 +156,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }), [signer, readProvider]);
 
   return (
-    <WalletContext.Provider value={{ account, signer, provider: readProvider, error, walletLoading, connect, disconnect, ...contracts }}>
+    <WalletContext.Provider value={{ account, signer, provider: readProvider, error, walletVerified, walletLoading, connect, confirmWallet, disconnect, ...contracts }}>
       {children}
     </WalletContext.Provider>
   );

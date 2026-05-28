@@ -73,8 +73,8 @@ function IconBox({ Icon, color = "#888", bg = "bg-[#1e2230]", danger = false }: 
 }
 
 export default function Settings() {
-  const { currency, toggle: toggleCurrency, rate, fmt } = useCurrency();
-  const { account, disconnect } = useWallet();
+  const { currency, toggle: toggleCurrency, rate } = useCurrency();
+  const { account, connect, disconnect } = useWallet();
   const { role } = useRole();
   const { state: notifs, toggle: toggleNotif } = useNotifToggles();
   const [copied, setCopied] = useState(false);
@@ -120,14 +120,20 @@ export default function Settings() {
                 <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#DDE048]/10 text-[#DDE048]">{role === "merchant" ? "Merchant" : "Sender"}</span>
               </Row>
               <Row>
-                <IconBox Icon={Wallet} />
+                <IconBox Icon={Wallet} color={account ? "#DDE048" : "#888"} bg={account ? "bg-[#DDE048]/10" : "bg-[#1e2230]"} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-white">Connected wallet</div>
-                  <div className="text-xs text-[#555] mt-0.5 font-mono">{shortAddr}</div>
+                  <div className="text-sm font-semibold text-white">{account ? "Connected wallet" : "No wallet connected"}</div>
+                  <div className="text-xs text-[#555] mt-0.5 font-mono">{account ? shortAddr : "Connect MetaMask to use on-chain features"}</div>
                 </div>
-                <button onClick={copyAddress} className="flex items-center gap-1.5 text-xs text-[#555] hover:text-[#ccc] transition-colors">
-                  {copied ? <><Check size={13} color="#DDE048" /><span className="text-[#DDE048]">Copied</span></> : <><Copy size={13} /><span>Copy</span></>}
-                </button>
+                {account ? (
+                  <button onClick={copyAddress} className="flex items-center gap-1.5 text-xs text-[#555] hover:text-[#ccc] transition-colors">
+                    {copied ? <><Check size={13} color="#DDE048" /><span className="text-[#DDE048]">Copied</span></> : <><Copy size={13} /><span>Copy</span></>}
+                  </button>
+                ) : (
+                  <button onClick={connect} className="text-xs font-semibold text-[#DDE048] hover:text-[#c8ce30] transition-colors px-3 py-1.5 bg-[#DDE048]/10 rounded-lg">
+                    Connect
+                  </button>
+                )}
               </Row>
               <Row>
                 <IconBox Icon={Shield} />
@@ -137,16 +143,18 @@ export default function Settings() {
                 </div>
                 <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#1e2230] text-[#555]">Coming soon</span>
               </Row>
-              <Row border={false}>
-                <IconBox Icon={LogOut} danger />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-red-400">Disconnect wallet</div>
-                  <div className="text-xs text-[#555] mt-0.5">Signs you out and clears your session</div>
-                </div>
-                <button onClick={disconnect} className="text-xs font-semibold text-red-400 hover:text-red-300 transition-colors px-3 py-1.5 bg-red-500/10 rounded-lg">
-                  Disconnect
-                </button>
-              </Row>
+              {account && (
+                <Row border={false}>
+                  <IconBox Icon={LogOut} danger />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-red-400">Disconnect wallet</div>
+                    <div className="text-xs text-[#555] mt-0.5">Clears your wallet connection</div>
+                  </div>
+                  <button onClick={disconnect} className="text-xs font-semibold text-red-400 hover:text-red-300 transition-colors px-3 py-1.5 bg-red-500/10 rounded-lg">
+                    Disconnect
+                  </button>
+                </Row>
+              )}
             </Card>
           </div>
 
@@ -319,16 +327,20 @@ export default function Settings() {
               <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#DDE048]/10 text-[#DDE048] font-semibold">{role === "merchant" ? "Merchant" : "Sender"}</span>
             </MRow>
             <MRow>
-              <MIcon Icon={Wallet} />
+              <MIcon Icon={Wallet} color={account ? "#DDE048" : "#888"} />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-white">Wallet</div>
-                <div className="text-xs text-[#666] font-mono truncate">{shortAddr}</div>
+                <div className="text-sm font-semibold text-white">{account ? "Wallet" : "No wallet"}</div>
+                <div className="text-xs text-[#666] font-mono truncate">{account ? shortAddr : "Not connected"}</div>
               </div>
-              <button onClick={copyAddress} className="text-xs text-[#555]">
-                {copied ? <Check size={14} color="#DDE048" /> : <Copy size={14} />}
-              </button>
+              {account ? (
+                <button onClick={copyAddress} className="text-xs text-[#555]">
+                  {copied ? <Check size={14} color="#DDE048" /> : <Copy size={14} />}
+                </button>
+              ) : (
+                <button onClick={connect} className="text-xs text-[#DDE048] font-semibold px-2.5 py-1 bg-[#DDE048]/10 rounded-lg">Connect</button>
+              )}
             </MRow>
-            <MRow>
+            <MRow last={!account}>
               <MIcon Icon={Shield} />
               <div className="flex-1">
                 <div className="text-sm font-semibold text-white">Identity & KYC</div>
@@ -336,14 +348,16 @@ export default function Settings() {
               </div>
               <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#1e1e1e] text-[#555]">Soon</span>
             </MRow>
-            <MRow last>
-              <MIcon Icon={LogOut} danger />
-              <div className="flex-1">
-                <div className="text-sm font-semibold text-red-400">Disconnect</div>
-                <div className="text-xs text-[#666]">Sign out of your wallet</div>
-              </div>
-              <button onClick={disconnect} className="text-xs text-red-400 font-semibold px-2.5 py-1 bg-red-500/10 rounded-lg">Sign out</button>
-            </MRow>
+            {account && (
+              <MRow last>
+                <MIcon Icon={LogOut} danger />
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-red-400">Disconnect</div>
+                  <div className="text-xs text-[#666]">Clear wallet connection</div>
+                </div>
+                <button onClick={disconnect} className="text-xs text-red-400 font-semibold px-2.5 py-1 bg-red-500/10 rounded-lg">Disconnect</button>
+              </MRow>
+            )}
           </div>
         </div>
 

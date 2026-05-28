@@ -6,7 +6,13 @@ import DesktopTopbar from "./DesktopTopbar";
 import BottomNav from "./BottomNav";
 import { SidebarProvider, useSidebar } from "../context/SidebarContext";
 
-const SHELL_EXCLUDED = ["/onboarding", "/login", "/signup"];
+const SHELL_EXCLUDED_EXACT = ["/onboarding", "/login", "/signup"];
+
+function isShellExcluded(pathname: string) {
+  if (SHELL_EXCLUDED_EXACT.includes(pathname)) return true;
+  if (pathname.startsWith("/admin")) return true;
+  return false;
+}
 
 function ShellLayout({ children }: { children: ReactNode }) {
   const { collapsed } = useSidebar();
@@ -23,7 +29,7 @@ function ShellLayout({ children }: { children: ReactNode }) {
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const showShell = !SHELL_EXCLUDED.includes(pathname);
+  const showShell = !isShellExcluded(pathname);
 
   if (!showShell) {
     return <div className="min-h-screen bg-[#0e1014]">{children}</div>;

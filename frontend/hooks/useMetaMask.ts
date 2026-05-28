@@ -19,7 +19,11 @@ export function useMetaMask(): MetaMaskState {
   useEffect(() => {
     const mobile = isMobileBrowser();
     const hasEthereum = typeof window !== "undefined" && !!window.ethereum;
-    const isMetaMask = hasEthereum && !!(window.ethereum as { isMetaMask?: boolean }).isMetaMask;
+    const ethereum = hasEthereum ? window.ethereum : undefined;
+    const isMetaMask = !!(
+      ethereum?.isMetaMask ||
+      ethereum?.providers?.some((provider) => provider?.isMetaMask)
+    );
 
     if (isMetaMask) {
       setState(mobile ? "mobile-mm" : "installed");

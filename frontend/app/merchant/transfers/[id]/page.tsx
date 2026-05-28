@@ -146,7 +146,7 @@ export default function MerchantTransferDetail() {
       <div className="flex items-start justify-between mb-8">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{ color: statusColor, background: statusBg }} className="flex items-center gap-1"><Dot size={14} style={{ color: statusColor }} />{status}</span>
+            <span className="text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1" style={{ color: statusColor, background: statusBg }}><Dot size={14} style={{ color: statusColor }} />{status}</span>
             <span className="text-[#555] text-sm font-mono">{pledgeIdHex}</span>
           </div>
           <div className="text-[56px] font-extrabold text-white leading-none">
@@ -388,7 +388,7 @@ export default function MerchantTransferDetail() {
         {/* Status + amount */}
         <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-5">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ color: statusColor, background: statusBg }} className="flex items-center gap-1"><Dot size={14} style={{ color: statusColor }} />{status}</span>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1" style={{ color: statusColor, background: statusBg }}><Dot size={14} style={{ color: statusColor }} />{status}</span>
             <span className="text-[#555] text-xs font-mono">{pledgeIdHex}</span>
           </div>
           <div className="text-[32px] font-extrabold text-white">{total.toFixed(2)} <span className="text-base text-[#888] font-normal">USDC</span></div>

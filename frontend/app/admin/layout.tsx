@@ -16,7 +16,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  function signOut() {
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     document.cookie = "rs_role=; path=/; max-age=0";
     router.replace("/login");
   }
