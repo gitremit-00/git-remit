@@ -190,6 +190,7 @@ export default function SenderRequestDetail() {
     const tokenAddress = req.token === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
     const tokenRead = req.token === "USDC" ? usdcRead : usdtRead;
     const tokenWrite = req.token === "USDC" ? usdcWrite : usdtWrite;
+    if (!tokenWrite) { setTxError("Wallet not connected."); setActionLoading(false); return; }
 
     try {
       if (req.type === "partial") {
@@ -279,7 +280,8 @@ export default function SenderRequestDetail() {
   const meta = getPledgeMeta(req.merchant_address);
   const hasCounter = req.counter_total_amount !== null || req.counter_amount_per_period !== null;
   const canAct = req.status !== "cancelled" && req.status !== "confirmed" && req.status !== "rejected";
-  const canPay = (req.status === "accepted") || (req.status === "renegotiating" && hasCounter);
+  // "confirmed" means merchant created pledge on-chain — payer can now deposit
+  const canPay = (req.status === "accepted" || req.status === "confirmed") || (req.status === "renegotiating" && hasCounter);
 
   const termRows = req.type === "partial" ? (
     <>

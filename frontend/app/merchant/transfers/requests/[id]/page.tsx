@@ -8,11 +8,13 @@ import {
 } from "lucide-react";
 import Header from "../../../../../components/Header";
 import LoadingSpinner from "../../../../../components/LoadingSpinner";
+import { ethers } from "ethers";
 import { useWallet } from "../../../../../context/WalletContext";
+import { CONTRACTS } from "../../../../../contracts/addresses";
 import {
   getTransferRequest, acceptTransferRequest, merchantCounterPropose,
   cancelTransferRequest, sendTransferRequestNotification,
-  type TransferRequest,
+  confirmTransferRequest, type TransferRequest,
 } from "../../../../../lib/supabase";
 import { getPledgeMeta } from "../../../../../lib/pledgeMeta";
 
@@ -61,7 +63,7 @@ function TermRow({ label, value, accent, last }: { label: string; value: string;
 export default function MerchantRequestDetail() {
   const params = useParams();
   const router = useRouter();
-  const { account } = useWallet();
+  const { account, signer, pledgeWrite } = useWallet();
   const id = params.id as string;
 
   const [req, setReq] = useState<TransferRequest | null>(null);
@@ -88,12 +90,63 @@ export default function MerchantRequestDetail() {
   }
 
   async function handleAccept() {
-    if (!req) return;
-    setActionLoading(true);
-    await acceptTransferRequest(id);
-    await sendTransferRequestNotification(id, req.sender_address, "accepted");
-    await loadRequest();
-    setActionLoading(false);
+    if (!req || !signer || !pledgeWrite) return;
+    setActionLoading(true); setError("");
+    try {
+      // Step 1 — determine agreed terms (use counter if renegotiating)
+      const useCounter = req.status === "renegotiating" && req.counter_total_amount !== null;
+      const tokenAddress = req.token === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
+
+      let txHash: string;
+      let pledgeId: string;
+
+      if (req.type === "partial") {
+        const total = useCounter ? req.counter_total_amount! : req.total_amount!;
+        const commitDate = useCounter ? req.counter_commitment_date! : req.commitment_date!;
+        const totalAmt = ethers.parseUnits(total.toFixed(6), 6);
+        const commitTs = Math.floor(new Date(commitDate).getTime() / 1000);
+
+        // Step 2 — merchant calls createPledge on-chain
+        const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [
+          tokenAddress, req.sender_address, totalAmt, commitTs,
+        ]);
+        const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
+        const receipt = await tx.wait();
+        txHash = tx.hash;
+
+        // Extract pledgeId from PledgeCreated event (topic[1])
+        const event = receipt?.logs?.find((l: { topics: string[] }) => l.topics.length >= 2);
+        pledgeId = event ? String(BigInt(event.topics[1])) : "unknown";
+      } else {
+        // Recurring pledge
+        const amtPerPeriod = useCounter ? req.counter_amount_per_period! : req.amount_per_period!;
+        const intervalSecs = useCounter ? req.counter_interval_seconds! : req.interval_seconds!;
+        const totalPeriods = useCounter ? req.counter_total_periods! : req.total_periods!;
+        const firstDue = useCounter ? req.counter_first_due_date! : req.first_due_date!;
+        const amtAmt = ethers.parseUnits(amtPerPeriod.toFixed(6), 6);
+        const firstDueTs = Math.floor(new Date(firstDue).getTime() / 1000);
+
+        const createData = pledgeWrite.interface.encodeFunctionData("createRecurringPledge", [
+          tokenAddress, req.sender_address, amtAmt, intervalSecs, totalPeriods, firstDueTs,
+        ]);
+        const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
+        const receipt = await tx.wait();
+        txHash = tx.hash;
+
+        const event = receipt?.logs?.find((l: { topics: string[] }) => l.topics.length >= 2);
+        pledgeId = event ? String(BigInt(event.topics[1])) : "unknown";
+      }
+
+      // Step 3 — save pledgeId to Supabase and mark accepted
+      await confirmTransferRequest(id, pledgeId, txHash);
+      await sendTransferRequestNotification(id, req.sender_address, "accepted");
+      await loadRequest();
+    } catch (err: unknown) {
+      const e = err as { reason?: string; message?: string };
+      setError(e.reason ?? e.message ?? "Transaction failed.");
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   async function handleCancel() {
