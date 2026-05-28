@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ethers } from "ethers";
-import { Copy, LogOut, ShieldCheck, ArrowRight, Users, BadgeCheck, Store, FileText, Info, X, Pencil, Check, Loader2, Phone, MapPin } from "lucide-react";
+import { Copy, LogOut, ShieldCheck, ShieldX, ArrowRight, Users, BadgeCheck, Store, FileText, Info, X, Pencil, Check, Loader2, Phone, MapPin } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import { useRole } from "../../context/RoleContext";
 import { UserProfile, uploadAvatar } from "../../lib/supabase";
@@ -30,6 +30,7 @@ export default function Profile() {
 
   // Profile card state
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [kycStatus, setKycStatus] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -49,9 +50,16 @@ export default function Profile() {
   useEffect(() => {
     if (account) {
       loadAll();
-      fetch(`/api/profile?address=${account}`)
+      fetch("/api/auth/me")
         .then(r => r.ok ? r.json() : null)
-        .then(data => { if (data) setProfile(data); });
+        .then(me => {
+          if (!me) return;
+          if (me.kycStatus) setKycStatus(me.kycStatus);
+          if (!me.userId) return;
+          fetch(`/api/profile?address=${me.userId}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data) setProfile(data); });
+        });
     }
   }, [account, role]);
 
@@ -235,16 +243,15 @@ export default function Profile() {
         {/* Left column */}
         <div className="space-y-5">
           {/* Profile card */}
-          <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl p-6">
-            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-4">PROFILE</div>
-            <div className="flex items-start gap-4">
-              {/* Avatar */}
+          <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl overflow-hidden">
+            {/* Top banner with avatar */}
+            <div className="bg-gradient-to-r from-[#1a1d24] to-[#13161c] px-6 pt-6 pb-5 flex items-center gap-4 border-b border-[#1e2230]">
               <div className="relative shrink-0">
                 <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarFileChange} />
                 <button
                   onClick={() => avatarInputRef.current?.click()}
                   disabled={avatarUploading}
-                  className="w-16 h-16 rounded-2xl overflow-hidden bg-[#1e2230] border border-[#2a2f3d] flex items-center justify-center hover:border-[#DDE048]/40 transition-colors group disabled:opacity-60"
+                  className="w-[60px] h-[60px] rounded-2xl overflow-hidden bg-[#1e2230] border-2 border-[#2a2f3d] flex items-center justify-center hover:border-[#DDE048]/40 transition-colors group disabled:opacity-60"
                 >
                   {profile?.avatar_url ? (
                     <img src={`${profile.avatar_url}?t=${avatarCacheBust}`} alt="avatar" className="w-full h-full object-cover" />
@@ -253,65 +260,84 @@ export default function Profile() {
                       {(profile?.name ?? displayName ?? account)?.slice(0, 1).toUpperCase()}
                     </span>
                   )}
-                  <span className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl">
-                    {avatarUploading ? <Loader2 size={14} className="text-white animate-spin" /> : <Pencil size={14} className="text-white" />}
+                  <span className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl">
+                    {avatarUploading ? <Loader2 size={14} className="text-white animate-spin" /> : <Pencil size={13} className="text-white" />}
                   </span>
                 </button>
               </div>
-              {/* Fields */}
-              <div className="flex-1 space-y-2.5 min-w-0">
-                <InlineField
-                  field="name"
-                  value={profile?.name ?? null}
-                  placeholder="Add your name"
-                  editingField={editingField}
-                  editValue={editValue}
-                  saving={saving}
-                  onEdit={startEdit}
-                  onSave={saveEdit}
-                  onCancel={() => setEditingField(null)}
-                  onEditValueChange={setEditValue}
-                />
-                <InlineField
-                  field="bio"
-                  value={profile?.bio ?? null}
-                  placeholder="Add a short bio"
-                  multiline
-                  editingField={editingField}
-                  editValue={editValue}
-                  saving={saving}
-                  onEdit={startEdit}
-                  onSave={saveEdit}
-                  onCancel={() => setEditingField(null)}
-                  onEditValueChange={setEditValue}
-                />
-                <InlineField
-                  field="phone"
-                  value={profile?.phone ?? null}
-                  placeholder="Add phone number"
-                  editingField={editingField}
-                  editValue={editValue}
-                  saving={saving}
-                  onEdit={startEdit}
-                  onSave={saveEdit}
-                  onCancel={() => setEditingField(null)}
-                  onEditValueChange={setEditValue}
-                  icon={<Phone size={13} />}
-                />
-                <InlineField
-                  field="country"
-                  value={profile?.country ?? null}
-                  placeholder="Add country"
-                  editingField={editingField}
-                  editValue={editValue}
-                  saving={saving}
-                  onEdit={startEdit}
-                  onSave={saveEdit}
-                  onCancel={() => setEditingField(null)}
-                  onEditValueChange={setEditValue}
-                  icon={<MapPin size={13} />}
-                />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white font-bold text-base leading-tight truncate">
+                    {profile?.name ?? displayName ?? "Unnamed"}
+                  </span>
+                  {/* Verification pill */}
+                  {kycStatus === "verified" ? (
+                    <span className="inline-flex items-center gap-1 text-[#DDE048] text-[11px] font-semibold">
+                      {isMerchant ? <Store size={11} /> : <BadgeCheck size={11} />}
+                      {isMerchant ? "Verified Merchant" : "Verified OFW"}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[#ef4444] text-[11px] font-semibold">
+                      <ShieldX size={11} /> Not Verified
+                    </span>
+                  )}
+                </div>
+                <div className="text-[#555] text-xs mt-1 font-mono truncate">{account.slice(0, 10)}…{account.slice(-8)}</div>
               </div>
+            </div>
+            {/* Editable fields */}
+            <div className="px-6 py-4 space-y-2.5">
+              <InlineField
+                field="name"
+                value={profile?.name ?? null}
+                placeholder="Add your name"
+                editingField={editingField}
+                editValue={editValue}
+                saving={saving}
+                onEdit={startEdit}
+                onSave={saveEdit}
+                onCancel={() => setEditingField(null)}
+                onEditValueChange={setEditValue}
+              />
+              <InlineField
+                field="bio"
+                value={profile?.bio ?? null}
+                placeholder="Add a short bio"
+                multiline
+                editingField={editingField}
+                editValue={editValue}
+                saving={saving}
+                onEdit={startEdit}
+                onSave={saveEdit}
+                onCancel={() => setEditingField(null)}
+                onEditValueChange={setEditValue}
+              />
+              <InlineField
+                field="phone"
+                value={profile?.phone ?? null}
+                placeholder="Add phone number"
+                editingField={editingField}
+                editValue={editValue}
+                saving={saving}
+                onEdit={startEdit}
+                onSave={saveEdit}
+                onCancel={() => setEditingField(null)}
+                onEditValueChange={setEditValue}
+                icon={<Phone size={13} />}
+              />
+              <InlineField
+                field="country"
+                value={profile?.country ?? null}
+                placeholder="Add country"
+                editingField={editingField}
+                editValue={editValue}
+                saving={saving}
+                onEdit={startEdit}
+                onSave={saveEdit}
+                onCancel={() => setEditingField(null)}
+                onEditValueChange={setEditValue}
+                icon={<MapPin size={13} />}
+              />
             </div>
           </div>
           {/* Identity hero */}
@@ -337,12 +363,6 @@ export default function Profile() {
                     <span className="text-sm font-bold px-3 py-1 rounded-full" style={{ color: scoreBg(rep.score), background: scoreBg(rep.score) + "22" }}>
                       {scoreLabel(rep.score)}
                     </span>
-                    <div className="flex items-center gap-1.5">
-                      {isMerchant
-                        ? <><Store size={13} color="#DDE048" /><span className="text-[#DDE048] text-xs font-semibold">Verified Merchant</span></>
-                        : <><BadgeCheck size={15} color="#DDE048" /><span className="text-[#DDE048] text-xs font-semibold">Verified OFW</span></>
-                      }
-                    </div>
                   </div>
                 )}
                 <div className="text-[#555] text-xs font-mono">{account.slice(0, 14)}…{account.slice(-12)}</div>
@@ -527,13 +547,13 @@ export default function Profile() {
         </div>
 
         {/* Profile card (mobile) */}
-        <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 mb-3.5">
-          <div className="flex items-start gap-3">
-            {/* Avatar (mobile reuses same hidden input) */}
+        <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl overflow-hidden mb-3.5">
+          {/* Top banner */}
+          <div className="bg-gradient-to-r from-[#161920] to-[#11141A] px-4 pt-4 pb-4 flex items-center gap-3 border-b border-[#1F2127]">
             <button
               onClick={() => avatarInputRef.current?.click()}
               disabled={avatarUploading}
-              className="relative w-14 h-14 rounded-xl overflow-hidden bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center shrink-0 disabled:opacity-60"
+              className="relative w-[52px] h-[52px] rounded-xl overflow-hidden bg-[#1a1a1a] border-2 border-[#2a2a2a] flex items-center justify-center shrink-0 disabled:opacity-60"
             >
               {profile?.avatar_url ? (
                 <img src={`${profile.avatar_url}?t=${avatarCacheBust}`} alt="avatar" className="w-full h-full object-cover" />
@@ -546,60 +566,78 @@ export default function Profile() {
                 {avatarUploading ? <Loader2 size={12} className="text-white animate-spin" /> : <Pencil size={12} className="text-white opacity-60" />}
               </span>
             </button>
-            {/* Fields */}
-            <div className="flex-1 space-y-2 min-w-0">
-              <InlineField
-                field="name"
-                value={profile?.name ?? null}
-                placeholder="Add your name"
-                editingField={editingField}
-                editValue={editValue}
-                saving={saving}
-                onEdit={startEdit}
-                onSave={saveEdit}
-                onCancel={() => setEditingField(null)}
-                onEditValueChange={setEditValue}
-              />
-              <InlineField
-                field="bio"
-                value={profile?.bio ?? null}
-                placeholder="Add a short bio"
-                multiline
-                editingField={editingField}
-                editValue={editValue}
-                saving={saving}
-                onEdit={startEdit}
-                onSave={saveEdit}
-                onCancel={() => setEditingField(null)}
-                onEditValueChange={setEditValue}
-              />
-              <InlineField
-                field="phone"
-                value={profile?.phone ?? null}
-                placeholder="Phone"
-                editingField={editingField}
-                editValue={editValue}
-                saving={saving}
-                onEdit={startEdit}
-                onSave={saveEdit}
-                onCancel={() => setEditingField(null)}
-                onEditValueChange={setEditValue}
-                icon={<Phone size={12} />}
-              />
-              <InlineField
-                field="country"
-                value={profile?.country ?? null}
-                placeholder="Country"
-                editingField={editingField}
-                editValue={editValue}
-                saving={saving}
-                onEdit={startEdit}
-                onSave={saveEdit}
-                onCancel={() => setEditingField(null)}
-                onEditValueChange={setEditValue}
-                icon={<MapPin size={12} />}
-              />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-white font-bold text-sm leading-tight truncate">
+                  {profile?.name ?? displayName ?? "Unnamed"}
+                </span>
+                {kycStatus === "verified" ? (
+                  <span className="inline-flex items-center gap-1 text-[#DDE048] text-[10px] font-semibold">
+                    {isMerchant ? <Store size={10} /> : <BadgeCheck size={10} />}
+                    {isMerchant ? "Verified Merchant" : "Verified OFW"}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[#ef4444] text-[10px] font-semibold">
+                    <ShieldX size={10} /> Not Verified
+                  </span>
+                )}
+              </div>
+              <div className="text-[#555] text-[11px] mt-0.5 font-mono truncate">{account.slice(0, 10)}…{account.slice(-8)}</div>
             </div>
+          </div>
+          {/* Editable fields */}
+          <div className="px-4 py-3 space-y-2">
+            <InlineField
+              field="name"
+              value={profile?.name ?? null}
+              placeholder="Add your name"
+              editingField={editingField}
+              editValue={editValue}
+              saving={saving}
+              onEdit={startEdit}
+              onSave={saveEdit}
+              onCancel={() => setEditingField(null)}
+              onEditValueChange={setEditValue}
+            />
+            <InlineField
+              field="bio"
+              value={profile?.bio ?? null}
+              placeholder="Add a short bio"
+              multiline
+              editingField={editingField}
+              editValue={editValue}
+              saving={saving}
+              onEdit={startEdit}
+              onSave={saveEdit}
+              onCancel={() => setEditingField(null)}
+              onEditValueChange={setEditValue}
+            />
+            <InlineField
+              field="phone"
+              value={profile?.phone ?? null}
+              placeholder="Phone"
+              editingField={editingField}
+              editValue={editValue}
+              saving={saving}
+              onEdit={startEdit}
+              onSave={saveEdit}
+              onCancel={() => setEditingField(null)}
+              onEditValueChange={setEditValue}
+              icon={<Phone size={12} />}
+            />
+            <InlineField
+              field="country"
+              value={profile?.country ?? null}
+              placeholder="Country"
+              editingField={editingField}
+              editValue={editValue}
+              saving={saving}
+              onEdit={startEdit}
+              onSave={saveEdit}
+              onCancel={() => setEditingField(null)}
+              onEditValueChange={setEditValue}
+              icon={<MapPin size={12} />}
+            />
           </div>
         </div>
 
@@ -624,12 +662,6 @@ export default function Profile() {
                 {rep?.score ?? "–"}<span className="text-base font-normal text-[#888]"> / 100</span>
               </div>
               {rep && <div className="text-[#DDE048] text-[11px] font-bold mt-1.5">{scoreLabel(rep.score)}</div>}
-              <div className="flex items-center gap-1 mt-2">
-                {isMerchant
-                  ? <><Store size={11} color="#DDE048" /><span className="text-[#DDE048] text-[10px] font-semibold">Verified Merchant</span></>
-                  : <><BadgeCheck size={11} color="#DDE048" /><span className="text-[#DDE048] text-[10px] font-semibold">Verified OFW</span></>
-                }
-              </div>
             </div>
             {rep && <div className="shrink-0"><CircularScore score={rep.score} size={80} /></div>}
           </div>
