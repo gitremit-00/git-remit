@@ -9,7 +9,7 @@ import LoadingSpinner from "../../components/LoadingSpinner";
 import { CONTRACTS } from "../../contracts/addresses";
 import RemittancePledgeABI from "../../contracts/RemittancePledge.json";
 import MockUSDCABI from "../../contracts/MockTokens.json";
-import { getSenderNotifications, markNotificationRead, type PaymentRequestNotification } from "../../lib/supabase";
+import { getSenderNotifications, markNotificationRead, getTransferRequestNotifications, markTransferNotificationRead, type PaymentRequestNotification, type TransferRequestNotification } from "../../lib/supabase";
 
 interface ActivityItem {
   id: string;
@@ -69,6 +69,7 @@ export default function Notifications() {
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [paymentReqNotifs, setPaymentReqNotifs] = useState<PaymentRequestNotification[]>([]);
+  const [transferReqNotifs, setTransferReqNotifs] = useState<TransferRequestNotification[]>([]);
   const [deadlineWarnings, setDeadlineWarnings] = useState<DeadlineWarning[]>([]);
   const [tab, setTab] = useState<"all" | "requests" | "sent" | "received">("all");
   const [page, setPage] = useState(1);
@@ -82,7 +83,7 @@ export default function Notifications() {
   async function loadAll() {
     setLoading(true);
     try {
-      await Promise.all([loadActivity(), loadPaymentReqNotifs()]);
+      await Promise.all([loadActivity(), loadPaymentReqNotifs(), loadTransferReqNotifs()]);
     } finally { setLoading(false); }
   }
 
@@ -109,6 +110,11 @@ export default function Notifications() {
   async function loadPaymentReqNotifs() {
     const data = await getSenderNotifications(account!);
     setPaymentReqNotifs(data);
+  }
+
+  async function loadTransferReqNotifs() {
+    const data = await getTransferRequestNotifications(account!);
+    setTransferReqNotifs(data);
   }
 
   async function loadActivity() {
@@ -414,6 +420,61 @@ export default function Notifications() {
             </div>
           )}
 
+          {/* Transfer requests (off-chain negotiation notifications) */}
+          {showRequests && transferReqNotifs.length > 0 && (
+            <div className="mb-6">
+              <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">TRANSFER REQUESTS</div>
+              <div className="space-y-2">
+                {transferReqNotifs.map((n) => {
+                  const r = n.transfer_requests;
+                  const trType = n.type;
+                  const label: Record<string, string> = {
+                    new_request: "New transfer request",
+                    renegotiated: "Merchant proposed new terms",
+                    accepted: "Merchant accepted your request",
+                    rejected: "Merchant rejected your request",
+                    cancelled: "Request was cancelled",
+                    confirmed: "Transfer confirmed on-chain",
+                  };
+                  const color: Record<string, string> = {
+                    new_request: "#DDE048", renegotiated: "#60a5fa", accepted: "#22c55e",
+                    rejected: "#ef4444", cancelled: "#888", confirmed: "#22c55e",
+                  };
+                  const isMerchantNotif = r && r.merchant_address === account?.toLowerCase();
+                  const detailHref = isMerchantNotif
+                    ? `/merchant/transfers/requests/${n.request_id}`
+                    : `/pledges/requests/${n.request_id}`;
+                  return (
+                    <Link key={n.id} href={detailHref}
+                      onClick={() => markTransferNotificationRead(n.id)}
+                      className={`flex items-center gap-4 p-4 rounded-2xl border transition-colors no-underline text-inherit ${
+                        n.read ? "bg-[#13161c] border-[#1e2230] hover:border-[#DDE048]/30" : "bg-[#1a1d12] border-[#DDE048]/20 hover:border-[#DDE048]/30"
+                      }`}>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                        style={{ background: color[trType] + "22", border: `1px solid ${color[trType]}33` }}>
+                        <FileText size={18} color={color[trType]} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="font-bold text-white text-sm truncate">{label[trType] ?? trType}</span>
+                          {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
+                        </div>
+                        {r && (
+                          <div className="text-xs text-[#888]">
+                            {r.type === "installment"
+                              ? `${r.amount_per_period?.toFixed(2) ?? "—"} ${r.token} × ${r.total_periods ?? "?"} payments`
+                              : `${r.total_amount?.toFixed(2) ?? "—"} ${r.token}`}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-[#DDE048] text-xs font-bold shrink-0">View →</div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Payment requests */}
           {showRequests && paymentReqNotifs.length > 0 && (
             <div className="mb-6">
@@ -533,6 +594,50 @@ export default function Notifications() {
                 <span className="text-[#f59e0b] text-xs font-bold shrink-0">Pay →</span>
               </Link>
             ))}
+          </div>
+        )}
+
+        {/* Transfer requests mobile */}
+        {!loading && account && showRequests && transferReqNotifs.length > 0 && (
+          <div className="mb-4">
+            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-2">TRANSFER REQUESTS</div>
+            {transferReqNotifs.map((n) => {
+              const r = n.transfer_requests;
+              const trType = n.type;
+              const label: Record<string, string> = {
+                new_request: "New transfer request", renegotiated: "Merchant proposed new terms",
+                accepted: "Merchant accepted your request", rejected: "Merchant rejected",
+                cancelled: "Request cancelled", confirmed: "Transfer confirmed",
+              };
+              const color: Record<string, string> = {
+                new_request: "#DDE048", renegotiated: "#60a5fa", accepted: "#22c55e",
+                rejected: "#ef4444", cancelled: "#888", confirmed: "#22c55e",
+              };
+              const isMerchantNotif = r && r.merchant_address === account?.toLowerCase();
+              const detailHref = isMerchantNotif ? `/merchant/transfers/requests/${n.request_id}` : `/pledges/requests/${n.request_id}`;
+              return (
+                <Link key={n.id} href={detailHref}
+                  onClick={() => markTransferNotificationRead(n.id)}
+                  className={`flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border no-underline text-inherit ${n.read ? "border-[#1F2127] bg-[#11141A]" : "border-[#DDE048]/20 bg-[#1a1d12]"}`}>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ background: color[trType] + "22", border: `1px solid ${color[trType]}33` }}>
+                    <FileText size={18} color={color[trType]} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-bold text-white text-sm truncate">{label[trType] ?? trType}</span>
+                      {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
+                    </div>
+                    {r && (
+                      <div className="text-xs text-[#888]">
+                        {r.type === "installment" ? `${r.amount_per_period?.toFixed(2) ?? "—"} ${r.token} × ${r.total_periods ?? "?"}` : `${r.total_amount?.toFixed(2) ?? "—"} ${r.token}`}
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-[#DDE048] text-xs font-bold shrink-0">View →</span>
+                </Link>
+              );
+            })}
           </div>
         )}
 

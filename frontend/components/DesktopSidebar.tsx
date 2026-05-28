@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Send, FileText, Users, Wallet, Bell, Shield, Settings, HelpCircle, PanelLeftClose, PanelLeftOpen, ChevronRight } from "lucide-react";
+import { Home, Send, FileText, Users, Wallet, Bell, Shield, Settings, HelpCircle, PanelLeftClose, PanelLeftOpen, ChevronRight, ClipboardList } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
 import { useRole } from "../context/RoleContext";
 import Logo from "./Logo";
@@ -16,6 +16,7 @@ const senderNav = [
   { href: "/", label: "Dashboard", Icon: Home },
   { href: "/new-transfer", label: "New transfer", Icon: Send, arrow: true },
   { href: "/pledges", label: "My Transfers", Icon: FileText },
+  { href: "/pledges/requests", label: "My Requests", Icon: ClipboardList },
   { href: "/recipients", label: "Recipients", Icon: Users },
   { href: "/wallet", label: "Wallet", Icon: Wallet },
   { href: "/notifications", label: "Activity", Icon: Bell, badge: true },

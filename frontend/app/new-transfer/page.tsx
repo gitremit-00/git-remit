@@ -15,7 +15,7 @@ import { CONTRACTS } from "../../contracts/addresses";
 import { useCurrency } from "../../context/CurrencyContext";
 import ProgressBar from "../../components/ProgressBar";
 import { savePledgeMeta, getPledgeMeta } from "../../lib/pledgeMeta";
-import { getPaymentRequest, type PaymentRequest, markNotificationRead, updatePaymentRequestStatus } from "../../lib/supabase";
+import { getPaymentRequest, type PaymentRequest, markNotificationRead, updatePaymentRequestStatus, createTransferRequest, sendTransferRequestNotification } from "../../lib/supabase";
 import Link from "next/link";
 
 type PaymentType = "full" | "partial" | "installment";
@@ -70,6 +70,7 @@ export default function NewTransfer() {
   const [txStatus, setTxStatus] = useState("");
   const [txError, setTxError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
 
   useEffect(() => {
     const to = searchParams.get("to");
@@ -86,6 +87,10 @@ export default function NewTransfer() {
     } else if (to) {
       const known = getPledgeMeta(to);
       setForm((f) => ({ ...f, merchant: to, merchantName: known?.name ?? "" }));
+      if (known?.type) {
+        setTransferMode(known.type);
+        setStep(STEP_RECIPIENT);
+      }
     }
   }, []);
 
@@ -287,7 +292,7 @@ export default function NewTransfer() {
       const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [tokenAddress, form.merchant, totalAmt, initDeposit, commitTs]);
       const createTx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
       await createTx.wait();
-      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note });
+      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
       if (requestId) updatePaymentRequestStatus(requestId, "fulfilled");
       try { localStorage.setItem("remitsafe_notif_dirty", "true"); window.dispatchEvent(new Event("storage")); } catch { /* ignore */ }
       setTxStatus("done");
@@ -312,13 +317,44 @@ export default function NewTransfer() {
       ]);
       const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data });
       await tx.wait();
-      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note });
+      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
       try { localStorage.setItem("remitsafe_notif_dirty", "true"); window.dispatchEvent(new Event("storage")); } catch { /* ignore */ }
       setTxStatus("done");
       setTimeout(() => router.push("/pledges"), 1800);
     } catch (err: unknown) {
       setTxError(parseContractError(err));
       setTxStatus(""); setLoading(false);
+    }
+  }
+
+  async function sendRequest() {
+    if (!account) return;
+    setLoading(true); setTxError("");
+    try {
+      const isInstallment = paymentType === "installment";
+      const req = await createTransferRequest({
+        sender_address: account,
+        merchant_address: form.merchant,
+        type: isInstallment ? "installment" : "partial",
+        token: selectedToken,
+        total_amount: isInstallment ? null : parseFloat(form.totalAmount),
+        initial_deposit: isInstallment ? null : parseFloat(form.initialDeposit),
+        commitment_date: isInstallment ? null : (form.commitmentDate ? new Date(form.commitmentDate).toISOString() : null),
+        amount_per_period: isInstallment ? parseFloat(form.totalAmount) : null,
+        interval_seconds: isInstallment ? installmentInterval : null,
+        total_periods: isInstallment ? installmentCount : null,
+        first_due_date: isInstallment ? (form.commitmentDate ? new Date(form.commitmentDate).toISOString() : null) : null,
+        note: form.note || null,
+      });
+      if (!req) { setTxError("Failed to send request. Please try again."); setLoading(false); return; }
+      await sendTransferRequestNotification(req.id, form.merchant, "new_request");
+      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
+      setRequestSent(true);
+      setTimeout(() => router.push("/pledges/requests"), 1800);
+    } catch {
+      setTxError("Failed to send request. Please try again.");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -790,22 +826,46 @@ export default function NewTransfer() {
 
               {step === STEP_REVIEW && (
                 <>
-                  <div className="flex items-start gap-2 bg-[#0e1014] border border-[#1e2230] rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
-                    <Shield size={13} color="#555" className="shrink-0 mt-0.5" />
-                    Secured by smart contract · Visible to {form.merchantName || "merchant"} as soon as you sign.
-                  </div>
-                  <button
-                    onClick={submit} disabled={loading}
-                    className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#c8ce30] transition-colors"
-                  >
-                    {loading ? (txStatus === "done" ? "✓ Done!" : "Processing…") : paymentType === "installment" ? "Create Installment Plan" : "Confirm & Lock Funds"}
-                  </button>
-                  <button className="w-full text-[#555] text-sm py-2.5 hover:text-[#888] transition-colors">Save as draft</button>
-                  <p className="text-[11px] text-[#444] text-center leading-relaxed">
-                    {paymentType === "installment"
-                      ? "MetaMask will ask you to sign one transaction to create the recurring pledge."
-                      : `MetaMask will ask you to approve two transactions: ${selectedToken} spend + pledge creation`}
-                  </p>
+                  {transferMode === "merchant" && (paymentType === "partial" || paymentType === "installment") ? (
+                    <>
+                      <div className="flex items-start gap-2 bg-[#DDE048]/5 border border-[#DDE048]/20 rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
+                        <FileText size={13} color="#DDE048" className="shrink-0 mt-0.5" />
+                        Your request will be sent to the merchant for review. No funds are locked yet.
+                      </div>
+                      {requestSent ? (
+                        <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2">
+                          <CheckCircle2 size={16} /> Request sent! Redirecting…
+                        </div>
+                      ) : (
+                        <button
+                          onClick={sendRequest} disabled={loading}
+                          className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#c8ce30] transition-colors"
+                        >
+                          {loading ? "Sending…" : "Send Request →"}
+                        </button>
+                      )}
+                      {txError && <p className="text-red-400 text-[12px] mt-2 text-center">{txError}</p>}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-start gap-2 bg-[#0e1014] border border-[#1e2230] rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
+                        <Shield size={13} color="#555" className="shrink-0 mt-0.5" />
+                        Secured by smart contract · Visible to {form.merchantName || "merchant"} as soon as you sign.
+                      </div>
+                      <button
+                        onClick={submit} disabled={loading}
+                        className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#c8ce30] transition-colors"
+                      >
+                        {loading ? (txStatus === "done" ? "✓ Done!" : "Processing…") : paymentType === "installment" ? "Create Installment Plan" : "Confirm & Lock Funds"}
+                      </button>
+                      <button className="w-full text-[#555] text-sm py-2.5 hover:text-[#888] transition-colors">Save as draft</button>
+                      <p className="text-[11px] text-[#444] text-center leading-relaxed">
+                        {paymentType === "installment"
+                          ? "MetaMask will ask you to sign one transaction to create the recurring pledge."
+                          : `MetaMask will ask you to approve two transactions: ${selectedToken} spend + pledge creation`}
+                      </p>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -1064,17 +1124,32 @@ export default function NewTransfer() {
             <TxGuard active={loading && txStatus !== "done"} steps={txGuardSteps} />
 
             {step !== STEP_TYPE && (
-              <button
-                className="w-full bg-[#DDE048] text-black border-0 rounded-2xl py-[17px] text-base font-bold cursor-pointer mt-6 mb-6 disabled:opacity-50"
-                style={{ opacity: canNext ? 1 : 0.5 }}
-                onClick={step < STEP_REVIEW ? nextStep : submit}
-                disabled={!canNext || loading}>
-                {loading
-                  ? (txStatus === "done" ? "✓ Done!" : "Processing...")
-                  : step < STEP_REVIEW
-                    ? "Continue →"
-                    : paymentType === "installment" ? "Create Installment Plan" : "Confirm & Lock Funds"}
-              </button>
+              step === STEP_REVIEW && transferMode === "merchant" && (paymentType === "partial" || paymentType === "installment") ? (
+                requestSent ? (
+                  <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-base rounded-2xl py-[17px] flex items-center justify-center gap-2 mt-6 mb-6">
+                    <CheckCircle2 size={18} /> Request sent! Redirecting…
+                  </div>
+                ) : (
+                  <button
+                    className="w-full bg-[#DDE048] text-black border-0 rounded-2xl py-[17px] text-base font-bold cursor-pointer mt-6 mb-6 disabled:opacity-50"
+                    onClick={sendRequest}
+                    disabled={loading}>
+                    {loading ? "Sending…" : "Send Request →"}
+                  </button>
+                )
+              ) : (
+                <button
+                  className="w-full bg-[#DDE048] text-black border-0 rounded-2xl py-[17px] text-base font-bold cursor-pointer mt-6 mb-6 disabled:opacity-50"
+                  style={{ opacity: canNext ? 1 : 0.5 }}
+                  onClick={step < STEP_REVIEW ? nextStep : submit}
+                  disabled={!canNext || loading}>
+                  {loading
+                    ? (txStatus === "done" ? "✓ Done!" : "Processing...")
+                    : step < STEP_REVIEW
+                      ? "Continue →"
+                      : paymentType === "installment" ? "Create Installment Plan" : "Confirm & Lock Funds"}
+                </button>
+              )
             )}
           </div>
         )}

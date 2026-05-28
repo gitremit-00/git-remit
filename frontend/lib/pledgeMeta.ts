@@ -1,12 +1,14 @@
 export interface PledgeMeta {
   name: string;
   note: string;
+  type?: "merchant" | "p2p";
 }
 
-export function savePledgeMeta(merchantAddr: string, meta: PledgeMeta) {
+export function savePledgeMeta(merchantAddr: string, meta: Partial<PledgeMeta> & { name: string; note: string }) {
   try {
     const all: Record<string, PledgeMeta> = JSON.parse(localStorage.getItem("rs_meta") ?? "{}");
-    all[merchantAddr.toLowerCase()] = meta;
+    const existing = all[merchantAddr.toLowerCase()] ?? {};
+    all[merchantAddr.toLowerCase()] = { ...existing, ...meta };
     localStorage.setItem("rs_meta", JSON.stringify(all));
   } catch {}
 }
