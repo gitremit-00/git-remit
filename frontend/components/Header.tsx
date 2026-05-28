@@ -7,8 +7,7 @@ import { useEffect, useState } from "react";
 import { useRole } from "../context/RoleContext";
 import { useWallet } from "../context/WalletContext";
 
-const STORAGE_KEY = "remitsafe_read_notifs";
-const NOTIF_COUNT_KEY = "remitsafe_notif_count";
+const NOTIF_DIRTY_KEY = "remitsafe_notif_dirty";
 
 interface HeaderProps {
   title?: string;
@@ -23,14 +22,16 @@ export default function Header({ title, back, onBack }: HeaderProps) {
   const { account, disconnect } = useWallet();
 
   useEffect(() => {
-    // Show badge if stored notification count exceeds read count
-    try {
-      const total = parseInt(localStorage.getItem(NOTIF_COUNT_KEY) ?? "0");
-      const read = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]").length;
-      setHasUnread(total > read);
-    } catch {
-      setHasUnread(false);
+    function checkUnread() {
+      try {
+        setHasUnread(localStorage.getItem(NOTIF_DIRTY_KEY) === "true");
+      } catch {
+        setHasUnread(false);
+      }
     }
+    checkUnread();
+    window.addEventListener("storage", checkUnread);
+    return () => window.removeEventListener("storage", checkUnread);
   }, []);
 
   return (

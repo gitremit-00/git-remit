@@ -4,7 +4,7 @@ import LoadingSpinner from "../../components/LoadingSpinner";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import Link from "next/link";
-import { Link2, Inbox, Clock, Check, CheckCircle2, AlertCircle, XCircle, Send } from "lucide-react";
+import { Link2, Inbox, Clock, Check, CheckCircle2, AlertCircle, XCircle, Send, Copy, CheckCheck } from "lucide-react";
 import { useWallet } from "../../context/WalletContext";
 import ProgressBar from "../../components/ProgressBar";
 import { useCurrency } from "../../context/CurrencyContext";
@@ -42,6 +42,13 @@ export default function Pledges() {
   const [tab, setTab] = useState<Tab>("All");
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
   const [loading, setLoading] = useState(false);
+  const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
+
+  function copyAddress(addr: string) {
+    navigator.clipboard.writeText(addr);
+    setCopiedAddr(addr);
+    setTimeout(() => setCopiedAddr(null), 1500);
+  }
 
   useEffect(() => { if (account) loadPledges(); }, [account, tab]);
 
@@ -129,8 +136,17 @@ export default function Pledges() {
                 return (
                   <tr key={p.id.toString()} className="border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors group">
                     <td className="px-5 py-4">
-                      <div className="font-semibold text-white text-xs">{meta?.name || shortAddr(counterparty)}</div>
-                      <div className="text-[10px] text-[#555] font-mono mt-0.5">{shortAddr(counterparty)}</div>
+                      {meta?.name && <div className="font-semibold text-white text-xs">{meta.name}</div>}
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-[10px] text-[#555] font-mono">{shortAddr(counterparty)}</span>
+                        <button
+                          onClick={(e) => { e.preventDefault(); copyAddress(counterparty); }}
+                          className="text-[#444] hover:text-[#DDE048] transition-colors"
+                          title="Copy wallet address"
+                        >
+                          {copiedAddr === counterparty ? <CheckCheck size={11} color="#22c55e" /> : <Copy size={11} />}
+                        </button>
+                      </div>
                       <div className="text-[10px] text-[#555] mt-0.5">{isSent ? "↑ Sent" : "↓ Received"}</div>
                     </td>
                     <td className="px-5 py-4 font-mono text-[#555] text-xs">#{p.id.toString()}</td>

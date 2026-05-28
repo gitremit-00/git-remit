@@ -285,3 +285,237 @@ export async function markNotificationRead(id: string): Promise<void> {
 
   await supabase.from("payment_request_notifications").update({ read: true }).eq("id", id);
 }
+
+// ─── Transfer Requests (off-chain negotiation) ────────────────────────────────
+
+export type TransferRequestStatus = "pending" | "accepted" | "rejected" | "renegotiating" | "cancelled" | "confirmed";
+export type TransferRequestType = "partial" | "installment";
+export type TransferRequestNotificationType = "new_request" | "renegotiated" | "accepted" | "rejected" | "confirmed" | "cancelled";
+export type CancelledBy = "sender" | "merchant";
+
+export interface TransferRequest {
+  id: string;
+  sender_address: string;
+  merchant_address: string;
+  type: TransferRequestType;
+  status: TransferRequestStatus;
+  token: "USDC" | "USDT";
+  // sender's original proposal
+  total_amount: number | null;
+  initial_deposit: number | null;
+  commitment_date: string | null;
+  amount_per_period: number | null;
+  interval_seconds: number | null;
+  total_periods: number | null;
+  first_due_date: string | null;
+  note: string | null;
+  // merchant counter-proposal
+  counter_total_amount: number | null;
+  counter_initial_deposit: number | null;
+  counter_commitment_date: string | null;
+  counter_amount_per_period: number | null;
+  counter_interval_seconds: number | null;
+  counter_total_periods: number | null;
+  counter_first_due_date: string | null;
+  counter_note: string | null;
+  renegotiation_count: number;
+  cancelled_by: CancelledBy | null;
+  // blockchain result
+  pledge_id: string | null;
+  tx_hash: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface TransferRequestNotification {
+  id: string;
+  request_id: string;
+  recipient_address: string;
+  type: TransferRequestNotificationType;
+  read: boolean;
+  created_at: string;
+  transfer_requests?: TransferRequest;
+}
+
+// Sender creates a new transfer request (no blockchain yet)
+export async function createTransferRequest(
+  req: Pick<TransferRequest,
+    | "sender_address" | "merchant_address" | "type" | "token"
+    | "total_amount" | "initial_deposit" | "commitment_date"
+    | "amount_per_period" | "interval_seconds" | "total_periods" | "first_due_date"
+    | "note"
+  >
+): Promise<TransferRequest | null> {
+  const { data, error } = await supabase
+    .from("transfer_requests")
+    .insert({
+      ...req,
+      sender_address: req.sender_address.toLowerCase(),
+      merchant_address: req.merchant_address.toLowerCase(),
+      status: "pending",
+    })
+    .select()
+    .single();
+  if (error) { console.error(error); return null; }
+  return data as TransferRequest;
+}
+
+export async function getTransferRequest(id: string): Promise<TransferRequest | null> {
+  const { data, error } = await supabase
+    .from("transfer_requests")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error || !data) return null;
+  return data as TransferRequest;
+}
+
+export async function getSenderTransferRequests(senderAddress: string): Promise<TransferRequest[]> {
+  const { data, error } = await supabase
+    .from("transfer_requests")
+    .select("*")
+    .eq("sender_address", senderAddress.toLowerCase())
+    .order("created_at", { ascending: false });
+  if (error || !data) return [];
+  return data as TransferRequest[];
+}
+
+export async function getMerchantTransferRequests(merchantAddress: string): Promise<TransferRequest[]> {
+  const { data, error } = await supabase
+    .from("transfer_requests")
+    .select("*")
+    .eq("merchant_address", merchantAddress.toLowerCase())
+    .order("created_at", { ascending: false });
+  if (error || !data) return [];
+  return data as TransferRequest[];
+}
+
+// Merchant accepts the sender's proposal as-is
+export async function acceptTransferRequest(id: string): Promise<void> {
+  await supabase
+    .from("transfer_requests")
+    .update({ status: "accepted", updated_at: new Date().toISOString() })
+    .eq("id", id);
+}
+
+// Merchant proposes counter-terms; increments renegotiation_count
+export async function merchantCounterPropose(
+  id: string,
+  counter: Pick<TransferRequest,
+    | "counter_total_amount" | "counter_initial_deposit" | "counter_commitment_date"
+    | "counter_amount_per_period" | "counter_interval_seconds" | "counter_total_periods"
+    | "counter_first_due_date" | "counter_note"
+  >,
+  currentCount: number
+): Promise<void> {
+  await supabase
+    .from("transfer_requests")
+    .update({
+      ...counter,
+      status: "renegotiating",
+      renegotiation_count: currentCount + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+}
+
+// Sender agrees to merchant's counter — promotes counter fields to main proposal
+export async function senderAcceptsCounter(id: string, counter: Pick<TransferRequest,
+  | "counter_total_amount" | "counter_initial_deposit" | "counter_commitment_date"
+  | "counter_amount_per_period" | "counter_interval_seconds" | "counter_total_periods"
+  | "counter_first_due_date" | "counter_note"
+>): Promise<void> {
+  await supabase
+    .from("transfer_requests")
+    .update({
+      total_amount: counter.counter_total_amount,
+      initial_deposit: counter.counter_initial_deposit,
+      commitment_date: counter.counter_commitment_date,
+      amount_per_period: counter.counter_amount_per_period,
+      interval_seconds: counter.counter_interval_seconds,
+      total_periods: counter.counter_total_periods,
+      first_due_date: counter.counter_first_due_date,
+      note: counter.counter_note,
+      counter_total_amount: null,
+      counter_initial_deposit: null,
+      counter_commitment_date: null,
+      counter_amount_per_period: null,
+      counter_interval_seconds: null,
+      counter_total_periods: null,
+      counter_first_due_date: null,
+      counter_note: null,
+      status: "accepted",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+}
+
+// Sender sends a new counter back to merchant (keeps renegotiating)
+export async function senderCounterPropose(
+  id: string,
+  proposal: Pick<TransferRequest,
+    | "total_amount" | "initial_deposit" | "commitment_date"
+    | "amount_per_period" | "interval_seconds" | "total_periods" | "first_due_date"
+    | "note"
+  >,
+  currentCount: number
+): Promise<void> {
+  await supabase
+    .from("transfer_requests")
+    .update({
+      ...proposal,
+      counter_total_amount: null,
+      counter_initial_deposit: null,
+      counter_commitment_date: null,
+      counter_amount_per_period: null,
+      counter_interval_seconds: null,
+      counter_total_periods: null,
+      counter_first_due_date: null,
+      counter_note: null,
+      status: "renegotiating",
+      renegotiation_count: currentCount + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+}
+
+export async function cancelTransferRequest(id: string, cancelledBy: CancelledBy): Promise<void> {
+  await supabase
+    .from("transfer_requests")
+    .update({ status: "cancelled", cancelled_by: cancelledBy, updated_at: new Date().toISOString() })
+    .eq("id", id);
+}
+
+// Called after on-chain pledge creation succeeds
+export async function confirmTransferRequest(id: string, pledgeId: string, txHash: string): Promise<void> {
+  await supabase
+    .from("transfer_requests")
+    .update({ status: "confirmed", pledge_id: pledgeId, tx_hash: txHash, updated_at: new Date().toISOString() })
+    .eq("id", id);
+}
+
+export async function sendTransferRequestNotification(
+  requestId: string,
+  recipientAddress: string,
+  type: TransferRequestNotificationType
+): Promise<void> {
+  await supabase
+    .from("transfer_request_notifications")
+    .insert({ request_id: requestId, recipient_address: recipientAddress.toLowerCase(), type });
+}
+
+export async function getTransferRequestNotifications(
+  recipientAddress: string
+): Promise<TransferRequestNotification[]> {
+  const { data, error } = await supabase
+    .from("transfer_request_notifications")
+    .select("*, transfer_requests(*)")
+    .eq("recipient_address", recipientAddress.toLowerCase())
+    .order("created_at", { ascending: false });
+  if (error || !data) return [];
+  return data as TransferRequestNotification[];
+}
+
+export async function markTransferNotificationRead(id: string): Promise<void> {
+  await supabase.from("transfer_request_notifications").update({ read: true }).eq("id", id);
+}
