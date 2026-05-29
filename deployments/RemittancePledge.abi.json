@@ -10,10 +10,80 @@
         "internalType": "address",
         "name": "_feeRecipient",
         "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_linkOperator",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_verificationOperator",
+        "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
     "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "AllPeriodsAccounted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "AmountBelowMinimum",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "BaselineExceedsMax",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "BaselineNotKyc",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ClaimWindowExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ClaimWindowOpen",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "CommitmentInPast",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "CommitmentTooFar",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DepositBelowRequiredPct",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DepositExactRemainder",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DepositExceedsTotal",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DepositLimitReached",
+    "type": "error"
   },
   {
     "inputs": [],
@@ -53,6 +123,111 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "ExtensionDateInvalid",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ExtensionTooLate",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ExtensionTooLong",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "GraceEnded",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "GraceNotOver",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InsufficientBalance",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "IntervalTooShort",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidAccountId",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidAddress",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidAmount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidPeriodCount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidSignature",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "LastWalletCannotUnlink",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "LinkingDisabled",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MerchantNotVerified",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NoMissedInstallments",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NoOutstandingDebt",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotAuthorized",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NothingToClaim",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NothingToReclaim",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OnlyOperator",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -76,6 +251,41 @@
   },
   {
     "inputs": [],
+    "name": "PayerNotVerified",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PledgeMissing",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PledgeNotActive",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PledgeNotCancellable",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PledgeNotInSettlement",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PledgeNotPending",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RecipientNotRegistered",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ReentrancyGuardReentrantCall",
     "type": "error"
   },
@@ -89,6 +299,126 @@
     ],
     "name": "SafeERC20FailedOperation",
     "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SelfTransferDisallowed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SenderNotVerified",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SignatureExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SignatureValidityTooLong",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TimelockNotElapsed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TokenNotSupported",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "WalletAlreadyLinked",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "WalletNotLinked",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "WithdrawalNotActive",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "verified",
+        "type": "bool"
+      }
+    ],
+    "name": "AccountMerchantVerificationChanged",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "oldScore",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newScore",
+        "type": "uint256"
+      }
+    ],
+    "name": "AccountVerificationBaselineChanged",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "wallet",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "oldCap",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newCap",
+        "type": "uint256"
+      }
+    ],
+    "name": "DailyCapChanged",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -121,13 +451,44 @@
       {
         "indexed": true,
         "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "DebtSettled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
         "name": "pledgeId",
         "type": "uint256"
       },
       {
         "indexed": true,
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
         "internalType": "address",
-        "name": "sender",
+        "name": "wallet",
         "type": "address"
       },
       {
@@ -157,9 +518,9 @@
       },
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
       },
       {
         "indexed": false,
@@ -220,6 +581,112 @@
     "inputs": [
       {
         "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "source",
+        "type": "string"
+      }
+    ],
+    "name": "FundsCredited",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "period",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "debtAdded",
+        "type": "uint256"
+      }
+    ],
+    "name": "InstallmentMissed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "period",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "InstallmentPaid",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "oldOp",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOp",
+        "type": "address"
+      }
+    ],
+    "name": "LinkOperatorChanged",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "address",
         "name": "previousOwner",
         "type": "address"
@@ -257,6 +724,74 @@
     "anonymous": false,
     "inputs": [
       {
+        "indexed": true,
+        "internalType": "address",
+        "name": "sender",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "senderAccount",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "recipientAccount",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fee",
+        "type": "uint256"
+      }
+    ],
+    "name": "P2PSent",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "survivor",
+        "type": "address"
+      }
+    ],
+    "name": "PanicUnlinkAll",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": false,
         "internalType": "address",
         "name": "account",
@@ -277,15 +812,15 @@
       },
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
       },
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "merchant",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
       },
       {
         "indexed": false,
@@ -308,9 +843,9 @@
       },
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "merchant",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
       },
       {
         "indexed": false,
@@ -333,15 +868,15 @@
       },
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
       },
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "merchant",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
       },
       {
         "indexed": false,
@@ -353,12 +888,6 @@
         "indexed": false,
         "internalType": "uint256",
         "name": "totalAmount",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "initialDeposit",
         "type": "uint256"
       },
       {
@@ -388,9 +917,9 @@
       },
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "merchant",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
       },
       {
         "indexed": false,
@@ -400,6 +929,111 @@
       }
     ],
     "name": "PledgeDefaulted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
+      }
+    ],
+    "name": "RecurringPledgeCancelled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
+      }
+    ],
+    "name": "RecurringPledgeCompleted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amountPerPeriod",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "intervalSeconds",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "totalPeriods",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "firstDueDate",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "appliedFeeBps",
+        "type": "uint256"
+      }
+    ],
+    "name": "RecurringPledgeCreated",
     "type": "event"
   },
   {
@@ -435,8 +1069,253 @@
     "type": "event"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "oldOp",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOp",
+        "type": "address"
+      }
+    ],
+    "name": "VerificationOperatorChanged",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "wallet",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "isPrimary",
+        "type": "bool"
+      }
+    ],
+    "name": "WalletLinked",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "wallet",
+        "type": "address"
+      }
+    ],
+    "name": "WalletUnlinked",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "withdrawalId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "WithdrawalCancelled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "withdrawalId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "wallet",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "WithdrawalClaimed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "wallet",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "WithdrawalInstant",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "withdrawalId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "wallet",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "claimableAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "WithdrawalQueued",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "BASELINE_KYC",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "BASELINE_KYC_PLUS_AVATAR",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "CAP_TIER_HIGH_MULT",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "CLAIM_WINDOW",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "DEFAULT_DAILY_CAP",
     "outputs": [
       {
         "internalType": "uint256",
@@ -553,6 +1432,19 @@
   },
   {
     "inputs": [],
+    "name": "LINK_SIG_MAX_VALIDITY",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_ACTIVE_HIGH",
     "outputs": [
       {
@@ -592,6 +1484,19 @@
   },
   {
     "inputs": [],
+    "name": "MAX_BASELINE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_EXTENSION",
     "outputs": [
       {
@@ -618,7 +1523,46 @@
   },
   {
     "inputs": [],
+    "name": "MAX_RECURRING_PERIODS",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MIN_PLEDGE_AMOUNT",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_RECURRING_INTERVAL",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_TRANSACT_BASELINE",
     "outputs": [
       {
         "internalType": "uint256",
@@ -670,7 +1614,59 @@
   },
   {
     "inputs": [],
+    "name": "TIMELOCK_1H",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "TIMELOCK_24H",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "TIME_BUFFER",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "WEIGHT_INSTALLMENT_BONUS",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "WEIGHT_INSTALLMENT_PARTIAL",
     "outputs": [
       {
         "internalType": "uint256",
@@ -717,17 +1713,147 @@
   {
     "inputs": [
       {
-        "internalType": "address",
+        "internalType": "bytes32",
         "name": "",
-        "type": "address"
+        "type": "bytes32"
       }
     ],
-    "name": "activePledgeCount",
+    "name": "accountActivePledgeCount",
     "outputs": [
       {
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "accountBalances",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "accountIsMerchantVerified",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "accountReputation",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "onTimeCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "lateCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "defaultCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "weightedScore",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalWeight",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "accountVerificationBaseline",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "accountWallets",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -755,6 +1881,19 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "boostVerificationBaseline",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
@@ -769,6 +1908,19 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      }
+    ],
+    "name": "cancelPendingWithdrawal",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -798,6 +1950,29 @@
     "inputs": [
       {
         "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sigExpiry",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "merchantSig",
+        "type": "bytes"
+      }
+    ],
+    "name": "cancelRecurring",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
         "name": "pledgeId",
         "type": "uint256"
       }
@@ -810,23 +1985,31 @@
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      }
+    ],
+    "name": "claimPendingWithdrawal",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "token",
         "type": "address"
       },
       {
-        "internalType": "address",
-        "name": "merchant",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
       },
       {
         "internalType": "uint256",
         "name": "totalAmount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "initialDeposit",
         "type": "uint256"
       },
       {
@@ -843,19 +2026,68 @@
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
+      },
+      {
         "internalType": "uint256",
-        "name": "pledgeId",
+        "name": "amountPerPeriod",
         "type": "uint256"
       },
       {
         "internalType": "uint256",
-        "name": "amount",
+        "name": "intervalSeconds",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalPeriods",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "firstDueDate",
         "type": "uint256"
       }
     ],
-    "name": "depositRemaining",
+    "name": "createRecurringPledge",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "dailyWithdrawnAmount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -921,12 +2153,17 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
         "internalType": "address",
-        "name": "sender",
+        "name": "token",
         "type": "address"
       }
     ],
-    "name": "getMaxActivePledges",
+    "name": "getAccountBalance",
     "outputs": [
       {
         "internalType": "uint256",
@@ -940,12 +2177,31 @@
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "merchant",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
       }
     ],
-    "name": "getMerchantPledges",
+    "name": "getAccountMaxActivePledges",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getAccountMerchantPledges",
     "outputs": [
       {
         "internalType": "uint256[]",
@@ -959,9 +2215,9 @@
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "merchant",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
       },
       {
         "internalType": "uint256",
@@ -974,7 +2230,7 @@
         "type": "uint256"
       }
     ],
-    "name": "getMerchantPledgesPaginated",
+    "name": "getAccountMerchantPledgesPaginated",
     "outputs": [
       {
         "internalType": "uint256[]",
@@ -985,6 +2241,365 @@
         "internalType": "uint256",
         "name": "total",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getAccountMerchantRecurringPledges",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "offset",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "limit",
+        "type": "uint256"
+      }
+    ],
+    "name": "getAccountMerchantRecurringPledgesPaginated",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "page",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "total",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getAccountPayerPledges",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "offset",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "limit",
+        "type": "uint256"
+      }
+    ],
+    "name": "getAccountPayerPledgesPaginated",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "page",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "total",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getAccountPayerRecurringPledges",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "offset",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "limit",
+        "type": "uint256"
+      }
+    ],
+    "name": "getAccountPayerRecurringPledgesPaginated",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "page",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "total",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getAccountReputation",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "basisPoints",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "onTimeCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "lateCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "defaultCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalCount",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getAccountRequiredDepositPct",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getAccountTrustScore",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getAccountWallets",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "wallet",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "getDailyCap",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "wallet",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "getDailyUsed",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      }
+    ],
+    "name": "getPendingWithdrawal",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "accountId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "address",
+            "name": "sourceWallet",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "queuedAt",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "claimableAt",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "active",
+            "type": "bool"
+          }
+        ],
+        "internalType": "struct RemittancePledge.PendingWithdrawal",
+        "name": "",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
@@ -1008,13 +2623,18 @@
             "type": "uint256"
           },
           {
-            "internalType": "address",
-            "name": "sender",
-            "type": "address"
+            "internalType": "bytes32",
+            "name": "merchantAccount",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "payerAccount",
+            "type": "bytes32"
           },
           {
             "internalType": "address",
-            "name": "merchant",
+            "name": "depositingWallet",
             "type": "address"
           },
           {
@@ -1025,11 +2645,6 @@
           {
             "internalType": "uint256",
             "name": "totalAmount",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "initialDeposit",
             "type": "uint256"
           },
           {
@@ -1069,56 +2684,84 @@
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "wallet",
-        "type": "address"
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
       }
     ],
-    "name": "getReputation",
+    "name": "getRecurringPledge",
     "outputs": [
       {
-        "internalType": "uint256",
-        "name": "basisPoints",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "onTimeCount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "lateCount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "defaultCount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "totalCount",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      }
-    ],
-    "name": "getRequiredDepositPct",
-    "outputs": [
-      {
-        "internalType": "uint256",
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "merchantAccount",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "payerAccount",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "address",
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amountPerPeriod",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "intervalSeconds",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "totalPeriods",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "periodsCompleted",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "missedCount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "totalMissedDebt",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "nextDueDate",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "appliedFeeBps",
+            "type": "uint256"
+          },
+          {
+            "internalType": "enum RemittancePledge.RecurringStatus",
+            "name": "status",
+            "type": "uint8"
+          }
+        ],
+        "internalType": "struct RemittancePledge.RecurringPledge",
         "name": "",
-        "type": "uint256"
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
@@ -1127,62 +2770,9 @@
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      }
-    ],
-    "name": "getSenderPledges",
-    "outputs": [
-      {
-        "internalType": "uint256[]",
-        "name": "",
-        "type": "uint256[]"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "offset",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "limit",
-        "type": "uint256"
-      }
-    ],
-    "name": "getSenderPledgesPaginated",
-    "outputs": [
-      {
-        "internalType": "uint256[]",
-        "name": "page",
-        "type": "uint256[]"
-      },
-      {
-        "internalType": "uint256",
-        "name": "total",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
       }
     ],
     "name": "getServiceFeeBps",
@@ -1204,12 +2794,12 @@
         "type": "address"
       }
     ],
-    "name": "getTrustScore",
+    "name": "getWalletAccount",
     "outputs": [
       {
-        "internalType": "uint256",
+        "internalType": "bytes32",
         "name": "",
-        "type": "uint256"
+        "type": "bytes32"
       }
     ],
     "stateMutability": "view",
@@ -1235,6 +2825,74 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "linkNonces",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "linkOperator",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sigExpiry",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "operatorSig",
+        "type": "bytes"
+      }
+    ],
+    "name": "linkWallet",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      }
+    ],
+    "name": "markMissedInstallment",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "owner",
     "outputs": [
@@ -1245,6 +2903,13 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "panicUnlink",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1268,6 +2933,32 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      }
+    ],
+    "name": "payInstallment",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      }
+    ],
+    "name": "payMissedInstallment",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "pendingOwner",
     "outputs": [
@@ -1275,6 +2966,68 @@
         "internalType": "address",
         "name": "",
         "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pendingWithdrawalCounter",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "pendingWithdrawals",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "sourceWallet",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "queuedAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "claimableAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "active",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -1309,13 +3062,18 @@
         "type": "uint256"
       },
       {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
       },
       {
         "internalType": "address",
-        "name": "merchant",
+        "name": "depositingWallet",
         "type": "address"
       },
       {
@@ -1326,11 +3084,6 @@
       {
         "internalType": "uint256",
         "name": "totalAmount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "initialDeposit",
         "type": "uint256"
       },
       {
@@ -1365,9 +3118,9 @@
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
       },
       {
         "internalType": "uint256",
@@ -1400,6 +3153,117 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "recurringCancelNonces",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "recurringCounter",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "recurringPledges",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "merchantAccount",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "payerAccount",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amountPerPeriod",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "intervalSeconds",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalPeriods",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "periodsCompleted",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "missedCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalMissedDebt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "nextDueDate",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "appliedFeeBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "enum RemittancePledge.RecurringStatus",
+        "name": "status",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "renounceOwnership",
     "outputs": [],
@@ -1410,44 +3274,23 @@
     "inputs": [
       {
         "internalType": "address",
-        "name": "",
+        "name": "token",
         "type": "address"
-      }
-    ],
-    "name": "reputations",
-    "outputs": [
+      },
       {
-        "internalType": "uint256",
-        "name": "onTimeCount",
-        "type": "uint256"
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
       },
       {
         "internalType": "uint256",
-        "name": "lateCount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "defaultCount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "totalCount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "weightedScore",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "totalWeight",
+        "name": "amount",
         "type": "uint256"
       }
     ],
-    "stateMutability": "view",
+    "name": "sendP2P",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1459,6 +3302,37 @@
       }
     ],
     "name": "setFeeRecipient",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOp",
+        "type": "address"
+      }
+    ],
+    "name": "setLinkOperator",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bool",
+        "name": "verified",
+        "type": "bool"
+      }
+    ],
+    "name": "setMerchantVerified",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1484,6 +3358,86 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "accountId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "newScore",
+        "type": "uint256"
+      }
+    ],
+    "name": "setVerificationBaseline",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOp",
+        "type": "address"
+      }
+    ],
+    "name": "setVerificationOperator",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "newCap",
+        "type": "uint256"
+      }
+    ],
+    "name": "setWalletDailyCap",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "recurringId",
+        "type": "uint256"
+      }
+    ],
+    "name": "settleDebt",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "pledgeId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "submitDeposit",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "newOwner",
         "type": "address"
@@ -1496,8 +3450,119 @@
   },
   {
     "inputs": [],
+    "name": "unlinkWallet",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "unpause",
     "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "verificationOperator",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "walletCapConfigured",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "walletDailyCap",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "walletToAccount",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "withdraw",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "withdrawalId",
+        "type": "uint256"
+      }
+    ],
     "stateMutability": "nonpayable",
     "type": "function"
   }
