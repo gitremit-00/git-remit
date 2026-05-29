@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Clock, CheckCircle2, XCircle, RefreshCw, ChevronRight, FileText, Store } from "lucide-react";
 import Header from "../../../components/Header";
+import KYCGate from "../../../components/KYCGate";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { useWallet } from "../../../context/WalletContext";
 import { getSenderTransferRequests, type TransferRequest } from "../../../lib/supabase";
@@ -249,9 +250,9 @@ export default function SenderRequests() {
   );
 
   return (
-    <>
+    <KYCGate featureName="Payment Requests">
       {DesktopView}
       {MobileView}
-    </>
+    </KYCGate>
   );
 }

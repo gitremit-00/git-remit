@@ -285,3 +285,28 @@ export const AUTH_LIMITS = {
   otpTtlMinutes: OTP_TTL_MINUTES,
   resetTtlMinutes: RESET_TTL_MINUTES,
 };
+
+// Server-side KYC guard for API routes.
+// Returns null if the user is verified, or a NextResponse error if not.
+export async function requireKYCVerified(userId: string) {
+  const { NextResponse } = await import("next/server");
+  const supabase = adminClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("kyc_status")
+    .eq("id", userId)
+    .single();
+
+  if (data?.kyc_status === "verified") return null;
+
+  const messages: Record<string, string> = {
+    pending:        "Your account is pending KYC review. Transaction features are locked until verified.",
+    needs_revision: "Your account requires document revision before you can transact.",
+    rejected:       "Your KYC application was rejected. Contact support to continue.",
+  };
+  const status = data?.kyc_status ?? "pending";
+  return NextResponse.json(
+    { error: messages[status] ?? "KYC verification required.", kycStatus: status },
+    { status: 403 }
+  );
+}

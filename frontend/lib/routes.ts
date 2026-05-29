@@ -17,6 +17,7 @@ const SHARED_PREFIXES = [
   "/settings",
   "/notifications",
   "/help",
+  "/kyc-revision",
 ];
 
 function matches(pathname: string, routes: string[]) {

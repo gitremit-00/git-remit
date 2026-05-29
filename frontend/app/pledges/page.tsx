@@ -1,5 +1,6 @@
 "use client";
 import Header from "../../components/Header";
+import KYCGate from "../../components/KYCGate";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { useEffect, useState } from "react";
 import { ethers } from "ethers";
@@ -257,9 +258,9 @@ export default function Pledges() {
   );
 
   return (
-    <>
+    <KYCGate featureName="My Transfers">
       {DesktopView}
       {MobileView}
-    </>
+    </KYCGate>
   );
 }

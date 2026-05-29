@@ -13,6 +13,7 @@ import { useCurrency } from "../context/CurrencyContext";
 import { getPledgeMeta } from "../lib/pledgeMeta";
 import DashboardWalletConfirm from "../components/DashboardWalletConfirm";
 import KYCBanner from "../components/KYCBanner";
+import { useRole } from "../context/RoleContext";
 
 interface RepState { score: number; onTime: number; total: number; defaults: number; late: number; }
 interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
@@ -28,6 +29,8 @@ function scoreColor(s: number) { return s >= 80 ? "#22c55e" : s >= 50 ? "#DDE048
 export default function Home() {
   const { account, connect, confirmWallet, walletVerified, error, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
   const { fmt, fmtAlt, currency } = useCurrency();
+  const { kycStatus } = useRole();
+  const isVerified = kycStatus === "verified";
   const [usdcBal, setUsdcBal] = useState<string | null>(null);
   const [usdtBal, setUsdtBal] = useState<string | null>(null);
   const [rep, setRep] = useState<RepState | null>(null);
@@ -118,12 +121,17 @@ export default function Home() {
             </button>
           </div>
         </div>
-        <Link
-          href="/new-transfer"
-          className="flex items-center gap-2 bg-[#DDE048] text-black font-bold text-sm rounded-xl px-5 py-3 hover:bg-[#c8ce30] transition-colors"
-        >
-          + New transfer
-        </Link>
+        {isVerified ? (
+          <Link href="/new-transfer"
+            className="flex items-center gap-2 bg-[#DDE048] text-black font-bold text-sm rounded-xl px-5 py-3 hover:bg-[#c8ce30] transition-colors">
+            + New transfer
+          </Link>
+        ) : (
+          <div title="KYC verification required"
+            className="flex items-center gap-2 bg-[#1e2230] text-[#555] font-bold text-sm rounded-xl px-5 py-3 cursor-not-allowed select-none">
+            + New transfer
+          </div>
+        )}
       </div>
 
       {/* Stats row: Trust Score wide + 2 cards */}
@@ -228,7 +236,9 @@ export default function Home() {
             <Inbox size={40} color="#333" className="mb-3" />
             <div className="font-bold text-base text-white mb-1.5">No active transfers</div>
             <div className="text-[#555] text-sm mb-5">Create your first pledge to get started</div>
-            <Link href="/new-transfer" className="inline-block bg-[#DDE048] text-black rounded-xl px-6 py-2.5 text-sm font-bold">+ New Transfer</Link>
+            {isVerified
+              ? <Link href="/new-transfer" className="inline-block bg-[#DDE048] text-black rounded-xl px-6 py-2.5 text-sm font-bold">+ New Transfer</Link>
+              : <span title="KYC verification required" className="inline-block bg-[#1e2230] text-[#555] rounded-xl px-6 py-2.5 text-sm font-bold cursor-not-allowed">+ New Transfer</span>}
           </div>
         )}
 
@@ -438,7 +448,9 @@ export default function Home() {
           )}
           {currency === "USD" && <div className="text-xs text-[#888] mt-1">≈ {fmtAlt(parseFloat(usdcBal ?? "0") + parseFloat(usdtBal ?? "0"))}</div>}
           <div className="flex gap-2.5 mt-[18px]">
-            <Link href="/new-transfer" className="flex-1 bg-[#DDE048] text-black border-0 rounded-xl py-[13px] text-sm font-bold text-center block">+ New Transfer</Link>
+            {isVerified
+              ? <Link href="/new-transfer" className="flex-1 bg-[#DDE048] text-black border-0 rounded-xl py-[13px] text-sm font-bold text-center block">+ New Transfer</Link>
+              : <span title="KYC verification required" className="flex-1 bg-[#1e2230] text-[#555] rounded-xl py-[13px] text-sm font-bold text-center block cursor-not-allowed">+ New Transfer</span>}
             <Link href="/wallet" className="flex-1 bg-[#1e1e1e] text-white border border-[#1F2127] rounded-xl py-[13px] text-sm font-semibold text-center block">Top up</Link>
           </div>
         </div>
@@ -479,7 +491,9 @@ export default function Home() {
             <Inbox size={40} color="#444" className="mb-3" />
             <div className="font-bold text-base mb-1.5">No active transfers</div>
             <div className="text-[#888] text-[13px] mb-5">Create your first pledge to get started</div>
-            <Link href="/new-transfer" className="inline-block bg-[#DDE048] text-black rounded-[10px] px-6 py-2.5 text-sm font-bold">+ New Transfer</Link>
+            {isVerified
+              ? <Link href="/new-transfer" className="inline-block bg-[#DDE048] text-black rounded-[10px] px-6 py-2.5 text-sm font-bold">+ New Transfer</Link>
+              : <span title="KYC verification required" className="inline-block bg-[#1e2230] text-[#555] rounded-[10px] px-6 py-2.5 text-sm font-bold cursor-not-allowed">+ New Transfer</span>}
           </div>
         )}
 

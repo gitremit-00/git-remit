@@ -5,10 +5,14 @@ import { useWallet } from "./WalletContext";
 import { getUserProfile, Role } from "../lib/supabase";
 import { isSenderOnly, isMerchantOnly, isAdminOnly, isPublic } from "../lib/routes";
 
+export type KYCStatus = "pending" | "verified" | "rejected" | "needs_revision";
+
 interface RoleContextValue {
   role: Role | null;
   loading: boolean;
   isNewUser: boolean;
+  kycStatus: KYCStatus | null;
+  kycRejectionReason: string | null;
   displayName: string | null;
   setDisplayName: (name: string | null) => void;
   avatarUrl: string | null;
@@ -17,6 +21,7 @@ interface RoleContextValue {
 
 const RoleContext = createContext<RoleContextValue>({
   role: null, loading: true, isNewUser: false,
+  kycStatus: null, kycRejectionReason: null,
   displayName: null, setDisplayName: () => {},
   avatarUrl: null, setAvatarUrl: () => {},
 });
@@ -25,14 +30,16 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   useWallet();
   const router = useRouter();
   const pathname = usePathname();
-  const [role, setRole] = useState<Role | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isNewUser, setIsNewUser] = useState(false);
-  const [displayName, setDisplayName] = useState<string | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [role, setRole]                       = useState<Role | null>(null);
+  const [loading, setLoading]                 = useState(true);
+  const [isNewUser, setIsNewUser]             = useState(false);
+  const [kycStatus, setKycStatus]             = useState<KYCStatus | null>(null);
+  const [kycRejectionReason, setKycReason]    = useState<string | null>(null);
+  const [displayName, setDisplayName]         = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl]             = useState<string | null>(null);
 
-  // Fetch role from auth session on mount — independent of wallet connection.
-  // Wallet state is for on-chain features only; role comes from the session cookie.
+  // Fetch role + KYC status from auth session on mount.
+  // Wallet state is for on-chain features only; role/KYC come from session cookie.
   useEffect(() => {
     setLoading(true);
     setIsNewUser(false);
@@ -45,8 +52,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const { userId, role: r } = await res.json() as { userId: string; role: Role };
+      const { userId, role: r, kycStatus: ks, kycRejectionReason: kr } =
+        await res.json() as { userId: string; role: Role; kycStatus: KYCStatus; kycRejectionReason: string | null };
+
       setRole(r);
+      setKycStatus(ks ?? "pending");
+      setKycReason(kr ?? null);
       document.cookie = `rs_role=${r}; path=/; max-age=2592000`;
 
       if (isPublic(pathname) || pathname === "/onboarding") {
@@ -77,7 +88,12 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   }, [role, pathname, loading]);
 
   return (
-    <RoleContext.Provider value={{ role, loading, isNewUser, displayName, setDisplayName, avatarUrl, setAvatarUrl }}>
+    <RoleContext.Provider value={{
+      role, loading, isNewUser,
+      kycStatus, kycRejectionReason,
+      displayName, setDisplayName,
+      avatarUrl, setAvatarUrl,
+    }}>
       {children}
     </RoleContext.Provider>
   );

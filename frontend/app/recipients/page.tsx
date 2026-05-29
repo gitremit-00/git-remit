@@ -1,5 +1,6 @@
 "use client";
 import Header from "../../components/Header";
+import KYCGate from "../../components/KYCGate";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Users, Pencil, Trash2, Check, X, Copy, ArrowRight, UserCircle, Send } from "lucide-react";
@@ -208,9 +209,9 @@ export default function Recipients() {
   );
 
   return (
-    <>
+    <KYCGate featureName="Recipients">
       {DesktopView}
       {MobileView}
-    </>
+    </KYCGate>
   );
 }

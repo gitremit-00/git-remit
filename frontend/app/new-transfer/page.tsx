@@ -3,6 +3,7 @@ import Header from "../../components/Header";
 import Image from "next/image";
 import DateTimePicker from "../../components/DateTimePicker";
 import TxGuard from "../../components/TxGuard";
+import KYCGate from "../../components/KYCGate";
 import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ethers } from "ethers";
@@ -45,9 +46,11 @@ const INTERVAL_OPTIONS = [
 
 export default function NewTransfer() {
   return (
-    <Suspense fallback={<div className="px-4 pt-5 text-[#888] text-sm">Loading transfer...</div>}>
-      <NewTransferContent />
-    </Suspense>
+    <KYCGate featureName="New Transfer">
+      <Suspense fallback={<div className="px-4 pt-5 text-[#888] text-sm">Loading transfer...</div>}>
+        <NewTransferContent />
+      </Suspense>
+    </KYCGate>
   );
 }
 

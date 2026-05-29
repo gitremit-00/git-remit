@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 import Link from "next/link";
 import { Search, ArrowLeft, Clock, CheckCircle2, AlertCircle, XCircle, ChevronRight, ShieldCheck, RefreshCw, FileText } from "lucide-react";
 import Header from "../../../components/Header";
+import KYCGate from "../../../components/KYCGate";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { useWallet } from "../../../context/WalletContext";
 
@@ -460,9 +461,9 @@ export default function MerchantTransfers() {
   );
 
   return (
-    <>
+    <KYCGate featureName="Incoming Transfers">
       {DesktopView}
       {MobileView}
-    </>
+    </KYCGate>
   );
 }
