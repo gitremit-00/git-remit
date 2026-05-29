@@ -93,11 +93,13 @@ export async function GET(req: NextRequest) {
     }
 
     // Status filter
-    if (statusFilter && statusFilter !== "all") {
-      query = query.eq("kyc_status", statusFilter);
+    if (statusFilter === "all" || !statusFilter) {
+      // Return ALL users — no status restriction
+    } else if (statusFilter === "pending") {
+      // Pending includes explicit 'pending' and any NULL kyc_status (legacy rows)
+      query = query.or("kyc_status.eq.pending,kyc_status.is.null");
     } else {
-      // Default KYC queue: exclude verified, also include NULL kyc_status
-      query = query.or("kyc_status.neq.verified,kyc_status.is.null");
+      query = query.eq("kyc_status", statusFilter);
     }
 
     const { data, error } = await query;

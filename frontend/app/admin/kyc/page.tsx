@@ -59,7 +59,7 @@ export default function KYCQueuePage() {
   async function load(silent = false) {
     silent ? setRefreshing(true) : setLoading(true);
     try {
-      const res = await fetch("/api/admin/kyc/users");
+      const res = await fetch("/api/admin/kyc/users?status=all");
       if (res.ok) {
         const json = await res.json();
         setAll(json.users ?? []);

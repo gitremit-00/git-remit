@@ -6,10 +6,10 @@ import Image from "next/image";
 import { LayoutDashboard, ShieldCheck, Users, Store, LogOut } from "lucide-react";
 
 const NAV = [
-  { href: "/admin", label: "Overview", Icon: LayoutDashboard, exact: true },
-  { href: "/admin/kyc", label: "KYC Queue", Icon: ShieldCheck },
-  { href: "/admin/users", label: "Senders", Icon: Users },
-  { href: "/admin/merchants", label: "Merchants", Icon: Store },
+  { href: "/admin",          label: "Overview",  Icon: LayoutDashboard, exact: true },
+  { href: "/admin/kyc",      label: "KYC Queue", Icon: ShieldCheck },
+  { href: "/admin/users",    label: "Senders",   Icon: Users },
+  { href: "/admin/merchants",label: "Merchants", Icon: Store },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
