@@ -9,6 +9,31 @@ It assumes:
 
 ---
 
+## Status (2026-05-30)
+
+**Phase 1 contract — complete and verified.** `RemittancePledge.sol` (v2, account-keyed) is
+finalized and passes the full test stack:
+
+- **Hardhat:** 277 passing — 100% statements / functions / lines, ~89% branches. Covers
+  linking, escrow, tiered withdrawals, P2P, pledges, recurring pledges, reputation, and all
+  reachable auth/state revert guards. (See [test/TESTING.md](test/TESTING.md) for the
+  branch-coverage breakdown — the remainder is OZ-modifier negative paths and a handful of
+  provably-unreachable defensive guards.)
+- **Foundry:** 6 fuzz + 5 invariant passing; escrow conservation holds across random call
+  sequences.
+- **Slither:** 0 actionable findings (operator zero-address checks are intentional
+  "disabled" states, suppressed inline).
+- **Deployed size:** 20.6 KiB — under the 24.576 KiB EIP-170 limit.
+- **Security review (automated, 2026-05-30):** no high-confidence vulnerabilities in the
+  contract against signature-replay, reentrancy, fund-accounting/escrow, withdrawal-timelock,
+  and access-control classes. Off-chain findings to fix before deploy are tracked in the new
+  **"Pre-deploy security fixes"** section below.
+
+Not yet done: a professional human audit (recommended before mainnet / real value), and the
+Phase 3/4 backend + frontend work described in the rest of this document.
+
+---
+
 # Phase 3 — Backend + Database (5–7 days)
 
 ## 3.1 Database migration
@@ -220,6 +245,15 @@ Authenticated — changes which wallet is the primary for display purposes.
 ### 3.3.6 KYC route refactor
 
 **File:** `frontend/app/api/admin/kyc/[id]/route.ts`
+
+> ⚠ **Confirmed blocker (security review 2026-05-30).** The current code still calls
+> `setMerchantVerified(profile.wallet_address, …)` / `setVerificationBaseline(profile.wallet_address, …)`.
+> The contract keys identity by the UUID-derived `accountId` (`bytes32`), **not** the wallet
+> address — ethers zero-pads the address into the `bytes32` slot, so the on-chain flag is
+> written to a key that never matches `walletToAccount[...]`. This fails *safe* (no
+> unauthorized access — transactions just revert with `PayerNotVerified` / `MerchantNotVerified`),
+> but it means **no approved user can transact until this is changed to pass `accountId`.**
+> This refactor is the fix; it must land before testnet flows will work end-to-end.
 
 **Changes:**
 - Compute `accountId = deriveAccountId(profile.id)`.
@@ -779,6 +813,22 @@ For each user flow, test on Morph testnet end-to-end:
 | 7 | End-to-end testing | All of above |
 
 **Critical path:** DB migration → accountId helper → wallet endpoints → frontend wallet manager. The other items can interleave.
+
+---
+
+# Pre-deploy security fixes (from 2026-05-30 review)
+
+The contract is clean; these are **off-chain** issues found during the security review. Fix
+before relying on a deploy.
+
+| # | Severity | Location | Issue | Fix |
+|---|---|---|---|---|
+| 1 | Blocker (fails safe) | `frontend/app/api/admin/kyc/[id]/route.ts` | KYC approval calls the contract with `wallet_address` instead of the UUID-derived `accountId`; on-chain verification never matches, so approved users can't transact. | Apply the §3.3.6 refactor — derive `accountId = deriveAccountId(profile.id)` and pass it to `setMerchantVerified` / `setVerificationBaseline`. |
+| 2 | Medium | `frontend/lib/session.ts:35-37` | `sessionSecret()` falls back to `SUPABASE_SERVICE_ROLE_KEY` (and a hardcoded string) when `AUTH_SESSION_SECRET` is unset. The session HMAC then reuses the crown-jewel DB key; every cookie is an HMAC oracle over it, and the whole admin authz model trusts this one signature. | Require `AUTH_SESSION_SECRET` (non-empty) and **throw at boot if missing**; remove the service-role-key and hardcoded fallbacks. Rotate `SUPABASE_SERVICE_ROLE_KEY` (and `GMAIL_APP_PASSWORD`) if they've been on disk. Add `AUTH_SESSION_SECRET` to env docs. |
+| 3 | Low (latent) | `frontend/app/api/profile/route.ts` + `frontend/lib/routes.ts:28` | GET/PATCH `/api/profile` has no auth and trusts a caller-supplied `address`. Currently mitigated only because it uses the anon Supabase client and `profiles` RLS denies the anon role — but it's an IDOR/PII leak the moment RLS, the client, or the auth model changes. | Add `verifySessionCookie` and scope to `session.userId` (mirror `/api/user/profile`), or delete this route. Stop treating all of `/api` as public in `routes.ts` — require explicit opt-in. |
+
+Defense-in-depth (optional but recommended): re-verify the user's role against the DB on
+admin actions rather than trusting the cookie role alone.
 
 ---
 

@@ -21,12 +21,20 @@ async function main() {
   console.log("Deploying RemittancePledge...");
 
   const feeRecipient = process.env.FEE_RECIPIENT || deployer.address;
+  // Off-chain operators: linkOperator co-signs wallet→account links; verificationOperator
+  // may boost a KYC baseline to KYC+avatar. Default both to the deployer for local runs.
+  const linkOperator = process.env.LINK_OPERATOR || deployer.address;
+  const verificationOperator = process.env.VERIFICATION_OPERATOR || deployer.address;
   console.log("Fee recipient:", feeRecipient);
+  console.log("Link operator:", linkOperator);
+  console.log("Verification operator:", verificationOperator);
 
   const RemittancePledge = await ethers.getContractFactory("RemittancePledge");
   const contract = await RemittancePledge.deploy(
     [deployments.mockUSDC, deployments.mockUSDT],
-    feeRecipient
+    feeRecipient,
+    linkOperator,
+    verificationOperator
   );
   await contract.waitForDeployment();
 
