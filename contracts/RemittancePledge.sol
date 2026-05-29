@@ -5,19 +5,69 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-/// @title RemittancePledge — OFW Payment Pledge System on Morph L2
-/// @notice Cross-border remittance system where merchants create payment requests (pledges)
-///         targeting a specific payer (OFW). The payer fulfills the pledge by depositing funds
-///         by the commitment deadline. Anyone can send instant P2P transfers to any address.
-///         Supports any whitelisted ERC20 (USDC, USDT, etc.) with 6 decimals.
-///         Reputation is tracked per payer — their payment history determines deposit
-///         requirements and active pledge limits. Pledge IDs start at 1.
-/// @dev Assumes standard, non-rebasing, non-fee-on-transfer ERC20 tokens only.
+// ── Custom errors (cheaper than revert strings) ────────────────────────────────
+error InvalidAccountId();
+error InvalidAddress();
+error InvalidAmount();
+error TokenNotSupported();
+error WalletNotLinked();
+error WalletAlreadyLinked();
+error LinkingDisabled();
+error LastWalletCannotUnlink();
+error SignatureExpired();
+error SignatureValidityTooLong();
+error InvalidSignature();
+error NotAuthorized();
+error InsufficientBalance();
+error MerchantNotVerified();
+error PayerNotVerified();
+error SenderNotVerified();
+error RecipientNotRegistered();
+error SelfTransferDisallowed();
+error AmountBelowMinimum();
+error CommitmentInPast();
+error CommitmentTooFar();
+error IntervalTooShort();
+error InvalidPeriodCount();
+error PledgeMissing();
+error PledgeNotPending();
+error PledgeNotActive();
+error PledgeNotCancellable();
+error PledgeNotInSettlement();
+error AllPeriodsAccounted();
+error GraceEnded();
+error GraceNotOver();
+error ClaimWindowExpired();
+error ClaimWindowOpen();
+error NothingToClaim();
+error NothingToReclaim();
+error NoMissedInstallments();
+error NoOutstandingDebt();
+error ExtensionTooLate();
+error ExtensionDateInvalid();
+error ExtensionTooLong();
+error DepositLimitReached();
+error DepositBelowRequiredPct();
+error DepositExceedsTotal();
+error DepositExactRemainder();
+error WithdrawalNotActive();
+error TimelockNotElapsed();
+error BaselineExceedsMax();
+error BaselineNotKyc();
+error OnlyOperator();
+
+/// @title RemittancePledge — Account-keyed OFW Payment Pledge System on Morph L2
+/// @notice v2: identity is keyed by accountId (bytes32) derived off-chain from the user's
+///         RemitSafe profile UUID. Wallets are linked to accounts via linkWallet; one
+///         account may own multiple wallets. Reputation, KYC baseline, role, balances,
+///         and active-pledge caps are all account-keyed.
+///         Merchant payments and P2P receipts are credited to an account-held escrow;
+///         users withdraw to any of their linked wallets, subject to daily caps and
+///         tiered timelocks (instant within cap, 1h up to 5×, 24h beyond).
 contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     using ECDSA for bytes32;
     using SafeERC20 for IERC20;
@@ -27,95 +77,81 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     uint256 public constant MAX_PLEDGE_DAYS = 90 days;
     uint256 public constant MAX_EXTENSION   = 30 days;
 
-    /// @dev Merchant must claim a defaulted deposit within this window after the grace period.
     uint256 public constant CLAIM_WINDOW = 45 days;
-    /// @dev Small buffer absorbing validator timestamp drift on time-sensitive checks.
-    uint256 public constant TIME_BUFFER = 15 minutes;
+    uint256 public constant TIME_BUFFER  = 15 minutes;
 
-    // Reputation weights in basis points (out of 10000)
-    uint256 public constant WEIGHT_ON_TIME = 10000; // 100%
-    uint256 public constant WEIGHT_LATE    = 7000;  // 70%
-    // Defaults contribute 0 to weightedScore — only totalWeight is incremented.
+    uint256 public constant WEIGHT_ON_TIME = 10000;
+    uint256 public constant WEIGHT_LATE    = 7000;
 
-    // Trust score tiers (basis points, out of 10000)
-    uint256 public constant TIER_HIGH = 8000; // 80%+
-    uint256 public constant TIER_MID  = 5000; // 50%+
-    uint256 public constant TIER_LOW  = 2000; // 20%+
+    uint256 public constant TIER_HIGH = 8000;
+    uint256 public constant TIER_MID  = 5000;
+    uint256 public constant TIER_LOW  = 2000;
 
-    // Required upfront deposit percentage per tier
-    uint256 public constant DEPOSIT_TIER_HIGH = 20; // 20% upfront
-    uint256 public constant DEPOSIT_TIER_MID  = 30; // 30% upfront
-    uint256 public constant DEPOSIT_TIER_LOW  = 40; // 40% upfront
-    uint256 public constant DEPOSIT_TIER_RISK = 50; // 50% upfront
+    uint256 public constant DEPOSIT_TIER_HIGH = 20;
+    uint256 public constant DEPOSIT_TIER_MID  = 30;
+    uint256 public constant DEPOSIT_TIER_LOW  = 40;
+    uint256 public constant DEPOSIT_TIER_RISK = 50;
 
-    // Max concurrent active pledges a payer can have per trust tier
     uint256 public constant MAX_ACTIVE_NO_HISTORY = 2;
     uint256 public constant MAX_ACTIVE_MID        = 3;
     uint256 public constant MAX_ACTIVE_HIGH       = 5;
 
-    /// @dev Serial defaulters are capped here regardless of any on-time history.
     uint256 public constant DEFAULT_LOCKOUT_THRESHOLD = 3;
 
-    // Protocol fee tiers (basis points, out of 10000) — REWARD-ONLY model.
-    // Everyone pays the standard rate; high-trust payers earn a loyalty discount.
-    uint256 public constant FEE_BPS_STANDARD = 100; // 1%    — new and mid-trust payers
-    uint256 public constant FEE_BPS_LOYALTY  = 75;  // 0.75% — high-trust payers (80%+ score)
+    uint256 public constant FEE_BPS_STANDARD = 100;
+    uint256 public constant FEE_BPS_LOYALTY  = 75;
 
-    /// @dev 1 unit (6 decimals) — prevents dust-pledge reputation washing.
     uint256 public constant MIN_PLEDGE_AMOUNT = 1_000_000;
 
-    // Recurring pledge constraints
     uint256 public constant MIN_RECURRING_INTERVAL = 7 days;
     uint256 public constant MAX_RECURRING_PERIODS  = 12;
 
-    // Reputation weight for each completed recurring installment (50% of full weight).
-    // The remaining 50% is granted as a completion bonus when all periods are settled.
     uint256 public constant WEIGHT_INSTALLMENT_PARTIAL = 5000;
     uint256 public constant WEIGHT_INSTALLMENT_BONUS   = 5000;
 
-    // ── Verification / KYC tiers ───────────────────────────────────────────────
-    /// @dev Minimum baseline trust score required to initiate new transactions.
-    ///      Below this, the payer cannot deposit, pay installments, send P2P, etc.
-    ///      Set to match BASELINE_KYC — KYC approval is the gate.
-    uint256 public constant MIN_TRANSACT_BASELINE = 5000;
-    /// @dev Awarded baseline when admin approves KYC.
-    uint256 public constant BASELINE_KYC = 5000;
-    /// @dev Awarded baseline when KYC is approved AND avatar is uploaded.
+    uint256 public constant MIN_TRANSACT_BASELINE    = 5000;
+    uint256 public constant BASELINE_KYC             = 5000;
     uint256 public constant BASELINE_KYC_PLUS_AVATAR = 6000;
-    /// @dev Maximum admin-settable baseline. Behavioral score can still exceed this.
-    uint256 public constant MAX_BASELINE = 6000;
+    uint256 public constant MAX_BASELINE             = 6000;
+
+    // v2 constants
+    uint256 public constant DEFAULT_DAILY_CAP     = 500 * 10**6; // 500 USDC equiv (6-decimal tokens)
+    uint256 public constant CAP_TIER_HIGH_MULT    = 5;           // 5× cap → 24h timelock
+    uint256 public constant TIMELOCK_1H           = 1 hours;
+    uint256 public constant TIMELOCK_24H          = 24 hours;
+    uint256 public constant LINK_SIG_MAX_VALIDITY = 1 hours;
 
     // ── Types ──────────────────────────────────────────────────────────────────
     enum PledgeStatus { PENDING, COMPLETED, DEFAULTED, CANCELLED }
-
     enum RecurringStatus { ACTIVE, PENDING_SETTLEMENT, COMPLETED, CANCELLED }
 
     struct Pledge {
         uint256 id;
-        address merchant;        // created the pledge (the payment requester)
-        address payer;           // responsible for fulfilling the pledge (the OFW)
-        address token;           // whitelisted ERC20 used for this pledge
-        uint256 totalAmount;     // net amount the merchant ultimately receives
-        uint256 depositedAmount; // running total deposited by the payer (gross, fee-inclusive)
-        uint256 commitmentDate;  // payment deadline
-        uint256 appliedFeeBps;   // fee rate locked in at creation based on payer's trust score
+        bytes32 merchantAccount;
+        bytes32 payerAccount;
+        address depositingWallet; // wallet that submitted the first deposit (refund target)
+        address token;
+        uint256 totalAmount;
+        uint256 depositedAmount;
+        uint256 commitmentDate;
+        uint256 appliedFeeBps;
         PledgeStatus status;
-        bool paidDuringGrace;    // true if completed after the deadline but within grace
+        bool paidDuringGrace;
     }
 
     struct RecurringPledge {
         uint256 id;
-        address merchant;          // created the recurring pledge
-        address payer;             // responsible for paying each installment
+        bytes32 merchantAccount;
+        bytes32 payerAccount;
         address token;
-        uint256 amountPerPeriod;   // net amount merchant receives per installment
-        uint256 intervalSeconds;   // time between installments (min 7 days)
-        uint256 totalPeriods;      // total number of installments (max 12)
-        uint256 periodsCompleted;  // installments fully paid and released
-        uint256 missedCount;       // installments flagged as missed by merchant
-        uint256 totalMissedDebt;   // total unpaid missed installment amounts
-        uint256 nextDueDate;       // due date of the next installment
-        uint256 appliedFeeBps;     // fee rate locked at creation based on payer's trust score
+        uint256 amountPerPeriod;
+        uint256 intervalSeconds;
+        uint256 totalPeriods;
+        uint256 periodsCompleted;
+        uint256 missedCount;
+        uint256 totalMissedDebt;
+        uint256 nextDueDate;
+        uint256 appliedFeeBps;
         RecurringStatus status;
     }
 
@@ -123,80 +159,140 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 onTimeCount;
         uint256 lateCount;
         uint256 defaultCount;
-        uint256 totalCount;    // resolved pledges only (completed + defaulted)
-        uint256 weightedScore; // sum of (pledgeAmount * weight) across resolved pledges
-        uint256 totalWeight;   // sum of pledgeAmount across resolved pledges
+        uint256 totalCount;
+        uint256 weightedScore;
+        uint256 totalWeight;
+    }
+
+    struct PendingWithdrawal {
+        bytes32 accountId;
+        address sourceWallet;
+        address token;
+        uint256 amount;
+        uint256 queuedAt;
+        uint256 claimableAt;
+        bool active;
     }
 
     // ── State ──────────────────────────────────────────────────────────────────
-    /// @notice Returns true if a token is accepted for new pledges.
+    /// @notice Whitelist of ERC20 tokens accepted by the contract.
     mapping(address => bool) public allowedTokens;
 
     address public feeRecipient;
     uint256 public pledgeCounter;
+    uint256 public recurringCounter;
 
     mapping(uint256 => Pledge) public pledges;
-    mapping(address => Reputation) public reputations;
+    mapping(uint256 => RecurringPledge) public recurringPledges;
 
-    /// @notice Number of active pledges currently assigned to a payer.
-    mapping(address => uint256) public activePledgeCount;
+    // Identity registry
+    mapping(address => bytes32) public walletToAccount;
+    mapping(bytes32 => address[]) public accountWallets;
+    mapping(bytes32 => uint256) public linkNonces;
+    address public linkOperator;
 
-    // Per-pledge nonces — prevent replay of signatures.
+    // Account-keyed identity state
+    mapping(bytes32 => Reputation) public accountReputation;
+    mapping(bytes32 => uint256) public accountVerificationBaseline;
+    mapping(bytes32 => bool) public accountIsMerchantVerified;
+    mapping(bytes32 => uint256) public accountActivePledgeCount;
+
+    // Account-keyed pledge indexes (paginated externally)
+    mapping(bytes32 => uint256[]) private accountPayerPledgeIds;
+    mapping(bytes32 => uint256[]) private accountMerchantPledgeIds;
+    mapping(bytes32 => uint256[]) private accountPayerRecurringIds;
+    mapping(bytes32 => uint256[]) private accountMerchantRecurringIds;
+
+    // Escrow & withdrawal
+    mapping(bytes32 => mapping(address => uint256)) public accountBalances;
+    mapping(address => mapping(address => uint256)) public walletDailyCap;
+    mapping(address => mapping(address => bool)) public walletCapConfigured;
+    mapping(address => mapping(address => mapping(uint256 => uint256))) public dailyWithdrawnAmount;
+    mapping(uint256 => PendingWithdrawal) public pendingWithdrawals;
+    uint256 public pendingWithdrawalCounter;
+
+    // Per-pledge signature nonces
     mapping(uint256 => uint256) public extensionNonces;
     mapping(uint256 => uint256) public cancelNonces;
+    mapping(uint256 => uint256) public recurringCancelNonces;
 
-    // NOTE: these arrays grow unboundedly. Use the paginated getters for heavy users.
-    mapping(address => uint256[]) private payerPledgeIds;
-    mapping(address => uint256[]) private merchantPledgeIds;
-
-    // ── Verification State ─────────────────────────────────────────────────────
-    /// @notice Per-OFW baseline trust score set by admin/operator based on KYC.
-    ///         Behavioral score (from pledge history) can rise above this.
-    mapping(address => uint256) public verificationBaseline;
-
-    /// @notice Per-merchant binary verification flag set by admin.
-    mapping(address => bool) public isMerchantVerified;
-
-    /// @notice Backend wallet authorized to update OFW baselines automatically
-    ///         (e.g. avatar upload boost). Cannot touch merchant verification.
+    // Avatar-boost operator (narrow role)
     address public verificationOperator;
 
-    // ── Recurring Pledge State ─────────────────────────────────────────────────
-    uint256 public recurringCounter;
-    mapping(uint256 => RecurringPledge) public recurringPledges;
-    mapping(uint256 => uint256) public recurringCancelNonces;
-    mapping(address => uint256[]) private payerRecurringIds;
-    mapping(address => uint256[]) private merchantRecurringIds;
-
     // ── Events ─────────────────────────────────────────────────────────────────
+    // Pledge events
     event PledgeCreated(
         uint256 indexed pledgeId,
-        address indexed merchant,
-        address indexed payer,
+        bytes32 indexed merchantAccount,
+        bytes32 indexed payerAccount,
         address token,
         uint256 totalAmount,
         uint256 commitmentDate,
         uint256 appliedFeeBps
     );
-    event DepositMade(uint256 indexed pledgeId, address indexed payer, uint256 amount, uint256 totalDeposited);
-    event PledgeCompleted(uint256 indexed pledgeId, address indexed merchant, uint256 amount);
-    event PledgeDefaulted(uint256 indexed pledgeId, address indexed merchant, uint256 amount);
-    event PledgeCancelled(uint256 indexed pledgeId, address indexed payer, address indexed merchant, uint256 refund);
-    event DepositReclaimed(uint256 indexed pledgeId, address indexed payer, uint256 amount);
+    event DepositMade(
+        uint256 indexed pledgeId,
+        bytes32 indexed payerAccount,
+        address wallet,
+        uint256 amount,
+        uint256 totalDeposited
+    );
+    event PledgeCompleted(uint256 indexed pledgeId, bytes32 indexed merchantAccount, uint256 amount);
+    event PledgeDefaulted(uint256 indexed pledgeId, bytes32 indexed merchantAccount, uint256 amount);
+    event PledgeCancelled(
+        uint256 indexed pledgeId,
+        bytes32 indexed payerAccount,
+        bytes32 indexed merchantAccount,
+        uint256 refund
+    );
+    event DepositReclaimed(uint256 indexed pledgeId, bytes32 indexed payerAccount, uint256 amount);
     event DeadlineExtended(uint256 indexed pledgeId, uint256 oldDate, uint256 newDate);
     event FeeCollected(uint256 indexed pledgeId, address indexed feeRecipient, uint256 fee);
+
+    // Admin / config events
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event TokenAllowanceSet(address indexed token, bool allowed);
-
-    // Verification events
-    event VerificationBaselineChanged(address indexed ofw, uint256 oldScore, uint256 newScore);
-    event MerchantVerificationChanged(address indexed merchant, bool verified);
+    event AccountVerificationBaselineChanged(bytes32 indexed accountId, uint256 oldScore, uint256 newScore);
+    event AccountMerchantVerificationChanged(bytes32 indexed accountId, bool verified);
     event VerificationOperatorChanged(address indexed oldOp, address indexed newOp);
+    event LinkOperatorChanged(address indexed oldOp, address indexed newOp);
 
-    // P2P instant transfer event
+    // Linking events
+    event WalletLinked(bytes32 indexed accountId, address indexed wallet, bool isPrimary);
+    event WalletUnlinked(bytes32 indexed accountId, address indexed wallet);
+    event PanicUnlinkAll(bytes32 indexed accountId, address indexed survivor);
+
+    // Escrow / withdrawal events
+    event FundsCredited(bytes32 indexed accountId, address indexed token, uint256 amount, string source);
+    event WithdrawalInstant(
+        bytes32 indexed accountId,
+        address indexed wallet,
+        address indexed token,
+        uint256 amount
+    );
+    event WithdrawalQueued(
+        uint256 indexed withdrawalId,
+        bytes32 indexed accountId,
+        address indexed wallet,
+        address token,
+        uint256 amount,
+        uint256 claimableAt
+    );
+    event WithdrawalClaimed(
+        uint256 indexed withdrawalId,
+        bytes32 indexed accountId,
+        address indexed wallet,
+        uint256 amount
+    );
+    event WithdrawalCancelled(uint256 indexed withdrawalId, bytes32 indexed accountId, string reason);
+    event DailyCapChanged(address indexed wallet, address indexed token, uint256 oldCap, uint256 newCap);
+
+    // P2P event — keeps wallet-addressed fields for off-chain observability; adds account context
     event P2PSent(
         address indexed sender,
         address indexed recipient,
+        bytes32 senderAccount,
+        bytes32 recipientAccount,
         address token,
         uint256 amount,
         uint256 fee
@@ -205,8 +301,8 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     // Recurring pledge events
     event RecurringPledgeCreated(
         uint256 indexed recurringId,
-        address indexed merchant,
-        address indexed payer,
+        bytes32 indexed merchantAccount,
+        bytes32 indexed payerAccount,
         address token,
         uint256 amountPerPeriod,
         uint256 intervalSeconds,
@@ -214,65 +310,276 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 firstDueDate,
         uint256 appliedFeeBps
     );
-    event InstallmentPaid(uint256 indexed recurringId, address indexed payer, uint256 period, uint256 amount);
+    event InstallmentPaid(uint256 indexed recurringId, bytes32 indexed payerAccount, uint256 period, uint256 amount);
     event InstallmentMissed(uint256 indexed recurringId, uint256 period, uint256 debtAdded);
-    event DebtSettled(uint256 indexed recurringId, address indexed payer, uint256 amount);
-    event RecurringPledgeCompleted(uint256 indexed recurringId, address indexed merchant);
-    event RecurringPledgeCancelled(uint256 indexed recurringId, address indexed payer, address indexed merchant);
+    event DebtSettled(uint256 indexed recurringId, bytes32 indexed payerAccount, uint256 amount);
+    event RecurringPledgeCompleted(uint256 indexed recurringId, bytes32 indexed merchantAccount);
+    event RecurringPledgeCancelled(
+        uint256 indexed recurringId,
+        bytes32 indexed payerAccount,
+        bytes32 indexed merchantAccount
+    );
 
     // ── Constructor ────────────────────────────────────────────────────────────
-    /// @param initialTokens List of token addresses to whitelist at deployment (e.g. [USDC, USDT])
-    /// @param _feeRecipient  Address that receives the protocol fee on completed pledges
-    constructor(address[] memory initialTokens, address _feeRecipient) Ownable(msg.sender) {
-        require(initialTokens.length > 0, "At least one token required");
-        require(_feeRecipient != address(0), "Invalid fee recipient");
+    /// @param initialTokens List of token addresses to whitelist at deployment
+    /// @param _feeRecipient Recipient of the protocol fee
+    /// @param _linkOperator Wallet authorized to co-sign linkWallet approvals
+    /// @param _verificationOperator Wallet authorized to call boostVerificationBaseline (pass address(0) to disable until later)
+    constructor(
+        address[] memory initialTokens,
+        address _feeRecipient,
+        address _linkOperator,
+        address _verificationOperator
+    ) Ownable(msg.sender) {
+        if (initialTokens.length == 0) revert InvalidAmount();
+        if (_feeRecipient == address(0)) revert InvalidAddress();
         for (uint256 i = 0; i < initialTokens.length; i++) {
-            require(initialTokens[i] != address(0), "Invalid token address");
+            if (initialTokens[i] == address(0)) revert InvalidAddress();
             allowedTokens[initialTokens[i]] = true;
             emit TokenAllowanceSet(initialTokens[i], true);
         }
         feeRecipient = _feeRecipient;
+        linkOperator = _linkOperator;
+        verificationOperator = _verificationOperator;
+        emit LinkOperatorChanged(address(0), _linkOperator);
+        emit VerificationOperatorChanged(address(0), _verificationOperator);
+    }
+
+    // ── Identity / Wallet Linking ──────────────────────────────────────────────
+
+    /// @notice Link the caller's wallet to a RemitSafe account.
+    /// @dev Requires an off-chain signature from the linkOperator authorizing this specific
+    ///      wallet/account pairing. Each link consumes the account's linkNonce to prevent replay.
+    function linkWallet(
+        bytes32 accountId,
+        uint256 sigExpiry,
+        bytes calldata operatorSig
+    ) external whenNotPaused {
+        if (accountId == bytes32(0)) revert InvalidAccountId();
+        if (walletToAccount[msg.sender] != bytes32(0)) revert WalletAlreadyLinked();
+        if (block.timestamp > sigExpiry) revert SignatureExpired();
+        if (sigExpiry > block.timestamp + LINK_SIG_MAX_VALIDITY) revert SignatureValidityTooLong();
+        if (linkOperator == address(0)) revert LinkingDisabled();
+
+        bytes32 msgHash = keccak256(
+            abi.encodePacked(
+                block.chainid,
+                address(this),
+                "link",
+                accountId,
+                msg.sender,
+                sigExpiry,
+                linkNonces[accountId]
+            )
+        );
+        bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(msgHash);
+        if (ECDSA.recover(ethHash, operatorSig) != linkOperator) revert InvalidSignature();
+
+        linkNonces[accountId]++;
+        walletToAccount[msg.sender] = accountId;
+        accountWallets[accountId].push(msg.sender);
+
+        bool isPrimary = accountWallets[accountId].length == 1;
+        emit WalletLinked(accountId, msg.sender, isPrimary);
+    }
+
+    /// @notice Unlink the caller's wallet from its account.
+    /// @dev Cannot unlink the last wallet on an account — use the account-closure flow for that.
+    ///      Pending withdrawals from this wallet are implicitly invalidated at claim time.
+    function unlinkWallet() external whenNotPaused {
+        bytes32 accountId = walletToAccount[msg.sender];
+        if (accountId == bytes32(0)) revert WalletNotLinked();
+        if (accountWallets[accountId].length <= 1) revert LastWalletCannotUnlink();
+
+        walletToAccount[msg.sender] = bytes32(0);
+
+        address[] storage wallets = accountWallets[accountId];
+        for (uint256 i = 0; i < wallets.length; i++) {
+            if (wallets[i] == msg.sender) {
+                wallets[i] = wallets[wallets.length - 1];
+                wallets.pop();
+                break;
+            }
+        }
+
+        emit WalletUnlinked(accountId, msg.sender);
+    }
+
+    /// @notice Emergency: unlink every wallet on the caller's account except the caller's.
+    /// @dev Use when a wallet is suspected compromised. Other wallets' pending withdrawals
+    ///      become invalid at claim time. Survivor stays linked and operational.
+    function panicUnlink() external whenNotPaused {
+        bytes32 accountId = walletToAccount[msg.sender];
+        if (accountId == bytes32(0)) revert WalletNotLinked();
+
+        address[] storage wallets = accountWallets[accountId];
+        uint256 len = wallets.length;
+        for (uint256 i = 0; i < len; i++) {
+            address w = wallets[i];
+            if (w != msg.sender) {
+                walletToAccount[w] = bytes32(0);
+                emit WalletUnlinked(accountId, w);
+            }
+        }
+
+        delete accountWallets[accountId];
+        accountWallets[accountId].push(msg.sender);
+
+        emit PanicUnlinkAll(accountId, msg.sender);
+    }
+
+    // ── Withdrawal ─────────────────────────────────────────────────────────────
+
+    /// @notice Withdraw from the caller's account-held escrow balance to the caller's own wallet.
+    /// @dev Tiered timelock:
+    ///        - Within remaining daily cap → instant
+    ///        - amount ≤ cap × 5            → 1h timelock (queued)
+    ///        - amount > cap × 5            → 24h timelock (queued)
+    ///      Queued amount is debited from the account balance immediately to prevent
+    ///      double-spend; cancel returns it.
+    function withdraw(address token, uint256 amount)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 withdrawalId)
+    {
+        bytes32 accountId = walletToAccount[msg.sender];
+        if (accountId == bytes32(0)) revert WalletNotLinked();
+        if (!allowedTokens[token]) revert TokenNotSupported();
+        if (amount == 0) revert InvalidAmount();
+        if (accountBalances[accountId][token] < amount) revert InsufficientBalance();
+
+        // Resolve cap: unconfigured = DEFAULT_DAILY_CAP, 0 = disabled, max = unlimited
+        uint256 cap;
+        if (!walletCapConfigured[msg.sender][token]) {
+            cap = DEFAULT_DAILY_CAP;
+        } else {
+            cap = walletDailyCap[msg.sender][token];
+            if (cap == 0) revert NotAuthorized(); // withdrawals explicitly disabled
+        }
+
+        uint256 dayIndex = block.timestamp / 1 days;
+        uint256 used = dailyWithdrawnAmount[msg.sender][token][dayIndex];
+
+        // Unlimited cap → always instant
+        bool unlimited = cap == type(uint256).max;
+
+        // Tier 1: within remaining daily cap (or unlimited) → instant transfer
+        if (unlimited || used + amount <= cap) {
+            if (!unlimited) {
+                dailyWithdrawnAmount[msg.sender][token][dayIndex] = used + amount;
+            }
+            accountBalances[accountId][token] -= amount;
+            IERC20(token).safeTransfer(msg.sender, amount);
+            emit WithdrawalInstant(accountId, msg.sender, token, amount);
+            return 0;
+        }
+
+        // Tier 2/3: queue with timelock based on size vs cap
+        uint256 timelock = amount <= cap * CAP_TIER_HIGH_MULT ? TIMELOCK_1H : TIMELOCK_24H;
+        uint256 claimableAt = block.timestamp + timelock;
+        withdrawalId = ++pendingWithdrawalCounter;
+
+        pendingWithdrawals[withdrawalId] = PendingWithdrawal({
+            accountId: accountId,
+            sourceWallet: msg.sender,
+            token: token,
+            amount: amount,
+            queuedAt: block.timestamp,
+            claimableAt: claimableAt,
+            active: true
+        });
+
+        // Debit immediately so the user can't queue multiple withdrawals against the same funds
+        accountBalances[accountId][token] -= amount;
+
+        emit WithdrawalQueued(withdrawalId, accountId, msg.sender, token, amount, claimableAt);
+    }
+
+    /// @notice Cancel a pending withdrawal. Any wallet linked to the same account can cancel.
+    function cancelPendingWithdrawal(uint256 id) external nonReentrant whenNotPaused {
+        PendingWithdrawal storage w = pendingWithdrawals[id];
+        if (!w.active) revert WithdrawalNotActive();
+        if (walletToAccount[msg.sender] != w.accountId) revert NotAuthorized();
+
+        w.active = false;
+        accountBalances[w.accountId][w.token] += w.amount;
+
+        emit WithdrawalCancelled(id, w.accountId, "user_cancelled");
+    }
+
+    /// @notice Claim a pending withdrawal once its timelock has elapsed.
+    /// @dev Re-checks that the source wallet is still linked to the originating account.
+    ///      If the wallet has been unlinked (panic or explicit), the withdrawal is auto-
+    ///      cancelled and the funds returned to the account balance.
+    function claimPendingWithdrawal(uint256 id) external nonReentrant whenNotPaused {
+        PendingWithdrawal storage w = pendingWithdrawals[id];
+        if (!w.active) revert WithdrawalNotActive();
+        if (block.timestamp < w.claimableAt) revert TimelockNotElapsed();
+
+        w.active = false;
+
+        if (walletToAccount[w.sourceWallet] != w.accountId) {
+            accountBalances[w.accountId][w.token] += w.amount;
+            emit WithdrawalCancelled(id, w.accountId, "wallet_unlinked");
+            return;
+        }
+
+        IERC20(w.token).safeTransfer(w.sourceWallet, w.amount);
+        emit WithdrawalClaimed(id, w.accountId, w.sourceWallet, w.amount);
+    }
+
+    /// @notice Configure the caller's per-wallet daily withdrawal cap for a given token.
+    /// @dev Setting newCap = type(uint256).max effectively removes the cap.
+    /// @notice Configure the caller's per-wallet daily withdrawal cap for a token.
+    /// @dev Semantics:
+    ///        - newCap == 0                  → withdrawals explicitly DISABLED
+    ///        - newCap == type(uint256).max  → UNLIMITED (every withdrawal is instant)
+    ///        - any other value              → that amount per day
+    ///      Unconfigured wallets use DEFAULT_DAILY_CAP.
+    function setWalletDailyCap(address token, uint256 newCap) external whenNotPaused {
+        if (walletToAccount[msg.sender] == bytes32(0)) revert WalletNotLinked();
+        if (!allowedTokens[token]) revert TokenNotSupported();
+
+        uint256 oldCap = walletCapConfigured[msg.sender][token]
+            ? walletDailyCap[msg.sender][token]
+            : DEFAULT_DAILY_CAP;
+        walletDailyCap[msg.sender][token] = newCap;
+        walletCapConfigured[msg.sender][token] = true;
+        emit DailyCapChanged(msg.sender, token, oldCap, newCap);
     }
 
     // ── Merchant Functions ─────────────────────────────────────────────────────
 
-    /// @notice Merchant creates a payment request targeting a specific payer.
-    /// @dev No funds are transferred at creation — the payer deposits later via submitDeposit().
-    ///      The fee rate is locked in now based on the payer's current trust score so both
-    ///      parties know the exact gross amount required before any funds move.
-    /// @param token          Whitelisted ERC20 token for this pledge
-    /// @param payer          Address of the OFW who will fulfill this payment
-    /// @param totalAmount    Net token amount the merchant will receive (6 decimals)
-    /// @param commitmentDate Unix timestamp of the payment deadline (max 90 days out)
+    /// @notice Merchant creates a payment request targeting a specific payer account.
+    /// @dev Caller's wallet must be linked to a verified-merchant account. Payer account
+    ///      must be KYC-approved (baseline ≥ MIN_TRANSACT_BASELINE) but does not need to
+    ///      have any linked wallets at creation time — the payer can link later and deposit.
     function createPledge(
         address token,
-        address payer,
+        bytes32 payerAccount,
         uint256 totalAmount,
         uint256 commitmentDate
     ) external whenNotPaused {
-        require(isMerchantVerified[msg.sender], "Merchant not verified");
-        require(payer != address(0), "Invalid payer address");
-        require(payer != msg.sender, "Merchant cannot be the payer");
-        require(
-            verificationBaseline[payer] >= MIN_TRANSACT_BASELINE,
-            "Payer not verified"
-        );
-        require(allowedTokens[token], "Token not supported");
-        require(totalAmount >= MIN_PLEDGE_AMOUNT, "Amount below minimum");
-        require(commitmentDate > block.timestamp, "Commitment date must be in future");
-        require(
-            commitmentDate <= block.timestamp + MAX_PLEDGE_DAYS,
-            "Max 90 days commitment"
-        );
+        bytes32 merchantAccount = walletToAccount[msg.sender];
+        if (merchantAccount == bytes32(0)) revert WalletNotLinked();
+        if (!accountIsMerchantVerified[merchantAccount]) revert MerchantNotVerified();
+        if (payerAccount == bytes32(0)) revert InvalidAccountId();
+        if (payerAccount == merchantAccount) revert SelfTransferDisallowed();
+        if (accountVerificationBaseline[payerAccount] < MIN_TRANSACT_BASELINE) revert PayerNotVerified();
+        if (!allowedTokens[token]) revert TokenNotSupported();
+        if (totalAmount < MIN_PLEDGE_AMOUNT) revert AmountBelowMinimum();
+        if (commitmentDate <= block.timestamp) revert CommitmentInPast();
+        if (commitmentDate > block.timestamp + MAX_PLEDGE_DAYS) revert CommitmentTooFar();
 
-        // Fee rate is locked at creation based on the payer's current trust score.
-        uint256 feeBps = getServiceFeeBps(payer);
+        uint256 feeBps = getServiceFeeBps(payerAccount);
         uint256 pledgeId = ++pledgeCounter;
 
         pledges[pledgeId] = Pledge({
             id: pledgeId,
-            merchant: msg.sender,
-            payer: payer,
+            merchantAccount: merchantAccount,
+            payerAccount: payerAccount,
+            depositingWallet: address(0),
             token: token,
             totalAmount: totalAmount,
             depositedAmount: 0,
@@ -282,49 +589,49 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
             paidDuringGrace: false
         });
 
-        payerPledgeIds[payer].push(pledgeId);
-        merchantPledgeIds[msg.sender].push(pledgeId);
+        accountPayerPledgeIds[payerAccount].push(pledgeId);
+        accountMerchantPledgeIds[merchantAccount].push(pledgeId);
 
-        emit PledgeCreated(pledgeId, msg.sender, payer, token, totalAmount, commitmentDate, feeBps);
+        emit PledgeCreated(
+            pledgeId,
+            merchantAccount,
+            payerAccount,
+            token,
+            totalAmount,
+            commitmentDate,
+            feeBps
+        );
     }
 
-    /// @notice Merchant creates a recurring payment request targeting a specific payer.
-    /// @dev No active slot is consumed at creation — the payer hasn't consented yet.
-    ///      The slot is taken on the payer's first installment payment, mirroring one-shot pledges.
-    /// @param token           Whitelisted ERC20 token
-    /// @param payer           Address of the OFW who will pay each installment
-    /// @param amountPerPeriod Net token amount the merchant receives each installment
-    /// @param intervalSeconds Time between installments — minimum 7 days
-    /// @param totalPeriods    Number of installments — maximum 12
-    /// @param firstDueDate    Due date of the first installment
+    /// @notice Merchant creates a recurring payment request targeting a specific payer account.
+    /// @dev Active slot is consumed on the payer's first installment, not at creation.
     function createRecurringPledge(
         address token,
-        address payer,
+        bytes32 payerAccount,
         uint256 amountPerPeriod,
         uint256 intervalSeconds,
         uint256 totalPeriods,
         uint256 firstDueDate
     ) external whenNotPaused {
-        require(isMerchantVerified[msg.sender], "Merchant not verified");
-        require(payer != address(0), "Invalid payer address");
-        require(payer != msg.sender, "Merchant cannot be the payer");
-        require(
-            verificationBaseline[payer] >= MIN_TRANSACT_BASELINE,
-            "Payer not verified"
-        );
-        require(allowedTokens[token], "Token not supported");
-        require(amountPerPeriod >= MIN_PLEDGE_AMOUNT, "Amount below minimum");
-        require(intervalSeconds >= MIN_RECURRING_INTERVAL, "Interval too short");
-        require(totalPeriods >= 1 && totalPeriods <= MAX_RECURRING_PERIODS, "Invalid period count");
-        require(firstDueDate > block.timestamp, "First due date must be in future");
+        bytes32 merchantAccount = walletToAccount[msg.sender];
+        if (merchantAccount == bytes32(0)) revert WalletNotLinked();
+        if (!accountIsMerchantVerified[merchantAccount]) revert MerchantNotVerified();
+        if (payerAccount == bytes32(0)) revert InvalidAccountId();
+        if (payerAccount == merchantAccount) revert SelfTransferDisallowed();
+        if (accountVerificationBaseline[payerAccount] < MIN_TRANSACT_BASELINE) revert PayerNotVerified();
+        if (!allowedTokens[token]) revert TokenNotSupported();
+        if (amountPerPeriod < MIN_PLEDGE_AMOUNT) revert AmountBelowMinimum();
+        if (intervalSeconds < MIN_RECURRING_INTERVAL) revert IntervalTooShort();
+        if (totalPeriods == 0 || totalPeriods > MAX_RECURRING_PERIODS) revert InvalidPeriodCount();
+        if (firstDueDate <= block.timestamp) revert CommitmentInPast();
 
-        uint256 feeBps = getServiceFeeBps(payer);
+        uint256 feeBps = getServiceFeeBps(payerAccount);
         uint256 recurringId = ++recurringCounter;
 
         recurringPledges[recurringId] = RecurringPledge({
             id: recurringId,
-            merchant: msg.sender,
-            payer: payer,
+            merchantAccount: merchantAccount,
+            payerAccount: payerAccount,
             token: token,
             amountPerPeriod: amountPerPeriod,
             intervalSeconds: intervalSeconds,
@@ -337,83 +644,70 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
             status: RecurringStatus.ACTIVE
         });
 
-        payerRecurringIds[payer].push(recurringId);
-        merchantRecurringIds[msg.sender].push(recurringId);
+        accountPayerRecurringIds[payerAccount].push(recurringId);
+        accountMerchantRecurringIds[merchantAccount].push(recurringId);
 
         emit RecurringPledgeCreated(
-            recurringId, msg.sender, payer, token,
-            amountPerPeriod, intervalSeconds, totalPeriods, firstDueDate, feeBps
+            recurringId,
+            merchantAccount,
+            payerAccount,
+            token,
+            amountPerPeriod,
+            intervalSeconds,
+            totalPeriods,
+            firstDueDate,
+            feeBps
         );
     }
 
-    /// @notice Merchant claims the full locked deposit after a pledge default.
-    /// @dev Callable only after the grace period and within CLAIM_WINDOW.
-    /// @param pledgeId ID of the defaulted pledge
+    /// @notice Merchant claims a defaulted pledge's deposit. Credited to merchant's escrow balance.
     function claimDefaultedDeposit(uint256 pledgeId) external nonReentrant whenNotPaused {
-        require(isMerchantVerified[msg.sender], "Merchant not verified");
-        Pledge storage pledge = pledges[pledgeId];
+        bytes32 callerAccount = walletToAccount[msg.sender];
+        if (callerAccount == bytes32(0)) revert WalletNotLinked();
+        if (!accountIsMerchantVerified[callerAccount]) revert MerchantNotVerified();
 
-        require(pledge.id != 0, "Pledge does not exist");
-        require(msg.sender == pledge.merchant, "Only merchant can claim");
-        require(pledge.status == PledgeStatus.PENDING, "Pledge not pending");
-        require(pledge.depositedAmount > 0, "Nothing deposited to claim");
-        require(
-            block.timestamp > pledge.commitmentDate + GRACE_PERIOD + TIME_BUFFER,
-            "Grace period not over yet"
-        );
-        require(
-            block.timestamp <= pledge.commitmentDate + GRACE_PERIOD + CLAIM_WINDOW,
-            "Claim window has expired"
-        );
+        Pledge storage pledge = pledges[pledgeId];
+        if (pledge.id == 0) revert PledgeMissing();
+        if (callerAccount != pledge.merchantAccount) revert NotAuthorized();
+        if (pledge.status != PledgeStatus.PENDING) revert PledgeNotPending();
+        if (pledge.depositedAmount == 0) revert NothingToClaim();
+        if (block.timestamp <= pledge.commitmentDate + GRACE_PERIOD + TIME_BUFFER) revert GraceNotOver();
+        if (block.timestamp > pledge.commitmentDate + GRACE_PERIOD + CLAIM_WINDOW) revert ClaimWindowExpired();
 
         uint256 claimAmount = pledge.depositedAmount;
 
-        // Effects before interactions.
         pledge.status = PledgeStatus.DEFAULTED;
         pledge.depositedAmount = 0;
-        _recordDefault(pledge.payer, pledge.totalAmount);
-        _decrementActive(pledge.payer);
+        _recordDefault(pledge.payerAccount, pledge.totalAmount);
+        _decrementActive(pledge.payerAccount);
 
-        // Interactions
-        IERC20(pledge.token).safeTransfer(pledge.merchant, claimAmount);
+        accountBalances[pledge.merchantAccount][pledge.token] += claimAmount;
+        emit FundsCredited(pledge.merchantAccount, pledge.token, claimAmount, "default_claimed");
 
-        emit PledgeDefaulted(pledgeId, pledge.merchant, claimAmount);
+        emit PledgeDefaulted(pledgeId, pledge.merchantAccount, claimAmount);
     }
 
     /// @notice Merchant flags a missed installment after the grace period ends.
-    /// @dev Records the debt. No funds are transferred — merchant is compensated at settlement.
-    ///      Schedule advances to the next period automatically.
-    /// @param recurringId ID of the recurring pledge
     function markMissedInstallment(uint256 recurringId) external nonReentrant whenNotPaused {
         RecurringPledge storage rp = recurringPledges[recurringId];
+        bytes32 callerAccount = walletToAccount[msg.sender];
 
-        require(rp.id != 0, "Recurring pledge does not exist");
-        require(msg.sender == rp.merchant, "Only merchant can mark missed");
-        require(rp.status == RecurringStatus.ACTIVE, "Pledge not active");
-        require(
-            rp.periodsCompleted + rp.missedCount < rp.totalPeriods,
-            "All periods accounted for"
-        );
-        require(
-            block.timestamp > rp.nextDueDate + GRACE_PERIOD + TIME_BUFFER,
-            "Grace period not over yet"
-        );
+        if (rp.id == 0) revert PledgeMissing();
+        if (callerAccount != rp.merchantAccount) revert NotAuthorized();
+        if (rp.status != RecurringStatus.ACTIVE) revert PledgeNotActive();
+        if (rp.periodsCompleted + rp.missedCount >= rp.totalPeriods) revert AllPeriodsAccounted();
+        if (block.timestamp <= rp.nextDueDate + GRACE_PERIOD + TIME_BUFFER) revert GraceNotOver();
 
         uint256 currentPeriod = rp.periodsCompleted + rp.missedCount + 1;
 
-        // Effects
         rp.missedCount++;
         rp.totalMissedDebt += rp.amountPerPeriod;
         rp.nextDueDate += rp.intervalSeconds;
 
-        // Reputation — drag the trust score only if the payer has engaged with
-        // this contract (at least one installment paid). An unengaged contract is
-        // a non-event for the payer's reputation; the merchant can't unilaterally
-        // damage someone's score by creating a recurring they never accepted.
-        // defaultCount is bumped once per failed contract in _finalizeRecurring.
+        // Drag the payer's reputation only if they engaged (at least one installment paid)
         if (rp.periodsCompleted > 0) {
             // slither-disable-next-line divide-before-multiply
-            reputations[rp.payer].totalWeight += rp.amountPerPeriod / 2;
+            accountReputation[rp.payerAccount].totalWeight += rp.amountPerPeriod / 2;
         }
 
         emit InstallmentMissed(recurringId, currentPeriod, rp.amountPerPeriod);
@@ -425,138 +719,102 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
 
     // ── Payer Functions ────────────────────────────────────────────────────────
 
-    /// @notice Payer deposits funds toward a pledge created by a merchant.
-    /// @dev First call: must meet the minimum deposit percentage based on payer's trust score.
-    ///      Subsequent call: must be the exact remaining balance (all-or-nothing top-up).
-    ///      Active pledge count is incremented on the first deposit — this is when the payer
-    ///      accepts the obligation. If the payer is at their limit, full payment bypasses it
-    ///      since the pledge is released immediately and never sits as an ongoing obligation.
-    /// @param pledgeId ID of the pledge to deposit toward
-    /// @param amount   Amount of tokens to deposit
+    /// @notice Payer deposits funds toward a pledge. Any of their linked wallets can be the source.
+    /// @dev First deposit also records the depositing wallet for refund routing (cancel / reclaim).
     function submitDeposit(uint256 pledgeId, uint256 amount)
         external
         nonReentrant
         whenNotPaused
     {
-        require(
-            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
-            "Payer not verified"
-        );
-        Pledge storage pledge = pledges[pledgeId];
+        bytes32 payerAccount = walletToAccount[msg.sender];
+        if (payerAccount == bytes32(0)) revert WalletNotLinked();
+        if (accountVerificationBaseline[payerAccount] < MIN_TRANSACT_BASELINE) revert PayerNotVerified();
 
-        require(pledge.id != 0, "Pledge does not exist");
-        require(msg.sender == pledge.payer, "Only the assigned payer can deposit");
-        require(pledge.status == PledgeStatus.PENDING, "Pledge not pending");
-        require(
-            block.timestamp <= pledge.commitmentDate + GRACE_PERIOD,
-            "Grace period has ended"
-        );
-        require(amount > 0, "Amount must be > 0");
+        Pledge storage pledge = pledges[pledgeId];
+        if (pledge.id == 0) revert PledgeMissing();
+        if (payerAccount != pledge.payerAccount) revert NotAuthorized();
+        if (pledge.status != PledgeStatus.PENDING) revert PledgeNotPending();
+        if (block.timestamp > pledge.commitmentDate + GRACE_PERIOD) revert GraceEnded();
+        if (amount == 0) revert InvalidAmount();
 
         uint256 gross = _grossWithFee(pledge.totalAmount, pledge.appliedFeeBps);
 
         if (pledge.depositedAmount == 0) {
-            // First deposit — check active pledge limit and minimum deposit requirement.
             bool isFullPayment = amount >= gross;
-            uint256 maxActive = getMaxActivePledges(pledge.payer);
-            require(
-                activePledgeCount[pledge.payer] < maxActive || isFullPayment,
-                "Active pledge limit reached - full payment required to proceed"
-            );
+            uint256 maxActive = getAccountMaxActivePledges(pledge.payerAccount);
+            if (accountActivePledgeCount[pledge.payerAccount] >= maxActive && !isFullPayment) revert DepositLimitReached();
 
-            uint256 requiredPct = getRequiredDepositPct(pledge.payer);
-            require(
-                amount >= (gross * requiredPct) / 100,
-                string(abi.encodePacked(
-                    "Your trust score requires at least ",
-                    Strings.toString(requiredPct),
-                    "% upfront"
-                ))
-            );
-            require(amount <= gross, "Deposit cannot exceed total");
+            uint256 requiredPct = getAccountRequiredDepositPct(pledge.payerAccount);
+            if (amount < (gross * requiredPct) / 100) revert DepositBelowRequiredPct();
+            if (amount > gross) revert DepositExceedsTotal();
 
-            activePledgeCount[pledge.payer]++;
+            accountActivePledgeCount[pledge.payerAccount]++;
+            pledge.depositingWallet = msg.sender;
         } else {
-            // Subsequent deposit — must be the exact remaining balance.
-            require(
-                pledge.depositedAmount + amount == gross,
-                "Must deposit the exact remaining balance"
-            );
+            if (pledge.depositedAmount + amount != gross) revert DepositExactRemainder();
         }
 
-        // Effects
         if (block.timestamp > pledge.commitmentDate) {
             pledge.paidDuringGrace = true;
         }
         pledge.depositedAmount += amount;
 
-        // Interactions
         IERC20(pledge.token).safeTransferFrom(msg.sender, address(this), amount);
 
-        emit DepositMade(pledgeId, msg.sender, amount, pledge.depositedAmount);
+        emit DepositMade(pledgeId, pledge.payerAccount, msg.sender, amount, pledge.depositedAmount);
 
         if (pledge.depositedAmount >= gross) {
             _releaseFunds(pledgeId);
         }
     }
 
-    /// @notice Payer reclaims the deposit once the merchant's claim window has closed.
-    /// @dev The default is still recorded — reclaiming does not escape the reputation penalty.
-    /// @param pledgeId ID of the unclaimed defaulted pledge
+    /// @notice Payer reclaims their deposit when the merchant's claim window has closed.
+    /// @dev Refund goes directly to the depositing wallet (refund paths bypass escrow per spec #14).
     function reclaimDeposit(uint256 pledgeId) external nonReentrant whenNotPaused {
         Pledge storage pledge = pledges[pledgeId];
+        bytes32 callerAccount = walletToAccount[msg.sender];
 
-        require(pledge.id != 0, "Pledge does not exist");
-        require(msg.sender == pledge.payer, "Only the payer can reclaim");
-        require(pledge.status == PledgeStatus.PENDING, "Pledge not pending");
-        require(pledge.depositedAmount > 0, "Nothing to reclaim");
-        require(
-            block.timestamp
-                > pledge.commitmentDate + GRACE_PERIOD + CLAIM_WINDOW + TIME_BUFFER,
-            "Merchant claim window still open"
-        );
+        if (pledge.id == 0) revert PledgeMissing();
+        if (callerAccount != pledge.payerAccount) revert NotAuthorized();
+        if (pledge.status != PledgeStatus.PENDING) revert PledgeNotPending();
+        if (pledge.depositedAmount == 0) revert NothingToReclaim();
+        if (block.timestamp <= pledge.commitmentDate + GRACE_PERIOD + CLAIM_WINDOW + TIME_BUFFER) revert ClaimWindowOpen();
 
         uint256 amount = pledge.depositedAmount;
+        address refundTo = pledge.depositingWallet;
+        if (refundTo == address(0)) refundTo = msg.sender;
 
-        // Effects
         pledge.status = PledgeStatus.DEFAULTED;
         pledge.depositedAmount = 0;
-        _recordDefault(pledge.payer, pledge.totalAmount);
-        _decrementActive(pledge.payer);
+        _recordDefault(pledge.payerAccount, pledge.totalAmount);
+        _decrementActive(pledge.payerAccount);
 
-        // Interactions
-        IERC20(pledge.token).safeTransfer(pledge.payer, amount);
+        IERC20(pledge.token).safeTransfer(refundTo, amount);
 
-        emit DepositReclaimed(pledgeId, pledge.payer, amount);
+        emit DepositReclaimed(pledgeId, pledge.payerAccount, amount);
     }
 
-    /// @notice Payer requests a deadline extension — requires merchant's off-chain signature.
-    /// @param pledgeId    ID of the pledge to extend
-    /// @param newDate     New commitment date (max 30 days past the current deadline)
-    /// @param sigExpiry   Timestamp after which the merchant signature is no longer valid
-    /// @param merchantSig Merchant's ECDSA signature approving the extension
+    /// @notice Payer requests a deadline extension. Requires off-chain signature from any
+    ///         currently-linked merchant wallet.
     function extendDeadline(
         uint256 pledgeId,
         uint256 newDate,
         uint256 sigExpiry,
         bytes calldata merchantSig
     ) external nonReentrant whenNotPaused {
-        require(
-            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
-            "Payer not verified"
-        );
-        Pledge storage pledge = pledges[pledgeId];
+        bytes32 callerAccount = walletToAccount[msg.sender];
+        if (callerAccount == bytes32(0)) revert WalletNotLinked();
+        // No baseline check: payer with revoked KYC can still extend (matches cancel symmetry).
+        // Merchant signature is the authorization. submitDeposit still gates fund movement on KYC.
 
-        require(pledge.id != 0, "Pledge does not exist");
-        require(msg.sender == pledge.payer, "Only the payer can request an extension");
-        require(pledge.status == PledgeStatus.PENDING, "Pledge not pending");
-        require(block.timestamp < pledge.commitmentDate, "Cannot extend after deadline");
-        require(block.timestamp <= sigExpiry, "Signature expired");
-        require(newDate > pledge.commitmentDate, "New date must be later");
-        require(
-            newDate <= pledge.commitmentDate + MAX_EXTENSION,
-            "Max 30-day extension"
-        );
+        Pledge storage pledge = pledges[pledgeId];
+        if (pledge.id == 0) revert PledgeMissing();
+        if (callerAccount != pledge.payerAccount) revert NotAuthorized();
+        if (pledge.status != PledgeStatus.PENDING) revert PledgeNotPending();
+        if (block.timestamp >= pledge.commitmentDate) revert ExtensionTooLate();
+        if (block.timestamp > sigExpiry) revert SignatureExpired();
+        if (newDate <= pledge.commitmentDate) revert ExtensionDateInvalid();
+        if (newDate > pledge.commitmentDate + MAX_EXTENSION) revert ExtensionTooLong();
 
         bytes32 msgHash = keccak256(
             abi.encodePacked(
@@ -571,7 +829,8 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
             )
         );
         bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(msgHash);
-        require(ECDSA.recover(ethHash, merchantSig) == pledge.merchant, "Invalid merchant signature");
+        address signer = ECDSA.recover(ethHash, merchantSig);
+        if (walletToAccount[signer] != pledge.merchantAccount) revert InvalidSignature();
 
         extensionNonces[pledgeId]++;
 
@@ -581,23 +840,21 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         emit DeadlineExtended(pledgeId, oldDate, newDate);
     }
 
-    /// @notice Payer cancels a pledge — requires merchant's off-chain signature approval.
-    /// @dev Deposited funds are fully refunded. Cancellation does not affect reputation.
-    /// @param pledgeId    ID of the pledge to cancel
-    /// @param sigExpiry   Timestamp after which the merchant signature is no longer valid
-    /// @param merchantSig Merchant's ECDSA signature approving the cancellation
+    /// @notice Payer cancels a pledge with off-chain merchant signature. Refund (if any) goes
+    ///         directly to the depositing wallet.
     function cancelPledge(
         uint256 pledgeId,
         uint256 sigExpiry,
         bytes calldata merchantSig
     ) external nonReentrant whenNotPaused {
         Pledge storage pledge = pledges[pledgeId];
+        bytes32 callerAccount = walletToAccount[msg.sender];
 
-        require(pledge.id != 0, "Pledge does not exist");
-        require(msg.sender == pledge.payer, "Only the payer can cancel");
-        require(pledge.status == PledgeStatus.PENDING, "Pledge not pending");
-        require(block.timestamp < pledge.commitmentDate, "Cannot cancel after deadline");
-        require(block.timestamp <= sigExpiry, "Signature expired");
+        if (pledge.id == 0) revert PledgeMissing();
+        if (callerAccount != pledge.payerAccount) revert NotAuthorized();
+        if (pledge.status != PledgeStatus.PENDING) revert PledgeNotPending();
+        if (block.timestamp >= pledge.commitmentDate) revert ExtensionTooLate();
+        if (block.timestamp > sigExpiry) revert SignatureExpired();
 
         bytes32 msgHash = keccak256(
             abi.encodePacked(
@@ -610,75 +867,58 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
             )
         );
         bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(msgHash);
-        require(ECDSA.recover(ethHash, merchantSig) == pledge.merchant, "Invalid merchant signature");
+        address signer = ECDSA.recover(ethHash, merchantSig);
+        if (walletToAccount[signer] != pledge.merchantAccount) revert InvalidSignature();
 
         cancelNonces[pledgeId]++;
 
         uint256 refund = pledge.depositedAmount;
+        address refundTo = pledge.depositingWallet;
+        if (refundTo == address(0)) refundTo = msg.sender;
 
-        // Effects — cancellation does NOT touch reputation.
         pledge.status = PledgeStatus.CANCELLED;
         pledge.depositedAmount = 0;
         if (refund > 0) {
-            // Only decrement active count if payer had made a deposit (accepted the obligation).
-            _decrementActive(pledge.payer);
+            _decrementActive(pledge.payerAccount);
         }
 
-        // Interactions
         if (refund > 0) {
-            IERC20(pledge.token).safeTransfer(pledge.payer, refund);
+            IERC20(pledge.token).safeTransfer(refundTo, refund);
         }
 
-        emit PledgeCancelled(pledgeId, pledge.payer, pledge.merchant, refund);
+        emit PledgeCancelled(pledgeId, pledge.payerAccount, pledge.merchantAccount, refund);
     }
 
-    /// @notice Payer pays the current installment for a recurring pledge.
-    /// @dev Payer may pay early (before nextDueDate). Payment is released to merchant
-    ///      immediately. If paid after the due date but within grace, marked late.
-    /// @param recurringId ID of the recurring pledge
+    /// @notice Payer pays the current installment of a recurring pledge.
+    /// @dev Merchant payment credits the merchant's account escrow.
     function payInstallment(uint256 recurringId) external nonReentrant whenNotPaused {
-        require(
-            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
-            "Payer not verified"
-        );
-        RecurringPledge storage rp = recurringPledges[recurringId];
+        bytes32 payerAccount = walletToAccount[msg.sender];
+        if (payerAccount == bytes32(0)) revert WalletNotLinked();
+        if (accountVerificationBaseline[payerAccount] < MIN_TRANSACT_BASELINE) revert PayerNotVerified();
 
-        require(rp.id != 0, "Recurring pledge does not exist");
-        require(msg.sender == rp.payer, "Only the payer can pay installments");
-        require(rp.status == RecurringStatus.ACTIVE, "Pledge not active");
-        require(
-            rp.periodsCompleted + rp.missedCount < rp.totalPeriods,
-            "All periods accounted for"
-        );
-        require(
-            block.timestamp <= rp.nextDueDate + GRACE_PERIOD,
-            "Grace period has ended - use markMissedInstallment"
-        );
+        RecurringPledge storage rp = recurringPledges[recurringId];
+        if (rp.id == 0) revert PledgeMissing();
+        if (payerAccount != rp.payerAccount) revert NotAuthorized();
+        if (rp.status != RecurringStatus.ACTIVE) revert PledgeNotActive();
+        if (rp.periodsCompleted + rp.missedCount >= rp.totalPeriods) revert AllPeriodsAccounted();
+        if (block.timestamp > rp.nextDueDate + GRACE_PERIOD) revert GraceEnded();
 
         bool isLate = block.timestamp > rp.nextDueDate;
         uint256 gross = _grossWithFee(rp.amountPerPeriod, rp.appliedFeeBps);
         uint256 currentPeriod = rp.periodsCompleted + rp.missedCount + 1;
 
-        // First installment — payer is accepting the obligation now.
-        // Take an active slot, subject to the payer's tier limit.
         if (rp.periodsCompleted == 0 && rp.missedCount == 0) {
-            uint256 maxActive = getMaxActivePledges(rp.payer);
-            require(
-                activePledgeCount[rp.payer] < maxActive,
-                "Payer has reached their active pledge limit"
-            );
-            activePledgeCount[rp.payer]++;
+            uint256 maxActive = getAccountMaxActivePledges(rp.payerAccount);
+            if (accountActivePledgeCount[rp.payerAccount] >= maxActive) revert DepositLimitReached();
+            accountActivePledgeCount[rp.payerAccount]++;
         }
 
-        // Effects
         rp.periodsCompleted++;
         rp.nextDueDate += rp.intervalSeconds;
 
-        // Reputation — each installment contributes half the amount weight.
-        // The other half is granted as a completion bonus when all periods settle.
-        Reputation storage rep = reputations[rp.payer];
+        Reputation storage rep = accountReputation[rp.payerAccount];
         // slither-disable-next-line divide-before-multiply
-        uint256 halfAmount = rp.amountPerPeriod / 2; // intentional 50% partial weight — max 1 wei rounding loss
+        uint256 halfAmount = rp.amountPerPeriod / 2;
         if (isLate) {
             rep.lateCount++;
             rep.weightedScore += halfAmount * WEIGHT_LATE;
@@ -690,15 +930,15 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
 
         uint256 fee = (rp.amountPerPeriod * rp.appliedFeeBps) / 10000;
 
-        // Interactions
         IERC20(rp.token).safeTransferFrom(msg.sender, address(this), gross);
         if (fee > 0) {
             IERC20(rp.token).safeTransfer(feeRecipient, fee);
             emit FeeCollected(recurringId, feeRecipient, fee);
         }
-        IERC20(rp.token).safeTransfer(rp.merchant, rp.amountPerPeriod);
+        accountBalances[rp.merchantAccount][rp.token] += rp.amountPerPeriod;
+        emit FundsCredited(rp.merchantAccount, rp.token, rp.amountPerPeriod, "installment_paid");
 
-        emit InstallmentPaid(recurringId, msg.sender, currentPeriod, rp.amountPerPeriod);
+        emit InstallmentPaid(recurringId, payerAccount, currentPeriod, rp.amountPerPeriod);
 
         if (rp.periodsCompleted + rp.missedCount == rp.totalPeriods) {
             _finalizeRecurring(recurringId);
@@ -706,126 +946,101 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice Payer catches up on one missed installment mid-contract.
-    /// @dev Reduces missedCount by 1, transfers amountPerPeriod (plus fee) to merchant.
-    ///      Counts as a late payment for reputation purposes.
-    ///      For paying ALL outstanding debt at the end of the contract, use settleDebt instead.
-    /// @param recurringId ID of the recurring pledge
     function payMissedInstallment(uint256 recurringId) external nonReentrant whenNotPaused {
-        require(
-            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
-            "Payer not verified"
-        );
-        RecurringPledge storage rp = recurringPledges[recurringId];
+        bytes32 payerAccount = walletToAccount[msg.sender];
+        if (payerAccount == bytes32(0)) revert WalletNotLinked();
+        if (accountVerificationBaseline[payerAccount] < MIN_TRANSACT_BASELINE) revert PayerNotVerified();
 
-        require(rp.id != 0, "Recurring pledge does not exist");
-        require(msg.sender == rp.payer, "Only the payer can pay missed installments");
-        require(rp.status == RecurringStatus.ACTIVE, "Pledge not active");
-        require(rp.missedCount > 0, "No missed installments to pay");
+        RecurringPledge storage rp = recurringPledges[recurringId];
+        if (rp.id == 0) revert PledgeMissing();
+        if (payerAccount != rp.payerAccount) revert NotAuthorized();
+        if (rp.status != RecurringStatus.ACTIVE) revert PledgeNotActive();
+        if (rp.missedCount == 0) revert NoMissedInstallments();
 
         uint256 gross = _grossWithFee(rp.amountPerPeriod, rp.appliedFeeBps);
         uint256 fee = (rp.amountPerPeriod * rp.appliedFeeBps) / 10000;
         // slither-disable-next-line divide-before-multiply
         uint256 halfAmount = rp.amountPerPeriod / 2;
 
-        // First engagement via a make-up payment — take an active slot.
-        // Mirrors the slot logic in payInstallment for the regular first-payment path.
         bool firstEngagement = (rp.periodsCompleted == 0);
         if (firstEngagement) {
-            uint256 maxActive = getMaxActivePledges(rp.payer);
-            require(
-                activePledgeCount[rp.payer] < maxActive,
-                "Payer has reached their active pledge limit"
-            );
-            activePledgeCount[rp.payer]++;
+            uint256 maxActive = getAccountMaxActivePledges(rp.payerAccount);
+            if (accountActivePledgeCount[rp.payerAccount] >= maxActive) revert DepositLimitReached();
+            accountActivePledgeCount[rp.payerAccount]++;
         }
 
-        // Effects — move one period from missed to completed
         rp.missedCount--;
         rp.totalMissedDebt -= rp.amountPerPeriod;
         rp.periodsCompleted++;
 
-        // Reputation — make-up payment counts as a LATE installment.
-        // If this is the first engagement, the miss was unengaged so totalWeight
-        // wasn't bumped earlier — add it here. If engaged, weight was already counted.
-        Reputation storage rep = reputations[rp.payer];
+        Reputation storage rep = accountReputation[rp.payerAccount];
         rep.lateCount++;
         rep.weightedScore += halfAmount * WEIGHT_LATE;
         if (firstEngagement) {
             rep.totalWeight += halfAmount;
         }
 
-        // Interactions
         IERC20(rp.token).safeTransferFrom(msg.sender, address(this), gross);
         if (fee > 0) {
             IERC20(rp.token).safeTransfer(feeRecipient, fee);
             emit FeeCollected(recurringId, feeRecipient, fee);
         }
-        IERC20(rp.token).safeTransfer(rp.merchant, rp.amountPerPeriod);
+        accountBalances[rp.merchantAccount][rp.token] += rp.amountPerPeriod;
+        emit FundsCredited(rp.merchantAccount, rp.token, rp.amountPerPeriod, "missed_installment_paid");
 
-        emit InstallmentPaid(recurringId, msg.sender, rp.periodsCompleted, rp.amountPerPeriod);
+        emit InstallmentPaid(recurringId, payerAccount, rp.periodsCompleted, rp.amountPerPeriod);
     }
 
-    /// @notice Payer pays all outstanding missed installment debts to complete the contract.
-    /// @dev Only callable when status is PENDING_SETTLEMENT.
-    /// @param recurringId ID of the recurring pledge
+    /// @notice Payer settles all outstanding missed installment debts to complete a recurring pledge.
     function settleDebt(uint256 recurringId) external nonReentrant whenNotPaused {
-        require(
-            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE,
-            "Payer not verified"
-        );
-        RecurringPledge storage rp = recurringPledges[recurringId];
+        bytes32 payerAccount = walletToAccount[msg.sender];
+        if (payerAccount == bytes32(0)) revert WalletNotLinked();
+        if (accountVerificationBaseline[payerAccount] < MIN_TRANSACT_BASELINE) revert PayerNotVerified();
 
-        require(rp.id != 0, "Recurring pledge does not exist");
-        require(msg.sender == rp.payer, "Only the payer can settle debt");
-        require(rp.status == RecurringStatus.PENDING_SETTLEMENT, "No debt to settle");
+        RecurringPledge storage rp = recurringPledges[recurringId];
+        if (rp.id == 0) revert PledgeMissing();
+        if (payerAccount != rp.payerAccount) revert NotAuthorized();
+        if (rp.status != RecurringStatus.PENDING_SETTLEMENT) revert PledgeNotInSettlement();
 
         uint256 debt = rp.totalMissedDebt;
-        require(debt > 0, "No outstanding debt");
+        if (debt == 0) revert NoOutstandingDebt();
 
         uint256 grossDebt = _grossWithFee(debt, rp.appliedFeeBps);
         uint256 fee = (debt * rp.appliedFeeBps) / 10000;
 
-        // Effects
         rp.totalMissedDebt = 0;
         rp.status = RecurringStatus.COMPLETED;
-        // Slot was only taken if the payer made at least one installment.
         if (rp.periodsCompleted > 0) {
-            _decrementActive(rp.payer);
+            _decrementActive(rp.payerAccount);
         }
 
-        _applyCompletionBonus(rp.payer, rp.amountPerPeriod, rp.totalPeriods);
+        _applyCompletionBonus(rp.payerAccount, rp.amountPerPeriod, rp.totalPeriods);
 
-        // Interactions
         IERC20(rp.token).safeTransferFrom(msg.sender, address(this), grossDebt);
         if (fee > 0) {
             IERC20(rp.token).safeTransfer(feeRecipient, fee);
             emit FeeCollected(recurringId, feeRecipient, fee);
         }
-        IERC20(rp.token).safeTransfer(rp.merchant, debt);
+        accountBalances[rp.merchantAccount][rp.token] += debt;
+        emit FundsCredited(rp.merchantAccount, rp.token, debt, "debt_settled");
 
-        emit DebtSettled(recurringId, msg.sender, debt);
-        emit RecurringPledgeCompleted(recurringId, rp.merchant);
+        emit DebtSettled(recurringId, payerAccount, debt);
+        emit RecurringPledgeCompleted(recurringId, rp.merchantAccount);
     }
 
-    /// @notice Payer cancels a recurring pledge — requires merchant's off-chain signature.
-    /// @dev Missed debts are forgiven on cancellation. Reputation is unaffected.
-    /// @param recurringId ID of the recurring pledge
-    /// @param sigExpiry   Timestamp after which the merchant signature is no longer valid
-    /// @param merchantSig Merchant's ECDSA signature approving the cancellation
+    /// @notice Payer cancels a recurring pledge with off-chain merchant signature.
     function cancelRecurring(
         uint256 recurringId,
         uint256 sigExpiry,
         bytes calldata merchantSig
     ) external nonReentrant whenNotPaused {
         RecurringPledge storage rp = recurringPledges[recurringId];
+        bytes32 callerAccount = walletToAccount[msg.sender];
 
-        require(rp.id != 0, "Recurring pledge does not exist");
-        require(msg.sender == rp.payer, "Only the payer can cancel");
-        require(
-            rp.status == RecurringStatus.ACTIVE || rp.status == RecurringStatus.PENDING_SETTLEMENT,
-            "Pledge not cancellable"
-        );
-        require(block.timestamp <= sigExpiry, "Signature expired");
+        if (rp.id == 0) revert PledgeMissing();
+        if (callerAccount != rp.payerAccount) revert NotAuthorized();
+        if (rp.status != RecurringStatus.ACTIVE && rp.status != RecurringStatus.PENDING_SETTLEMENT) revert PledgeNotCancellable();
+        if (block.timestamp > sigExpiry) revert SignatureExpired();
 
         bytes32 msgHash = keccak256(
             abi.encodePacked(
@@ -838,106 +1053,69 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
             )
         );
         bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(msgHash);
-        require(ECDSA.recover(ethHash, merchantSig) == rp.merchant, "Invalid merchant signature");
+        address signer = ECDSA.recover(ethHash, merchantSig);
+        if (walletToAccount[signer] != rp.merchantAccount) revert InvalidSignature();
 
         recurringCancelNonces[recurringId]++;
 
         rp.status = RecurringStatus.CANCELLED;
         rp.totalMissedDebt = 0;
-        // Slot was only taken if the payer made at least one installment.
         if (rp.periodsCompleted > 0) {
-            _decrementActive(rp.payer);
+            _decrementActive(rp.payerAccount);
         }
 
-        emit RecurringPledgeCancelled(recurringId, rp.payer, rp.merchant);
+        emit RecurringPledgeCancelled(recurringId, rp.payerAccount, rp.merchantAccount);
     }
 
-    // ── P2P Instant Transfer ───────────────────────────────────────────────────
+    // ── P2P (closed network — both parties must be linked) ─────────────────────
 
-    /// @notice Send tokens instantly to any address — no pledge, no deposit hold.
-    /// @dev Pure transfer for supporting family or friends. No reputation impact.
-    ///      Protocol fee is applied; recipient receives exactly `amount`.
-    /// @param token     Whitelisted ERC20 token to send
-    /// @param recipient Destination address (any wallet)
-    /// @param amount    Net token amount the recipient receives (6 decimals)
+    /// @notice Send tokens instantly to another RemitSafe account's escrow balance.
+    /// @dev Recipient must have a linked wallet on a RemitSafe account. Unregistered wallets
+    ///      are rejected — RemitSafe operates as a closed network for P2P.
     function sendP2P(
         address token,
         address recipient,
         uint256 amount
     ) external nonReentrant whenNotPaused {
-        require(
-            verificationBaseline[msg.sender] >= MIN_TRANSACT_BASELINE
-                || isMerchantVerified[msg.sender],
-            "Sender not verified"
-        );
-        require(allowedTokens[token], "Token not supported");
-        require(recipient != address(0), "Invalid recipient address");
-        require(recipient != msg.sender, "Cannot send to yourself");
-        require(amount >= MIN_PLEDGE_AMOUNT, "Amount below minimum");
+        bytes32 senderAccount = walletToAccount[msg.sender];
+        if (senderAccount == bytes32(0)) revert WalletNotLinked();
+        if (
+            accountVerificationBaseline[senderAccount] < MIN_TRANSACT_BASELINE
+                && !accountIsMerchantVerified[senderAccount]
+        ) revert SenderNotVerified();
+        if (!allowedTokens[token]) revert TokenNotSupported();
+        if (recipient == address(0)) revert InvalidAddress();
+        if (recipient == msg.sender) revert SelfTransferDisallowed();
+        if (amount < MIN_PLEDGE_AMOUNT) revert AmountBelowMinimum();
 
-        uint256 feeBps = getServiceFeeBps(msg.sender);
+        bytes32 recipientAccount = walletToAccount[recipient];
+        if (recipientAccount == bytes32(0)) revert RecipientNotRegistered();
+        if (recipientAccount == senderAccount) revert SelfTransferDisallowed();
+
+        uint256 feeBps = getServiceFeeBps(senderAccount);
         uint256 gross = _grossWithFee(amount, feeBps);
         uint256 fee = gross - amount;
 
-        // Interactions
         IERC20(token).safeTransferFrom(msg.sender, address(this), gross);
         if (fee > 0) {
             IERC20(token).safeTransfer(feeRecipient, fee);
         }
-        IERC20(token).safeTransfer(recipient, amount);
+        accountBalances[recipientAccount][token] += amount;
+        emit FundsCredited(recipientAccount, token, amount, "p2p_received");
 
-        emit P2PSent(msg.sender, recipient, token, amount, fee);
+        emit P2PSent(msg.sender, recipient, senderAccount, recipientAccount, token, amount, fee);
     }
 
     // ── Internal ───────────────────────────────────────────────────────────────
 
-    /// @dev Called when all periods (paid + missed) are accounted for.
-    function _finalizeRecurring(uint256 recurringId) internal {
-        RecurringPledge storage rp = recurringPledges[recurringId];
-
-        if (rp.totalMissedDebt == 0) {
-            rp.status = RecurringStatus.COMPLETED;
-            // Slot was only taken if the payer made at least one installment.
-            if (rp.periodsCompleted > 0) {
-                _decrementActive(rp.payer);
-            }
-            _applyCompletionBonus(rp.payer, rp.amountPerPeriod, rp.totalPeriods);
-            reputations[rp.payer].totalCount++;
-            emit RecurringPledgeCompleted(recurringId, rp.merchant);
-        } else {
-            rp.status = RecurringStatus.PENDING_SETTLEMENT;
-            // Record one default for the failed contract — caps defaultCount inflation
-            // regardless of how many individual installments were missed.
-            // Skip if the payer never engaged (no installments paid): the contract
-            // was never accepted by them and should not damage their reputation.
-            if (rp.periodsCompleted > 0) {
-                Reputation storage rep = reputations[rp.payer];
-                rep.defaultCount++;
-                rep.totalCount++;
-            }
-        }
-    }
-
-    /// @dev Applies the 50% completion bonus when a recurring pledge is fully completed.
-    ///      Caller is responsible for incrementing totalCount.
-    function _applyCompletionBonus(address payer, uint256 amountPerPeriod, uint256 totalPeriods) internal {
-        Reputation storage rep = reputations[payer];
-        // slither-disable-next-line divide-before-multiply
-        uint256 bonusAmount = (amountPerPeriod * totalPeriods) / 2; // intentional 50% completion bonus weight
-        rep.weightedScore += bonusAmount * WEIGHT_ON_TIME;
-        rep.totalWeight += bonusAmount;
-    }
-
-    /// @dev Finalizes a fully-funded pledge: pays the fee and the merchant, updates payer reputation.
     function _releaseFunds(uint256 pledgeId) internal {
         Pledge storage pledge = pledges[pledgeId];
         uint256 amount = pledge.totalAmount;
 
-        // Effects
         pledge.status = PledgeStatus.COMPLETED;
         pledge.depositedAmount = 0;
 
-        Reputation storage rep = reputations[pledge.payer];
+        Reputation storage rep = accountReputation[pledge.payerAccount];
         if (pledge.paidDuringGrace) {
             rep.lateCount++;
             rep.weightedScore += amount * WEIGHT_LATE;
@@ -947,117 +1125,67 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         }
         rep.totalWeight += amount;
         rep.totalCount++;
-        _decrementActive(pledge.payer);
+        _decrementActive(pledge.payerAccount);
 
         uint256 fee = (amount * pledge.appliedFeeBps) / 10000;
 
-        // Interactions last.
         if (fee > 0) {
             IERC20(pledge.token).safeTransfer(feeRecipient, fee);
             emit FeeCollected(pledgeId, feeRecipient, fee);
         }
-        IERC20(pledge.token).safeTransfer(pledge.merchant, amount);
 
-        emit PledgeCompleted(pledgeId, pledge.merchant, amount);
+        accountBalances[pledge.merchantAccount][pledge.token] += amount;
+        emit FundsCredited(pledge.merchantAccount, pledge.token, amount, "pledge_completed");
+
+        emit PledgeCompleted(pledgeId, pledge.merchantAccount, amount);
     }
 
-    /// @dev Records a default against the payer's reputation.
-    function _recordDefault(address payer, uint256 amount) internal {
-        Reputation storage rep = reputations[payer];
+    function _finalizeRecurring(uint256 recurringId) internal {
+        RecurringPledge storage rp = recurringPledges[recurringId];
+
+        if (rp.totalMissedDebt == 0) {
+            rp.status = RecurringStatus.COMPLETED;
+            if (rp.periodsCompleted > 0) {
+                _decrementActive(rp.payerAccount);
+            }
+            _applyCompletionBonus(rp.payerAccount, rp.amountPerPeriod, rp.totalPeriods);
+            accountReputation[rp.payerAccount].totalCount++;
+            emit RecurringPledgeCompleted(recurringId, rp.merchantAccount);
+        } else {
+            rp.status = RecurringStatus.PENDING_SETTLEMENT;
+            if (rp.periodsCompleted > 0) {
+                Reputation storage rep = accountReputation[rp.payerAccount];
+                rep.defaultCount++;
+                rep.totalCount++;
+            }
+        }
+    }
+
+    function _applyCompletionBonus(
+        bytes32 payerAccount,
+        uint256 amountPerPeriod,
+        uint256 totalPeriods
+    ) internal {
+        Reputation storage rep = accountReputation[payerAccount];
+        // slither-disable-next-line divide-before-multiply
+        uint256 bonusAmount = (amountPerPeriod * totalPeriods) / 2;
+        rep.weightedScore += bonusAmount * WEIGHT_ON_TIME;
+        rep.totalWeight += bonusAmount;
+    }
+
+    function _recordDefault(bytes32 payerAccount, uint256 amount) internal {
+        Reputation storage rep = accountReputation[payerAccount];
         rep.defaultCount++;
         rep.totalWeight += amount;
         rep.totalCount++;
     }
 
-    /// @dev Safe decrement — underflow on activePledgeCount would permanently brick a user.
-    function _decrementActive(address user) internal {
-        if (activePledgeCount[user] > 0) {
-            activePledgeCount[user]--;
+    function _decrementActive(bytes32 accountId) internal {
+        if (accountActivePledgeCount[accountId] > 0) {
+            accountActivePledgeCount[accountId]--;
         }
     }
 
-    // ── Admin Functions ────────────────────────────────────────────────────────
-
-    /// @notice Add or remove a token from the whitelist.
-    function setTokenAllowed(address token, bool allowed) external onlyOwner {
-        require(token != address(0), "Invalid token address");
-        allowedTokens[token] = allowed;
-        emit TokenAllowanceSet(token, allowed);
-    }
-
-    /// @notice Emergency stop — halts all state-changing user functions.
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    /// @notice Resume operations after an emergency.
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    /// @notice Update the protocol fee recipient.
-    function setFeeRecipient(address newRecipient) external onlyOwner {
-        require(newRecipient != address(0), "Invalid fee recipient");
-        emit FeeRecipientUpdated(feeRecipient, newRecipient);
-        feeRecipient = newRecipient;
-    }
-
-    /// @notice Set the verification operator address (backend wallet for auto-updates).
-    /// @dev Operator can only call setVerificationBaseline. Pass address(0) to disable.
-    function setVerificationOperator(address newOp) external onlyOwner {
-        emit VerificationOperatorChanged(verificationOperator, newOp);
-        verificationOperator = newOp;
-    }
-
-    /// @notice Set or update an OFW's KYC baseline score (full admin control).
-    /// @dev Owner-only — used for KYC approval (0 → 5000), revocation (any → 0),
-    ///      or manual overrides. The operator wallet uses boostVerificationBaseline
-    ///      instead, which is restricted to the avatar-upload +1000 boost.
-    ///      Intentionally NOT gated by whenNotPaused — admin must be able to revoke
-    ///      fraudulent verifications during an emergency pause.
-    function setVerificationBaseline(address ofw, uint256 newScore) external onlyOwner {
-        require(ofw != address(0), "Invalid OFW address");
-        require(newScore <= MAX_BASELINE, "Baseline exceeds maximum");
-        uint256 oldScore = verificationBaseline[ofw];
-        verificationBaseline[ofw] = newScore;
-        emit VerificationBaselineChanged(ofw, oldScore, newScore);
-    }
-
-    /// @notice Operator-only narrow function: boost a KYC-approved OFW from
-    ///         BASELINE_KYC to BASELINE_KYC_PLUS_AVATAR after they upload an avatar.
-    /// @dev Restricted to this single transition for defense-in-depth. A compromised
-    ///      operator key cannot fake-verify new users or revoke existing ones — it can
-    ///      only push already-KYC-approved users up by +1000.
-    function boostVerificationBaseline(address ofw) external whenNotPaused {
-        require(msg.sender == verificationOperator, "Only operator");
-        require(ofw != address(0), "Invalid OFW address");
-        require(
-            verificationBaseline[ofw] == BASELINE_KYC,
-            "Only boostable from BASELINE_KYC"
-        );
-        verificationBaseline[ofw] = BASELINE_KYC_PLUS_AVATAR;
-        emit VerificationBaselineChanged(ofw, BASELINE_KYC, BASELINE_KYC_PLUS_AVATAR);
-    }
-
-    /// @notice Set merchant verification flag. Owner-only — operator cannot do this.
-    function setMerchantVerified(address merchant, bool verified) external onlyOwner {
-        require(merchant != address(0), "Invalid merchant address");
-        isMerchantVerified[merchant] = verified;
-        emit MerchantVerificationChanged(merchant, verified);
-    }
-
-    // ── View Functions ─────────────────────────────────────────────────────────
-
-    /// @notice Service fee rate (basis points) for a given payer based on their trust score.
-    /// @return bps 75 (0.75%) for high-trust payers, 100 (1%) standard
-    function getServiceFeeBps(address payer) public view returns (uint256 bps) {
-        if (_trustScore(payer) >= TIER_HIGH) {
-            return FEE_BPS_LOYALTY;
-        }
-        return FEE_BPS_STANDARD;
-    }
-
-    /// @dev Gross amount (net + fee) for a given fee rate.
     function _grossWithFee(uint256 totalAmount, uint256 feeBps)
         internal
         pure
@@ -1066,129 +1194,14 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         return totalAmount + (totalAmount * feeBps) / 10000;
     }
 
-    /// @notice Gross amount a payer would need to deposit for a pledge of `totalAmount`.
-    function quoteGrossAmount(address payer, uint256 totalAmount)
-        external
-        view
-        returns (uint256)
-    {
-        return _grossWithFee(totalAmount, getServiceFeeBps(payer));
-    }
-
-    /// @notice Gross amount for an existing pledge, using its locked-in fee rate.
-    function grossAmountForPledge(uint256 pledgeId) external view returns (uint256) {
-        Pledge storage pledge = pledges[pledgeId];
-        require(pledge.id != 0, "Pledge does not exist");
-        return _grossWithFee(pledge.totalAmount, pledge.appliedFeeBps);
-    }
-
-    /// @dev Single source of truth for the trust score (basis points, 0-10000).
-    ///      Returns max(verificationBaseline, behavioral) so KYC sets a floor that
-    ///      behavior can only raise above — never below — until admin downgrades.
-    function _trustScore(address wallet) internal view returns (uint256) {
-        Reputation storage rep = reputations[wallet];
-        uint256 baseline = verificationBaseline[wallet];
+    function _accountTrustScore(bytes32 accountId) internal view returns (uint256) {
+        Reputation storage rep = accountReputation[accountId];
+        uint256 baseline = accountVerificationBaseline[accountId];
         if (rep.totalWeight == 0) return baseline;
         uint256 behavioral = rep.weightedScore / rep.totalWeight;
         return behavioral > baseline ? behavioral : baseline;
     }
 
-    /// @notice Trust score for a wallet, 0-10000 (divide by 100 for a percentage).
-    function getTrustScore(address wallet) external view returns (uint256) {
-        return _trustScore(wallet);
-    }
-
-    /// @notice Full reputation breakdown for a wallet.
-    function getReputation(address wallet)
-        external
-        view
-        returns (
-            uint256 basisPoints,
-            uint256 onTimeCount,
-            uint256 lateCount,
-            uint256 defaultCount,
-            uint256 totalCount
-        )
-    {
-        Reputation storage rep = reputations[wallet];
-        return (
-            _trustScore(wallet),
-            rep.onTimeCount,
-            rep.lateCount,
-            rep.defaultCount,
-            rep.totalCount
-        );
-    }
-
-    /// @notice Full pledge details.
-    function getPledge(uint256 pledgeId) external view returns (Pledge memory) {
-        require(pledges[pledgeId].id != 0, "Pledge does not exist");
-        return pledges[pledgeId];
-    }
-
-    /// @notice Full recurring pledge details.
-    function getRecurringPledge(uint256 recurringId) external view returns (RecurringPledge memory) {
-        require(recurringPledges[recurringId].id != 0, "Recurring pledge does not exist");
-        return recurringPledges[recurringId];
-    }
-
-    /// @notice All pledge IDs assigned to a payer.
-    function getPayerPledges(address payer) external view returns (uint256[] memory) {
-        return payerPledgeIds[payer];
-    }
-
-    /// @notice All pledge IDs created by a merchant.
-    function getMerchantPledges(address merchant) external view returns (uint256[] memory) {
-        return merchantPledgeIds[merchant];
-    }
-
-    /// @notice Paginated view of a payer's pledge IDs.
-    function getPayerPledgesPaginated(address payer, uint256 offset, uint256 limit)
-        external
-        view
-        returns (uint256[] memory page, uint256 total)
-    {
-        return _paginate(payerPledgeIds[payer], offset, limit);
-    }
-
-    /// @notice Paginated view of a merchant's pledge IDs.
-    function getMerchantPledgesPaginated(address merchant, uint256 offset, uint256 limit)
-        external
-        view
-        returns (uint256[] memory page, uint256 total)
-    {
-        return _paginate(merchantPledgeIds[merchant], offset, limit);
-    }
-
-    /// @notice All recurring pledge IDs assigned to a payer.
-    function getPayerRecurringPledges(address payer) external view returns (uint256[] memory) {
-        return payerRecurringIds[payer];
-    }
-
-    /// @notice All recurring pledge IDs created by a merchant.
-    function getMerchantRecurringPledges(address merchant) external view returns (uint256[] memory) {
-        return merchantRecurringIds[merchant];
-    }
-
-    /// @notice Paginated view of a payer's recurring pledge IDs.
-    function getPayerRecurringPledgesPaginated(address payer, uint256 offset, uint256 limit)
-        external
-        view
-        returns (uint256[] memory page, uint256 total)
-    {
-        return _paginate(payerRecurringIds[payer], offset, limit);
-    }
-
-    /// @notice Paginated view of a merchant's recurring pledge IDs.
-    function getMerchantRecurringPledgesPaginated(address merchant, uint256 offset, uint256 limit)
-        external
-        view
-        returns (uint256[] memory page, uint256 total)
-    {
-        return _paginate(merchantRecurringIds[merchant], offset, limit);
-    }
-
-    /// @dev Shared pagination helper.
     function _paginate(uint256[] storage ids, uint256 offset, uint256 limit)
         internal
         view
@@ -1208,31 +1221,238 @@ contract RemittancePledge is ReentrancyGuard, Pausable, Ownable2Step {
         }
     }
 
-    /// @notice Max concurrent active pledges allowed for a payer.
-    /// @dev Serial defaulters (defaultCount >= DEFAULT_LOCKOUT_THRESHOLD) are capped at the
+    // ── Admin Functions ────────────────────────────────────────────────────────
+
+    function setTokenAllowed(address token, bool allowed) external onlyOwner {
+        if (token == address(0)) revert InvalidAddress();
+        allowedTokens[token] = allowed;
+        emit TokenAllowanceSet(token, allowed);
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function setFeeRecipient(address newRecipient) external onlyOwner {
+        if (newRecipient == address(0)) revert InvalidAddress();
+        emit FeeRecipientUpdated(feeRecipient, newRecipient);
+        feeRecipient = newRecipient;
+    }
+
+    function setVerificationOperator(address newOp) external onlyOwner {
+        emit VerificationOperatorChanged(verificationOperator, newOp);
+        verificationOperator = newOp;
+    }
+
+    function setLinkOperator(address newOp) external onlyOwner {
+        emit LinkOperatorChanged(linkOperator, newOp);
+        linkOperator = newOp;
+    }
+
+    /// @notice Set or update an account's KYC baseline score (owner-only).
+    /// @dev Used for KYC approval (0 → 5000), revocation (any → 0), or manual overrides.
+    function setVerificationBaseline(bytes32 accountId, uint256 newScore) external onlyOwner {
+        if (accountId == bytes32(0)) revert InvalidAccountId();
+        if (newScore > MAX_BASELINE) revert BaselineExceedsMax();
+        uint256 oldScore = accountVerificationBaseline[accountId];
+        accountVerificationBaseline[accountId] = newScore;
+        emit AccountVerificationBaselineChanged(accountId, oldScore, newScore);
+    }
+
+    /// @notice Operator-only narrow function: boost an account from BASELINE_KYC to
+    ///         BASELINE_KYC_PLUS_AVATAR (typically on avatar upload).
+    function boostVerificationBaseline(bytes32 accountId) external whenNotPaused {
+        if (msg.sender != verificationOperator) revert OnlyOperator();
+        if (accountId == bytes32(0)) revert InvalidAccountId();
+        if (accountVerificationBaseline[accountId] != BASELINE_KYC) revert BaselineNotKyc();
+        accountVerificationBaseline[accountId] = BASELINE_KYC_PLUS_AVATAR;
+        emit AccountVerificationBaselineChanged(accountId, BASELINE_KYC, BASELINE_KYC_PLUS_AVATAR);
+    }
+
+    /// @notice Set merchant verification flag for an account (owner-only).
+    function setMerchantVerified(bytes32 accountId, bool verified) external onlyOwner {
+        if (accountId == bytes32(0)) revert InvalidAccountId();
+        accountIsMerchantVerified[accountId] = verified;
+        emit AccountMerchantVerificationChanged(accountId, verified);
+    }
+
+    // ── View Functions ─────────────────────────────────────────────────────────
+
+    /// @notice Service fee rate (basis points) for a given account based on their trust score.
+    function getServiceFeeBps(bytes32 accountId) public view returns (uint256 bps) {
+        if (_accountTrustScore(accountId) >= TIER_HIGH) {
+            return FEE_BPS_LOYALTY;
+        }
+        return FEE_BPS_STANDARD;
+    }
+
+    /// @notice Gross amount an account would need to deposit for a pledge of `totalAmount`.
+    function quoteGrossAmount(bytes32 payerAccount, uint256 totalAmount)
+        external
+        view
+        returns (uint256)
+    {
+        return _grossWithFee(totalAmount, getServiceFeeBps(payerAccount));
+    }
+
+    /// @notice Gross amount for an existing pledge, using its locked-in fee rate.
+    function grossAmountForPledge(uint256 pledgeId) external view returns (uint256) {
+        Pledge storage pledge = pledges[pledgeId];
+        if (pledge.id == 0) revert PledgeMissing();
+        return _grossWithFee(pledge.totalAmount, pledge.appliedFeeBps);
+    }
+
+    /// @notice Trust score for an account, 0–10000 (divide by 100 for percentage).
+    function getAccountTrustScore(bytes32 accountId) external view returns (uint256) {
+        return _accountTrustScore(accountId);
+    }
+
+    /// @notice Full reputation breakdown for an account.
+    function getAccountReputation(bytes32 accountId)
+        external
+        view
+        returns (
+            uint256 basisPoints,
+            uint256 onTimeCount,
+            uint256 lateCount,
+            uint256 defaultCount,
+            uint256 totalCount
+        )
+    {
+        Reputation storage rep = accountReputation[accountId];
+        return (
+            _accountTrustScore(accountId),
+            rep.onTimeCount,
+            rep.lateCount,
+            rep.defaultCount,
+            rep.totalCount
+        );
+    }
+
+    /// @notice All wallets linked to an account.
+    function getAccountWallets(bytes32 accountId) external view returns (address[] memory) {
+        return accountWallets[accountId];
+    }
+
+    /// @notice Account ID associated with a wallet (zero bytes32 if not linked).
+    function getWalletAccount(address wallet) external view returns (bytes32) {
+        return walletToAccount[wallet];
+    }
+
+    /// @notice Account-held escrow balance for a token.
+    function getAccountBalance(bytes32 accountId, address token) external view returns (uint256) {
+        return accountBalances[accountId][token];
+    }
+
+    /// @notice Daily withdrawal cap for a wallet/token.
+    /// @dev Returns DEFAULT_DAILY_CAP if unconfigured. If configured, returns the stored value
+    ///      (which may be 0 = disabled or type(uint256).max = unlimited).
+    function getDailyCap(address wallet, address token) external view returns (uint256) {
+        if (!walletCapConfigured[wallet][token]) return DEFAULT_DAILY_CAP;
+        return walletDailyCap[wallet][token];
+    }
+
+    /// @notice Amount already withdrawn today (rolling daily window).
+    function getDailyUsed(address wallet, address token) external view returns (uint256) {
+        uint256 dayIndex = block.timestamp / 1 days;
+        return dailyWithdrawnAmount[wallet][token][dayIndex];
+    }
+
+    /// @notice Pending withdrawal record.
+    /// @dev Reverts on non-existent IDs (id == 0 or id > pendingWithdrawalCounter).
+    function getPendingWithdrawal(uint256 id) external view returns (PendingWithdrawal memory) {
+        if (id == 0 || id > pendingWithdrawalCounter) revert PledgeMissing();
+        return pendingWithdrawals[id];
+    }
+
+    /// @notice Full pledge details.
+    function getPledge(uint256 pledgeId) external view returns (Pledge memory) {
+        if (pledges[pledgeId].id == 0) revert PledgeMissing();
+        return pledges[pledgeId];
+    }
+
+    /// @notice Full recurring pledge details.
+    function getRecurringPledge(uint256 recurringId) external view returns (RecurringPledge memory) {
+        if (recurringPledges[recurringId].id == 0) revert PledgeMissing();
+        return recurringPledges[recurringId];
+    }
+
+    /// @notice All pledge IDs where the given account is the payer.
+    function getAccountPayerPledges(bytes32 accountId) external view returns (uint256[] memory) {
+        return accountPayerPledgeIds[accountId];
+    }
+
+    /// @notice All pledge IDs created by the given account as merchant.
+    function getAccountMerchantPledges(bytes32 accountId) external view returns (uint256[] memory) {
+        return accountMerchantPledgeIds[accountId];
+    }
+
+    function getAccountPayerPledgesPaginated(bytes32 accountId, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory page, uint256 total)
+    {
+        return _paginate(accountPayerPledgeIds[accountId], offset, limit);
+    }
+
+    function getAccountMerchantPledgesPaginated(bytes32 accountId, uint256 offset, uint256 limit)
+        external
+        view
+        returns (uint256[] memory page, uint256 total)
+    {
+        return _paginate(accountMerchantPledgeIds[accountId], offset, limit);
+    }
+
+    function getAccountPayerRecurringPledges(bytes32 accountId) external view returns (uint256[] memory) {
+        return accountPayerRecurringIds[accountId];
+    }
+
+    function getAccountMerchantRecurringPledges(bytes32 accountId) external view returns (uint256[] memory) {
+        return accountMerchantRecurringIds[accountId];
+    }
+
+    function getAccountPayerRecurringPledgesPaginated(
+        bytes32 accountId,
+        uint256 offset,
+        uint256 limit
+    ) external view returns (uint256[] memory page, uint256 total) {
+        return _paginate(accountPayerRecurringIds[accountId], offset, limit);
+    }
+
+    function getAccountMerchantRecurringPledgesPaginated(
+        bytes32 accountId,
+        uint256 offset,
+        uint256 limit
+    ) external view returns (uint256[] memory page, uint256 total) {
+        return _paginate(accountMerchantRecurringIds[accountId], offset, limit);
+    }
+
+    /// @notice Max concurrent active pledges allowed for an account.
+    /// @dev Serial defaulters (defaultCount ≥ DEFAULT_LOCKOUT_THRESHOLD) are capped at the
     ///      no-history limit regardless of any on-time history they may also have.
-    function getMaxActivePledges(address payer) public view returns (uint256) {
-        Reputation storage rep = reputations[payer];
+    function getAccountMaxActivePledges(bytes32 accountId) public view returns (uint256) {
+        Reputation storage rep = accountReputation[accountId];
 
         if (rep.defaultCount >= DEFAULT_LOCKOUT_THRESHOLD) {
             return MAX_ACTIVE_NO_HISTORY;
         }
 
-        uint256 score = _trustScore(payer);
+        uint256 score = _accountTrustScore(accountId);
         if (score >= TIER_HIGH) return MAX_ACTIVE_HIGH;
         if (score >= TIER_MID)  return MAX_ACTIVE_MID;
         return MAX_ACTIVE_NO_HISTORY;
     }
 
-    /// @notice Required upfront deposit percentage for a payer, based on their trust score.
-    /// @dev Score is `max(verificationBaseline, behavioralScore)`. Unverified wallets have
-    ///      baseline 0 and no history, putting them in the RISK tier (50% deposit) — but
-    ///      they cannot transact at all until KYC raises their baseline to MIN_TRANSACT_BASELINE.
-    function getRequiredDepositPct(address payer) public view returns (uint256) {
-        uint256 score = _trustScore(payer);
-        if (score >= TIER_HIGH) return DEPOSIT_TIER_HIGH; // 80%+ -> 20%
-        if (score >= TIER_MID)  return DEPOSIT_TIER_MID;  // 50%+ -> 30%
-        if (score >= TIER_LOW)  return DEPOSIT_TIER_LOW;  // 20%+ -> 40%
-        return DEPOSIT_TIER_RISK;                          // < 20% -> 50%
+    /// @notice Required upfront deposit percentage for an account, based on their trust score.
+    function getAccountRequiredDepositPct(bytes32 accountId) public view returns (uint256) {
+        uint256 score = _accountTrustScore(accountId);
+        if (score >= TIER_HIGH) return DEPOSIT_TIER_HIGH;
+        if (score >= TIER_MID)  return DEPOSIT_TIER_MID;
+        if (score >= TIER_LOW)  return DEPOSIT_TIER_LOW;
+        return DEPOSIT_TIER_RISK;
     }
 }
