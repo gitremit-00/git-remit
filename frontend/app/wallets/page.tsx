@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { Copy, Star, Trash2, Plus, AlertTriangle, Loader2, Check } from "lucide-react";
+import { Copy, Star, Trash2, Plus, AlertTriangle, Loader2, Check, ArrowLeft, ChevronRight } from "lucide-react";
+import Link from "next/link";
 import Header from "../../components/Header";
 import { useWallet } from "../../context/WalletContext";
 
@@ -131,8 +132,17 @@ export default function WalletsPage() {
   return (
     <div>
       <div className="md:hidden">
-      <Header title="My Wallets" />
+      <Header title="My Wallets" back />
       <div className="px-4 pt-5 pb-24 space-y-4">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-1.5 text-[12px] text-[#555]">
+          <Link href="/wallet" className="hover:text-[#888] transition-colors flex items-center gap-1">
+            <ArrowLeft size={12} /> Wallet
+          </Link>
+          <ChevronRight size={11} color="#333" />
+          <span className="text-[#888]">Linked wallets</span>
+        </div>
+
         {/* Account ID */}
         <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4">
           <div className="text-[10px] text-[#888] tracking-[1.5px] mb-2">YOUR ACCOUNT ID</div>
@@ -270,7 +280,16 @@ export default function WalletsPage() {
       </div>{/* end md:hidden */}
 
       {/* Desktop layout */}
-      <div className="hidden md:block p-8 max-w-2xl mx-auto">
+      <div className="hidden md:block p-8">
+        {/* Breadcrumb — flush to the left corner beside the sidebar */}
+        <div className="flex items-center gap-2 text-[13px] text-[#555] mb-6">
+          <Link href="/wallet" className="hover:text-[#888] transition-colors flex items-center gap-1">
+            <ArrowLeft size={14} /> Wallet
+          </Link>
+          <ChevronRight size={13} color="#333" />
+          <span className="text-[#888]">Linked wallets</span>
+        </div>
+        <div className="max-w-2xl mx-auto">
         <h1 className="text-3xl font-extrabold text-white mb-2">My Wallets</h1>
         <p className="text-[#555] text-sm mb-8">Manage the wallets linked to your RemitSafe account.</p>
 
@@ -375,6 +394,7 @@ export default function WalletsPage() {
             </div>
           </div>
         )}
+        </div>{/* end centered content */}
       </div>
     </div>
   );
