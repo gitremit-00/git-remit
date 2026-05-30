@@ -105,9 +105,23 @@ function NewTransferContent() {
       });
     } else if (to) {
       const known = getPledgeMeta(to);
-      setForm((f) => ({ ...f, merchant: to, merchantName: known?.name ?? "" }));
-      if (known?.type) {
-        setTransferMode(known.type);
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (UUID_RE.test(to)) {
+        // `to` is a UUID — auto-trigger lookup
+        setRecipientUuid(to);
+        lookupRecipientUuid(to);
+        if (known?.type) setTransferMode(known.type);
+        setStep(STEP_RECIPIENT);
+      } else if (known?.uuid) {
+        // `to` is an accountId key, but we have the UUID stored
+        setRecipientUuid(known.uuid);
+        lookupRecipientUuid(known.uuid);
+        if (known.type) setTransferMode(known.type);
+        setStep(STEP_RECIPIENT);
+      } else {
+        // Fallback — old format with no UUID
+        setForm((f) => ({ ...f, merchant: to, merchantName: known?.name ?? "" }));
+        if (known?.type) setTransferMode(known.type);
         setStep(STEP_RECIPIENT);
       }
     }
@@ -282,7 +296,7 @@ function NewTransferContent() {
 
   const canNext = (
     step === STEP_TYPE ? true :
-    step === STEP_RECIPIENT ? !!form.merchant :
+    step === STEP_RECIPIENT ? (!!form.merchant && !!form.merchantUuid) :
     step === STEP_PAYMENT_TYPE ? true :
     step === STEP_AMOUNT ? (
       isFullPayment ? !!form.totalAmount :
@@ -296,29 +310,32 @@ function NewTransferContent() {
   // All merchant-flow submissions go off-chain to Supabase via sendRequest().
   // The merchant reviews the request and accepts it by calling createPledge on-chain.
   async function submit() {
-    if (transferMode === "p2p") {
+    if (transferMode === "p2p" || paymentType === "full") {
+      // Full payment and P2P go directly on-chain — no merchant approval needed
       await sendP2PTransaction();
     } else {
+      // Partial and installment go through request flow — merchant must approve
       await sendRequest();
     }
   }
 
   async function sendRequest() {
     if (!account) return;
+    if (!form.merchantUuid) {
+      setTxError("Recipient account ID not resolved. Please re-enter the recipient UUID and wait for the lookup to complete.");
+      return;
+    }
     setLoading(true); setTxError("");
     try {
       const isInstallment = paymentType === "installment";
-      const isFull = paymentType === "full";
-      // Auto-set commitment date for full payments (85 days out)
-      const fullDate = (() => { const d = new Date(); d.setDate(d.getDate() + 85); d.setHours(9, 0, 0, 0); return d.toISOString(); })();
       const req = await createTransferRequest({
         sender_address: account,
         merchant_address: form.merchantUuid,
         type: isInstallment ? "installment" : "partial",
         token: selectedToken,
         total_amount: isInstallment ? null : parseFloat(form.totalAmount),
-        initial_deposit: isInstallment || isFull ? null : parseFloat(form.initialDeposit),
-        commitment_date: isInstallment ? null : isFull ? fullDate : (form.commitmentDate ? new Date(form.commitmentDate).toISOString() : null),
+        initial_deposit: isInstallment ? null : parseFloat(form.initialDeposit),
+        commitment_date: isInstallment ? null : (form.commitmentDate ? new Date(form.commitmentDate).toISOString() : null),
         amount_per_period: isInstallment ? parseFloat(form.totalAmount) : null,
         interval_seconds: isInstallment ? installmentInterval : null,
         total_periods: isInstallment ? installmentCount : null,
@@ -327,7 +344,7 @@ function NewTransferContent() {
       });
       if (!req) { setTxError("Failed to send request. Please try again."); setLoading(false); return; }
       await sendTransferRequestNotification(req.id, form.merchantUuid, "new_request");
-      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
+      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode, uuid: form.merchantUuid });
       setRequestSent(true);
       setTimeout(() => router.push("/pledges/requests"), 1800);
     } catch {
@@ -352,7 +369,7 @@ function NewTransferContent() {
       await approveTx.wait();
       const sendTx = await pledgeWrite.sendP2P(tokenAddress, form.merchant, amt);
       const receipt = await sendTx.wait();
-      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: "p2p" });
+      savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: "p2p", uuid: form.merchantUuid });
 
       // Save P2P transaction to Supabase so it reflects in the UI
       const saved = await createTransferRequest({
@@ -891,23 +908,24 @@ function NewTransferContent() {
                   {transferMode === "merchant" ? (
                     <>
                       <div className="flex items-start gap-2 bg-[#DDE048]/5 border border-[#DDE048]/20 rounded-xl px-3 py-3 mb-4 text-[12px] text-[#888]">
-                        <FileText size={13} color="#DDE048" className="shrink-0 mt-0.5" />
+                        {paymentType === "full" ? <Zap size={13} color="#DDE048" className="shrink-0 mt-0.5" /> : <FileText size={13} color="#DDE048" className="shrink-0 mt-0.5" />}
                         {paymentType === "full"
-                          ? "Your full payment request will be sent to the merchant. Once they accept and create the pledge, you can deposit to complete it."
+                          ? "Funds will be sent directly to the recipient — no merchant approval needed."
                           : paymentType === "partial"
                           ? "Your request will be sent to the merchant for review. No funds are locked until they accept."
                           : "Your installment plan request will be sent to the merchant. They review and accept before any payments begin."}
                       </div>
                       {requestSent ? (
                         <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2">
-                          <CheckCircle2 size={16} /> Request sent! Redirecting…
+                          <CheckCircle2 size={16} /> {paymentType === "full" ? "Sent! Redirecting…" : "Request sent! Redirecting…"}
                         </div>
                       ) : (
                         <button
-                          onClick={sendRequest} disabled={loading}
+                          onClick={paymentType === "full" ? sendP2PTransaction : sendRequest}
+                          disabled={loading || (paymentType === "full" && !pledgeWrite)}
                           className="w-full bg-[#DDE048] text-black font-bold text-sm rounded-xl py-3.5 flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[#c8ce30] transition-colors"
                         >
-                          {loading ? "Sending…" : "Send Request →"}
+                          {loading ? "Sending…" : paymentType === "full" ? "Pay Now →" : "Send Request →"}
                         </button>
                       )}
                       {txError && <p className="text-red-400 text-[12px] mt-2 text-center">{txError}</p>}
@@ -1213,7 +1231,7 @@ function NewTransferContent() {
             <TxGuard active={loading} steps={txGuardSteps} />
 
             {step !== STEP_TYPE && (
-              step === STEP_REVIEW && transferMode === "merchant" ? (
+              step === STEP_REVIEW && transferMode === "merchant" && paymentType !== "full" ? (
                 requestSent ? (
                   <div className="w-full bg-green-500/10 border border-green-500/20 text-green-400 font-bold text-base rounded-2xl py-[17px] flex items-center justify-center gap-2 mt-6 mb-6">
                     <CheckCircle2 size={18} /> Request sent! Redirecting…
@@ -1232,7 +1250,7 @@ function NewTransferContent() {
                   style={{ opacity: canNext ? 1 : 0.5 }}
                   onClick={step < STEP_REVIEW ? nextStep : submit}
                   disabled={!canNext || loading}>
-                  {loading ? "Processing..." : step < STEP_REVIEW ? "Continue →" : transferMode === "p2p" ? "Send Transaction →" : "Send →"}
+                  {loading ? "Processing..." : step < STEP_REVIEW ? "Continue →" : (transferMode === "p2p" || paymentType === "full") ? "Pay Now →" : "Send →"}
                 </button>
               )
             )}

@@ -22,7 +22,20 @@ export default function Recipients() {
 
   function reload() {
     const all = getAllMeta();
-    setEntries(Object.entries(all).map(([addr, meta]) => ({ addr, meta })));
+    // Only show entries that have a name (auto-saved after transfers)
+    setEntries(Object.entries(all).filter(([, meta]) => meta.name).map(([addr, meta]) => ({ addr, meta })));
+  }
+
+  function sendTo(e: Entry) {
+    // Prefer UUID for new-transfer, fall back to accountId key
+    const dest = e.meta.uuid ?? e.addr;
+    router.push(`/new-transfer?to=${dest}`);
+  }
+
+  function displayKey(e: Entry) {
+    // Show UUID if available, otherwise shorten the accountId
+    if (e.meta.uuid) return e.meta.uuid;
+    return e.addr.slice(0, 10) + "…" + e.addr.slice(-8);
   }
 
   function startEdit(e: Entry) { setEditAddr(e.addr); setEditName(e.meta.name); setEditNote(e.meta.note); }
@@ -40,7 +53,7 @@ export default function Recipients() {
           <Send size={14} /> New Transfer
         </Link>
       </div>
-      <p className="text-[#555] text-sm mb-8">Saved merchant addresses. Added automatically after your first transfer.</p>
+      <p className="text-[#555] text-sm mb-8">Saved recipients. Added automatically after your first transfer.</p>
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -108,8 +121,8 @@ export default function Recipients() {
                       <div className="font-semibold text-white text-sm">{e.meta.name || "Unnamed"}</div>
                       {e.meta.note && <div className="text-xs text-[#555] mt-0.5">{e.meta.note}</div>}
                     </div>
-                    <div className="font-mono text-xs text-[#555]">{e.addr.slice(0, 10)}…{e.addr.slice(-8)}</div>
-                    <button onClick={() => copyAddr(e.addr)} className="w-8 h-8 rounded-lg bg-[#1e2230] flex items-center justify-center hover:bg-[#252836] transition-colors">
+                    <div className="font-mono text-xs text-[#555]">{displayKey(e)}</div>
+                    <button onClick={() => copyAddr(e.meta.uuid ?? e.addr)} className="w-8 h-8 rounded-lg bg-[#1e2230] flex items-center justify-center hover:bg-[#252836] transition-colors">
                       {copied === e.addr ? <Check size={13} color="#22c55e" /> : <Copy size={13} color="#555" />}
                     </button>
                     <button onClick={() => startEdit(e)} className="w-8 h-8 rounded-lg bg-[#1e2230] flex items-center justify-center hover:bg-[#252836] transition-colors">
@@ -119,7 +132,7 @@ export default function Recipients() {
                       <Trash2 size={13} color="#555" />
                     </button>
                     <button
-                      onClick={() => router.push(`/new-transfer?to=${e.addr}`)}
+                      onClick={() => sendTo(e)}
                       className="flex items-center gap-1.5 bg-[#DDE048]/10 border border-[#DDE048]/20 text-[#DDE048] rounded-xl px-4 py-2 text-xs font-semibold hover:bg-[#DDE048]/20 transition-colors"
                     >
                       Send <ArrowRight size={12} />
@@ -190,12 +203,12 @@ export default function Recipients() {
                       </div>
                     </div>
                     <div className="flex items-center justify-between bg-[#0d0f13] border border-[#1F2127] rounded-xl px-3 py-2 mb-3">
-                      <span className="font-mono text-[12px] text-[#888]">{e.addr.slice(0, 10)}...{e.addr.slice(-8)}</span>
-                      <button type="button" onClick={() => copyAddr(e.addr)} className="cursor-pointer">
+                      <span className="font-mono text-[12px] text-[#888] truncate flex-1 mr-2">{displayKey(e)}</span>
+                      <button type="button" onClick={() => copyAddr(e.meta.uuid ?? e.addr)} className="cursor-pointer shrink-0">
                         {copied === e.addr ? <Check size={13} color="#22c55e" /> : <Copy size={13} color="#555" />}
                       </button>
                     </div>
-                    <button type="button" onClick={() => router.push(`/new-transfer?to=${e.addr}`)} className="w-full bg-[#DDE048]/10 border border-[#DDE048]/20 text-[#DDE048] rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 cursor-pointer">
+                    <button type="button" onClick={() => sendTo(e)} className="w-full bg-[#DDE048]/10 border border-[#DDE048]/20 text-[#DDE048] rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 cursor-pointer">
                       Send again <ArrowRight size={14} />
                     </button>
                   </div>

@@ -2,6 +2,7 @@ export interface PledgeMeta {
   name: string;
   note: string;
   type?: "merchant" | "p2p";
+  uuid?: string; // profile UUID — used for new-transfer UUID lookup
 }
 
 export function savePledgeMeta(merchantAddr: string, meta: Partial<PledgeMeta> & { name: string; note: string }) {

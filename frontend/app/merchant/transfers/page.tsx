@@ -86,18 +86,19 @@ export default function MerchantTransfers() {
     fetch("/api/auth/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.userId) setProfileUuid(me.userId); });
   }, []);
 
-  useEffect(() => { if (account && accountId && profileUuid) loadData(); }, [account, accountId, profileUuid]);
+  // Load transfer requests as soon as we have profileUuid — no wallet needed
+  useEffect(() => { if (profileUuid) loadData(); }, [profileUuid, accountId]);
 
   async function loadData() {
     setLoading(true);
-    console.log("[MerchantTransfers] loadData for account:", account);
     try {
-      const [idsResult, trData] = await Promise.all([
-        (pledgeRead.getAccountMerchantPledges(accountId) as Promise<bigint[]>).catch((e) => { console.error("[MerchantTransfers] getAccountMerchantPledges error:", e); return [] as bigint[]; }),
-        getMerchantTransferRequests(profileUuid!),
-      ]);
-      console.log("[MerchantTransfers] transferRequests:", trData.length, "pledges:", idsResult.length);
+      // Transfer requests load from DB — no wallet needed
+      const trData = await getMerchantTransferRequests(profileUuid!);
       setTransferRequests(trData);
+
+      // On-chain pledges only load if wallet is connected
+      if (!accountId) { setLoading(false); return; }
+      const idsResult = await (pledgeRead.getAccountMerchantPledges(accountId) as Promise<bigint[]>).catch(() => [] as bigint[]);
       const details = (await Promise.all(idsResult.map((id) => pledgeRead.getPledge(id)))).map(normalizePledge);
       setPledges(details.reverse());
       const uniqueSenders = [...new Set(details.map((p) => p.payer.toLowerCase()))];

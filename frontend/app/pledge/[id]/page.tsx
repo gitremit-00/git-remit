@@ -69,8 +69,10 @@ export default function PledgeDetail() {
   }
 
   async function handleDeposit() {
-    const tokenWrite = pledge?.token?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase() ? usdtWrite : usdcWrite;
-    const tokenRead = pledge?.token?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase() ? usdtRead : usdcRead;
+    const isUsdt = pledge?.token?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase();
+    const tokenWrite = isUsdt ? usdtWrite : usdcWrite;
+    const tokenRead = isUsdt ? usdtRead : usdcRead;
+    const tokenAddress = isUsdt ? CONTRACTS.MOCK_USDT : CONTRACTS.MOCK_USDC;
     if (!pledgeWrite || !tokenWrite || !pledge || !signer) return;
     const gross = pledge.totalAmount + pledge.totalAmount * pledge.appliedFeeBps / 10000n;
     const remaining = gross - pledge.depositedAmount;
@@ -87,7 +89,7 @@ export default function PledgeDetail() {
     const frozenSigner = signer;
     setTxLoading(true); setTxStatus("approving");
     try {
-      const approveTx = await frozenSigner.sendTransaction({ to: pledge.token, data: approveData });
+      const approveTx = await frozenSigner.sendTransaction({ to: tokenAddress, data: approveData });
       await approveTx.wait();
       setTxStatus("depositing");
       const depositTx = await frozenSigner.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: depositData });
