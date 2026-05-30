@@ -536,13 +536,14 @@ export async function sendTransferRequestNotification(
 }
 
 export async function getTransferRequestNotifications(
-  recipientAddress: string
+  recipientUuidOrAddress: string
 ): Promise<TransferRequestNotification[]> {
   if (!supabase) return [];
+  // Try UUID first, fall back to lowercase address for backward compat
   const { data, error } = await supabase
     .from("transfer_request_notifications")
     .select("*, transfer_requests(*)")
-    .eq("recipient_address", recipientAddress.toLowerCase())
+    .or(`recipient_address.eq.${recipientUuidOrAddress},recipient_address.eq.${recipientUuidOrAddress.toLowerCase()}`)
     .order("created_at", { ascending: false });
   if (error || !data) return [];
   return data as TransferRequestNotification[];
@@ -551,5 +552,15 @@ export async function getTransferRequestNotifications(
 export async function markTransferNotificationRead(id: string): Promise<void> {
   if (!supabase) return;
   await supabase.from("transfer_request_notifications").update({ read: true }).eq("id", id);
+}
+
+export async function getProfileUuidByWallet(walletAddress: string): Promise<string | null> {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from("profile_wallets")
+    .select("profile_id")
+    .eq("wallet_address", walletAddress.toLowerCase())
+    .maybeSingle();
+  return data?.profile_id ?? null;
 }
 

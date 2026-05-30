@@ -14,7 +14,7 @@ import { CONTRACTS } from "../../../../../contracts/addresses";
 import {
   getTransferRequest, merchantCounterPropose,
   cancelTransferRequest, sendTransferRequestNotification,
-  confirmTransferRequest, type TransferRequest,
+  confirmTransferRequest, getProfileUuidByWallet, type TransferRequest,
 } from "../../../../../lib/supabase";
 import { getPledgeMeta } from "../../../../../lib/pledgeMeta";
 
@@ -150,7 +150,8 @@ export default function MerchantRequestDetail() {
 
       // Step 3 — save pledgeId to Supabase and mark accepted
       await confirmTransferRequest(id, pledgeId, txHash);
-      await sendTransferRequestNotification(id, req.sender_address, "accepted");
+      const senderUuid = await getProfileUuidByWallet(req.sender_address);
+      await sendTransferRequestNotification(id, senderUuid ?? req.sender_address, "accepted");
       await loadRequest();
     } catch (err: unknown) {
       const e = err as { reason?: string; message?: string; code?: string | number };
@@ -168,7 +169,8 @@ export default function MerchantRequestDetail() {
     if (!req || !confirm("Cancel this request?")) return;
     setActionLoading(true);
     await cancelTransferRequest(id, "merchant");
-    await sendTransferRequestNotification(id, req.sender_address, "cancelled");
+    const senderUuidC = await getProfileUuidByWallet(req.sender_address);
+    await sendTransferRequestNotification(id, senderUuidC ?? req.sender_address, "cancelled");
     router.push("/merchant/transfers");
   }
 
@@ -196,7 +198,8 @@ export default function MerchantRequestDetail() {
         counter_note: counterNote || null,
       };
       await merchantCounterPropose(id, counter, req.renegotiation_count);
-      await sendTransferRequestNotification(id, req.sender_address, "renegotiated");
+      const senderUuidR = await getProfileUuidByWallet(req.sender_address);
+      await sendTransferRequestNotification(id, senderUuidR ?? req.sender_address, "renegotiated");
       setShowCounterForm(false);
       await loadRequest();
     } catch { setError("Failed to send counter-proposal. Please try again."); }

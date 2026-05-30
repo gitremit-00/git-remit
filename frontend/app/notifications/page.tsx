@@ -65,6 +65,7 @@ const PLEDGE_BG: Record<string, string> = {
 
 export default function Notifications() {
   const { account, accountId, provider, pledgeRead, walletLoading } = useWallet();
+  const [profileUuid, setProfileUuid] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -75,17 +76,29 @@ export default function Notifications() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
+  // Fetch profile UUID from session on mount
   useEffect(() => {
-    if (account && accountId) { setReadIds(getReadIds()); loadAll(); }
-    else if (!walletLoading) setLoading(false);
-  }, [account, accountId, walletLoading]);
+    fetch("/api/auth/me").then(r => r.ok ? r.json() : null).then(me => {
+      if (me?.userId) setProfileUuid(me.userId);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (profileUuid) {
+      setReadIds(getReadIds());
+      loadTransferReqNotifs();
+      loadPaymentReqNotifs();
+    }
+    if (account && accountId && profileUuid) loadActivity();
+    else if (!walletLoading && profileUuid) setLoading(false);
+  }, [account, accountId, walletLoading, profileUuid]);
 
   async function loadAll() {
     setLoading(true);
     try {
-      await Promise.all([loadActivity(), loadPaymentReqNotifs(), loadTransferReqNotifs()]);
+      await loadActivity();
     } catch (err) {
-      console.error("Failed to load notifications:", err);
+      console.error("Failed to load activity:", err);
     } finally { setLoading(false); }
   }
 
@@ -110,8 +123,9 @@ export default function Notifications() {
   }
 
   async function loadPaymentReqNotifs() {
+    if (!account) return;
     try {
-      const data = await getSenderNotifications(account!);
+      const data = await getSenderNotifications(account);
       setPaymentReqNotifs(data);
     } catch (err) {
       console.error("Failed to load payment request notifications:", err);
@@ -119,8 +133,10 @@ export default function Notifications() {
   }
 
   async function loadTransferReqNotifs() {
+    if (!profileUuid) return;
     try {
-      const data = await getTransferRequestNotifications(account!);
+      // Use UUID as primary identifier — notifications are now stored by UUID
+      const data = await getTransferRequestNotifications(profileUuid);
       setTransferReqNotifs(data);
     } catch (err) {
       console.error("Failed to load transfer request notifications:", err);
@@ -139,7 +155,8 @@ export default function Notifications() {
     // New contract uses bytes32 accountId in indexed topics
     const paddedAccountId = addrAccountId ? addrAccountId : ethers.zeroPadValue(account!, 32);
 
-    const [createdSender, createdMerchant, completed, defaulted, deposits, cancelled, usdcSent, usdcReceived] = await Promise.all([
+    const paddedWallet = ethers.zeroPadValue(account!, 32);
+    const [createdSender, createdMerchant, completed, defaulted, deposits, cancelled, p2pSent, p2pReceived, usdcSent, usdcReceived] = await Promise.all([
       // PledgeCreated(uint256 pledgeId, bytes32 merchantAccount, bytes32 payerAccount, ...)
       provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCreated(uint256,bytes32,bytes32,address,uint256,uint256,uint256)"), null, null, paddedAccountId], fromBlock }),
       provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCreated(uint256,bytes32,bytes32,address,uint256,uint256,uint256)"), null, paddedAccountId], fromBlock }),
@@ -151,8 +168,11 @@ export default function Notifications() {
       provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("DepositMade(uint256,bytes32,address,uint256,uint256)"), null, paddedAccountId], fromBlock }),
       // PledgeCancelled(uint256 pledgeId, bytes32 payerAccount, bytes32 merchantAccount, uint256 refund)
       provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCancelled(uint256,bytes32,bytes32,uint256)"), null, paddedAccountId], fromBlock }),
-      provider.getLogs({ address: CONTRACTS.MOCK_USDC, topics: [ethers.id("Transfer(address,address,uint256)"), ethers.zeroPadValue(account!, 32)], fromBlock }),
-      provider.getLogs({ address: CONTRACTS.MOCK_USDC, topics: [ethers.id("Transfer(address,address,uint256)"), null, ethers.zeroPadValue(account!, 32)], fromBlock }),
+      // P2PSent(address sender, address recipient, bytes32 senderAccount, bytes32 recipientAccount, address token, uint256 amount, uint256 fee)
+      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("P2PSent(address,address,bytes32,bytes32,address,uint256,uint256)"), paddedWallet], fromBlock }),
+      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("P2PSent(address,address,bytes32,bytes32,address,uint256,uint256)"), null, paddedWallet], fromBlock }),
+      provider.getLogs({ address: CONTRACTS.MOCK_USDC, topics: [ethers.id("Transfer(address,address,uint256)"), paddedWallet], fromBlock }),
+      provider.getLogs({ address: CONTRACTS.MOCK_USDC, topics: [ethers.id("Transfer(address,address,uint256)"), null, paddedWallet], fromBlock }),
     ]);
 
     const results: ActivityItem[] = [];
@@ -224,6 +244,38 @@ export default function Notifications() {
         title: "Pledge cancelled", sub: `Pledge #${pledgeId} cancelled · deposit refunded`,
         href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
     }
+    // P2PSent — direct payments (full payment + P2P mode)
+    for (const log of p2pSent) {
+      const p = pledgeIface.parseLog(log); if (!p) continue;
+      // P2PSent(sender, recipient, senderAccount, recipientAccount, token, amount, fee)
+      const amount = parseFloat(ethers.formatUnits(p.args[5], 6)).toFixed(2);
+      const fee = parseFloat(ethers.formatUnits(p.args[6], 6)).toFixed(2);
+      const short = (p.args[1] as string).slice(0, 6) + "…" + (p.args[1] as string).slice(-4);
+      results.push({
+        id: log.transactionHash + "_p2p_sent", kind: "transfer", direction: "sent",
+        counterparty: p.args[1], amount, fee,
+        sign: "negative",
+        title: "Payment sent",
+        sub: `${amount} USDC sent to ${short}`,
+        href: `https://explorer-hoodi.morph.network/tx/${log.transactionHash}`,
+        blockNumber: log.blockNumber,
+      });
+    }
+    for (const log of p2pReceived) {
+      const p = pledgeIface.parseLog(log); if (!p) continue;
+      const amount = parseFloat(ethers.formatUnits(p.args[5], 6)).toFixed(2);
+      const short = (p.args[0] as string).slice(0, 6) + "…" + (p.args[0] as string).slice(-4);
+      results.push({
+        id: log.transactionHash + "_p2p_received", kind: "transfer", direction: "received",
+        counterparty: p.args[0], amount,
+        sign: "positive",
+        title: "Payment received",
+        sub: `${amount} USDC received from ${short}`,
+        href: `https://explorer-hoodi.morph.network/tx/${log.transactionHash}`,
+        blockNumber: log.blockNumber,
+      });
+    }
+
     for (const log of usdcSent) {
       const p = usdcIface.parseLog(log); if (!p) continue;
       const to = p.args[1].toLowerCase();
@@ -255,7 +307,18 @@ export default function Notifications() {
       const allPledges = (await Promise.all(
         allIds.map((id) => pledgeRead.getPledge(id))
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      )).map((p: any) => ({ ...p, payer: p.payerAccount ?? p.payer ?? "", merchant: p.merchantAccount ?? p.merchant ?? "", status: Number(p.status) }));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      )).map((p: any) => ({
+        id: p.id,
+        payer: p.payerAccount ?? p.payer ?? "",
+        merchant: p.merchantAccount ?? p.merchant ?? "",
+        token: p.token,
+        totalAmount: p.totalAmount,
+        depositedAmount: p.depositedAmount,
+        commitmentDate: p.commitmentDate,
+        appliedFeeBps: p.appliedFeeBps,
+        status: Number(p.status),
+      }));
 
       // Entries with type "downpayment"/"fulfilment"/"deposit" share a pledgeId with "created" — only skip if
       // the pledge itself (created event) was already seen
@@ -449,7 +512,7 @@ export default function Notifications() {
                     new_request: "#DDE048", renegotiated: "#60a5fa", accepted: "#22c55e",
                     rejected: "#ef4444", cancelled: "#888", confirmed: "#22c55e",
                   };
-                  const isMerchantNotif = r && r.merchant_address === account?.toLowerCase();
+                  const isMerchantNotif = r && (r.merchant_address === profileUuid || r.merchant_address === account?.toLowerCase());
                   const detailHref = isMerchantNotif
                     ? `/merchant/transfers/requests/${n.request_id}`
                     : `/pledges/requests/${n.request_id}`;
@@ -622,7 +685,7 @@ export default function Notifications() {
                 new_request: "#DDE048", renegotiated: "#60a5fa", accepted: "#22c55e",
                 rejected: "#ef4444", cancelled: "#888", confirmed: "#22c55e",
               };
-              const isMerchantNotif = r && r.merchant_address === account?.toLowerCase();
+              const isMerchantNotif = r && (r.merchant_address === profileUuid || r.merchant_address === account?.toLowerCase());
               const detailHref = isMerchantNotif ? `/merchant/transfers/requests/${n.request_id}` : `/pledges/requests/${n.request_id}`;
               return (
                 <Link key={n.id} href={detailHref}

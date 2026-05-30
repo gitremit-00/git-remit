@@ -404,8 +404,8 @@ function NewTransferContent() {
       if (saved) {
         await Promise.all([
           confirmTransferRequest(saved.id, "", receipt?.hash ?? ""),
-          sendTransferRequestNotification(saved.id, form.merchant.toLowerCase(), "accepted"),
-          sendTransferRequestNotification(saved.id, account.toLowerCase(), "confirmed"),
+          sendTransferRequestNotification(saved.id, form.merchantUuid, "accepted"),
+          sendTransferRequestNotification(saved.id, form.merchantUuid, "confirmed"),
         ]);
       }
 
