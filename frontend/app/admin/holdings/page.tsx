@@ -265,7 +265,6 @@ export default function AdminHoldings() {
                 const isOnHold = u.account_status === "on_hold";
                 const expanded = expandedId === u.id;
                 return (
-                  <>
                     <tr key={u.id} className={`transition-colors ${isOnHold ? "bg-red-500/[0.03]" : "hover:bg-[#1a1d23]"}`}>
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2.5">
@@ -320,7 +319,6 @@ export default function AdminHoldings() {
                         )}
                       </td>
                     </tr>
-                  </>
                 );
               })}
             </tbody>
