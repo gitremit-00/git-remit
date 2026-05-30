@@ -37,6 +37,14 @@ interface DeadlineWarning {
   commitmentDate: bigint;
 }
 
+// A single entry in the unified Activity list. Deadline warnings, transfer/payment
+// requests and on-chain activity all flow through one paginated array.
+type CombinedRow =
+  | { type: "deadline"; key: string; w: DeadlineWarning }
+  | { type: "transfer"; key: string; n: TransferRequestNotification }
+  | { type: "payment"; key: string; n: PaymentRequestNotification }
+  | { type: "activity"; key: string; item: ActivityItem };
+
 const STORAGE_KEY = "remitsafe_read_notifs";
 function getReadIds(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")); }
@@ -379,8 +387,22 @@ export default function Notifications() {
   const showRequests = tab === "all" || tab === "requests";
   const showActivity = tab !== "requests";
 
-  const totalPages = Math.max(1, Math.ceil(filteredActivity.length / PAGE_SIZE));
-  const paged = filteredActivity.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // The "all" tab no longer segregates requests/warnings/activity into separate
+  // labeled sections — everything flows together as one list, paginated as a whole.
+  const hasDeadlines = (tab === "all" || tab === "sent") && deadlineWarnings.length > 0;
+  const hasReqs = showRequests && (transferReqNotifs.length > 0 || paymentReqNotifs.length > 0);
+  const hasActivityRows = showActivity && filteredActivity.length > 0;
+
+  const combinedRows: CombinedRow[] = [
+    ...(hasDeadlines ? deadlineWarnings.map((w): CombinedRow => ({ type: "deadline", key: `d-${w.pledgeId}`, w })) : []),
+    ...(hasReqs ? transferReqNotifs.map((n): CombinedRow => ({ type: "transfer", key: `t-${n.id}`, n })) : []),
+    ...(hasReqs ? paymentReqNotifs.map((n): CombinedRow => ({ type: "payment", key: `p-${n.id}`, n })) : []),
+    ...(hasActivityRows ? filteredActivity.map((item): CombinedRow => ({ type: "activity", key: `a-${item.id}`, item })) : []),
+  ];
+
+  const hasAnyItems = combinedRows.length > 0;
+  const totalPages = Math.max(1, Math.ceil(combinedRows.length / PAGE_SIZE));
+  const pagedRows = combinedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   function Pagination() {
     if (totalPages <= 1) return null;
@@ -429,6 +451,215 @@ export default function Notifications() {
     );
   }
 
+  const TR_LABEL: Record<string, string> = {
+    new_request: "New transfer request",
+    renegotiated: "Merchant proposed new terms",
+    accepted: "Merchant accepted your request",
+    rejected: "Merchant rejected your request",
+    cancelled: "Request was cancelled",
+    confirmed: "Transfer confirmed on-chain",
+  };
+  const TR_COLOR: Record<string, string> = {
+    new_request: "#DDE048", renegotiated: "#60a5fa", accepted: "#22c55e",
+    rejected: "#ef4444", cancelled: "#888", confirmed: "#22c55e",
+  };
+
+  // One combined-list row, desktop (table-row) layout.
+  function DesktopRow({ row }: { row: CombinedRow }) {
+    if (row.type === "deadline") {
+      const w = row.w;
+      return (
+        <Link href={`/pledge/${w.pledgeId}`} className="block no-underline text-inherit">
+          <div className="flex items-center gap-4 px-6 py-4 border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors bg-[#f59e0b08]">
+            <div className="w-10 h-10 rounded-full bg-[#f59e0b22] flex items-center justify-center shrink-0">
+              <Clock size={18} color="#f59e0b" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-white">Last day before grace period</span>
+                <span className="w-2 h-2 rounded-full bg-[#f59e0b] shrink-0" />
+              </div>
+              <div className="text-xs text-[#555] mt-0.5">Pledge #{w.pledgeId} · {w.amount} USDC · {w.hoursLeft}h left to pay before grace activates</div>
+            </div>
+            <div className="text-[#f59e0b] text-xs font-bold shrink-0">Pay now →</div>
+          </div>
+        </Link>
+      );
+    }
+    if (row.type === "transfer") {
+      const n = row.n;
+      const r = n.transfer_requests;
+      const trType = n.type;
+      const isMerchantNotif = r && (r.merchant_address === profileUuid || r.merchant_address === account?.toLowerCase());
+      const detailHref = isMerchantNotif ? `/merchant/transfers/requests/${n.request_id}` : `/pledges/requests/${n.request_id}`;
+      return (
+        <Link href={detailHref} onClick={() => markTransferNotificationRead(n.id)} className="block no-underline text-inherit">
+          <div className={`flex items-center gap-4 px-6 py-4 border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors ${n.read ? "" : "bg-[#DDE04806]"}`}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: TR_COLOR[trType] + "22", border: `1px solid ${TR_COLOR[trType]}33` }}>
+              <FileText size={18} color={TR_COLOR[trType]} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-semibold truncate ${n.read ? "text-[#aaa]" : "text-white"}`}>{TR_LABEL[trType] ?? trType}</span>
+                {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
+              </div>
+              {r && (
+                <div className="text-xs text-[#555] mt-0.5">
+                  {r.type === "installment"
+                    ? `${r.amount_per_period?.toFixed(2) ?? "—"} ${r.token} × ${r.total_periods ?? "?"} payments`
+                    : `${r.total_amount?.toFixed(2) ?? "—"} ${r.token}`}
+                </div>
+              )}
+            </div>
+            <div className="text-[#DDE048] text-xs font-bold shrink-0">View →</div>
+          </div>
+        </Link>
+      );
+    }
+    if (row.type === "payment") {
+      const n = row.n;
+      const req = n.payment_requests;
+      if (!req) return null;
+      const days = Math.ceil((new Date(req.deadline.replace(" ", "T")).getTime() - Date.now()) / 86400000);
+      return (
+        <Link href={req.status === "fulfilled" ? "#" : `/new-transfer?request=${req.id}&notif=${n.id}`}
+          onClick={() => { if (req.status !== "fulfilled") markNotificationRead(n.id); }} className="block no-underline text-inherit">
+          <div className={`flex items-center gap-4 px-6 py-4 border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors ${req.status === "fulfilled" ? "opacity-60" : n.read ? "" : "bg-[#DDE04806]"}`}>
+            <div className="w-10 h-10 rounded-xl bg-[#DDE048]/10 border border-[#DDE048]/20 flex items-center justify-center shrink-0">
+              <FileText size={18} color="#DDE048" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-semibold truncate ${n.read ? "text-[#aaa]" : "text-white"}`}>{req.title || "Payment Request"}</span>
+                {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
+              </div>
+              <div className="text-xs text-[#555] mt-0.5">{req.amount.toFixed(2)} USDC · {days > 0 ? `${days}d left` : "Overdue"} · from {req.merchant_address.slice(0, 6)}…{req.merchant_address.slice(-4)}</div>
+            </div>
+            {req.status === "fulfilled"
+              ? <div className="flex items-center gap-1 text-[#22c55e] text-xs font-bold shrink-0"><CheckCircle2 size={13} /> Paid</div>
+              : <div className="text-[#DDE048] text-xs font-bold shrink-0">Pay →</div>}
+          </div>
+        </Link>
+      );
+    }
+    const item = row.item;
+    const isUnread = !readIds.has(item.id);
+    const isExternal = item.href.startsWith("http");
+    const inner = (
+      <div className={`flex items-center gap-4 px-6 py-4 border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors ${isUnread ? "bg-[#DDE04806]" : ""}`}>
+        <ActivityIcon item={item} />
+        <div className="flex-1 min-w-0">
+          <div className={`text-sm font-semibold ${isUnread ? "text-white" : "text-[#aaa]"}`}>{item.title}</div>
+          <div className="text-xs text-[#555] mt-0.5">{item.sub}</div>
+        </div>
+        <AmountBadge item={item} />
+        {isUnread && <div className="w-2 h-2 rounded-full bg-[#DDE048] flex-shrink-0" />}
+      </div>
+    );
+    return isExternal
+      ? <a href={item.href} target="_blank" rel="noopener noreferrer" className="block no-underline text-inherit">{inner}</a>
+      : <Link href={item.href} className="block no-underline text-inherit">{inner}</Link>;
+  }
+
+  // One combined-list row, mobile (card) layout.
+  function MobileRow({ row }: { row: CombinedRow }) {
+    if (row.type === "deadline") {
+      const w = row.w;
+      return (
+        <Link href={`/pledge/${w.pledgeId}`}
+          className="flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border border-[#f59e0b]/40 bg-[#f59e0b08] no-underline text-inherit">
+          <div className="w-10 h-10 rounded-full bg-[#f59e0b22] flex items-center justify-center shrink-0">
+            <Clock size={18} color="#f59e0b" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="font-bold text-white text-sm truncate">Last day before grace period</span>
+              <span className="w-2 h-2 rounded-full bg-[#f59e0b] shrink-0" />
+            </div>
+            <div className="text-xs text-[#888]">Pledge #{w.pledgeId} · {w.amount} USDC · {w.hoursLeft}h left</div>
+          </div>
+          <span className="text-[#f59e0b] text-xs font-bold shrink-0">Pay →</span>
+        </Link>
+      );
+    }
+    if (row.type === "transfer") {
+      const n = row.n;
+      const r = n.transfer_requests;
+      const trType = n.type;
+      const isMerchantNotif = r && (r.merchant_address === profileUuid || r.merchant_address === account?.toLowerCase());
+      const detailHref = isMerchantNotif ? `/merchant/transfers/requests/${n.request_id}` : `/pledges/requests/${n.request_id}`;
+      return (
+        <Link href={detailHref}
+          onClick={() => markTransferNotificationRead(n.id)}
+          className={`flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border no-underline text-inherit ${n.read ? "border-[#1F2127] bg-[#11141A]" : "border-[#DDE048]/20 bg-[#1a1d12]"}`}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: TR_COLOR[trType] + "22", border: `1px solid ${TR_COLOR[trType]}33` }}>
+            <FileText size={18} color={TR_COLOR[trType]} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="font-bold text-white text-sm truncate">{TR_LABEL[trType] ?? trType}</span>
+              {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
+            </div>
+            {r && (
+              <div className="text-xs text-[#888]">
+                {r.type === "installment" ? `${r.amount_per_period?.toFixed(2) ?? "—"} ${r.token} × ${r.total_periods ?? "?"}` : `${r.total_amount?.toFixed(2) ?? "—"} ${r.token}`}
+              </div>
+            )}
+          </div>
+          <span className="text-[#DDE048] text-xs font-bold shrink-0">View →</span>
+        </Link>
+      );
+    }
+    if (row.type === "payment") {
+      const n = row.n;
+      const req = n.payment_requests;
+      if (!req) return null;
+      const days = Math.ceil((new Date(req.deadline.replace(" ", "T")).getTime() - Date.now()) / 86400000);
+      return (
+        <Link href={req.status === "fulfilled" ? "#" : `/new-transfer?request=${req.id}&notif=${n.id}`}
+          onClick={() => { if (req.status !== "fulfilled") markNotificationRead(n.id); }}
+          className={`flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border no-underline text-inherit ${req.status === "fulfilled" ? "opacity-60 cursor-default border-[#1F2127] bg-[#11141A]" : n.read ? "border-[#1F2127] bg-[#11141A]" : "border-[#DDE048]/20 bg-[#1a1d12]"}`}>
+          <div className="w-10 h-10 rounded-xl bg-[#DDE048]/10 border border-[#DDE048]/20 flex items-center justify-center shrink-0">
+            <FileText size={18} color="#DDE048" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="font-bold text-white text-sm truncate">{req.title || "Payment Request"}</span>
+              {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
+            </div>
+            <div className="text-xs text-[#888]">{req.amount.toFixed(2)} USDC · {days > 0 ? `${days}d left` : "Overdue"}</div>
+          </div>
+          {req.status === "fulfilled"
+            ? <span className="flex items-center gap-1 text-[#22c55e] text-xs font-bold shrink-0"><CheckCircle2 size={13} /> Paid</span>
+            : <span className="text-[#DDE048] text-xs font-bold shrink-0">Pay →</span>}
+        </Link>
+      );
+    }
+    const item = row.item;
+    const isUnread = !readIds.has(item.id);
+    const isExternal = item.href.startsWith("http");
+    const inner = (
+      <div className={`flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border ${isUnread ? "border-[#DDE04833] bg-[#DDE04808]" : "border-[#1F2127] bg-[#11141A]"}`}>
+        <ActivityIcon item={item} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className={`text-sm font-semibold ${isUnread ? "text-white" : "text-[#aaa]"}`}>{item.title}</div>
+            {isUnread && <div className="w-2 h-2 rounded-full bg-[#DDE048] flex-shrink-0" />}
+          </div>
+          <div className="flex items-center justify-between gap-2 mt-0.5">
+            <div className="text-xs text-[#666] leading-relaxed truncate">{item.sub}</div>
+            <AmountBadge item={item} />
+          </div>
+        </div>
+      </div>
+    );
+    return isExternal
+      ? <a href={item.href} target="_blank" rel="noopener noreferrer" className="block no-underline text-inherit">{inner}</a>
+      : <Link href={item.href} className="block no-underline text-inherit">{inner}</Link>;
+  }
+
   const TABS = [
     { key: "all",      label: "All" },
     { key: "requests", label: "Requests" },
@@ -467,123 +698,9 @@ export default function Notifications() {
         </div>
       ) : (
         <>
-          {/* Deadline warnings */}
-          {(tab === "all" || tab === "sent") && deadlineWarnings.length > 0 && (
-            <div className="mb-6">
-              <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">URGENT · DEADLINE TODAY</div>
-              <div className="space-y-2">
-                {deadlineWarnings.map((w) => (
-                  <Link key={w.pledgeId} href={`/pledge/${w.pledgeId}`}
-                    className="flex items-center gap-4 p-4 rounded-2xl border border-[#f59e0b]/40 bg-[#f59e0b08] hover:border-[#f59e0b]/60 transition-colors no-underline text-inherit">
-                    <div className="w-10 h-10 rounded-full bg-[#f59e0b22] flex items-center justify-center shrink-0">
-                      <Clock size={18} color="#f59e0b" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="font-bold text-white text-sm">Last day before grace period</span>
-                        <span className="w-2 h-2 rounded-full bg-[#f59e0b] shrink-0" />
-                      </div>
-                      <div className="text-xs text-[#888]">Pledge #{w.pledgeId} · {w.amount} USDC · {w.hoursLeft}h left to pay before grace activates</div>
-                    </div>
-                    <div className="text-[#f59e0b] text-xs font-bold shrink-0">Pay now →</div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Transfer requests (off-chain negotiation notifications) */}
-          {showRequests && transferReqNotifs.length > 0 && (
-            <div className="mb-6">
-              <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">TRANSFER REQUESTS</div>
-              <div className="space-y-2">
-                {transferReqNotifs.map((n) => {
-                  const r = n.transfer_requests;
-                  const trType = n.type;
-                  const label: Record<string, string> = {
-                    new_request: "New transfer request",
-                    renegotiated: "Merchant proposed new terms",
-                    accepted: "Merchant accepted your request",
-                    rejected: "Merchant rejected your request",
-                    cancelled: "Request was cancelled",
-                    confirmed: "Transfer confirmed on-chain",
-                  };
-                  const color: Record<string, string> = {
-                    new_request: "#DDE048", renegotiated: "#60a5fa", accepted: "#22c55e",
-                    rejected: "#ef4444", cancelled: "#888", confirmed: "#22c55e",
-                  };
-                  const isMerchantNotif = r && (r.merchant_address === profileUuid || r.merchant_address === account?.toLowerCase());
-                  const detailHref = isMerchantNotif
-                    ? `/merchant/transfers/requests/${n.request_id}`
-                    : `/pledges/requests/${n.request_id}`;
-                  return (
-                    <Link key={n.id} href={detailHref}
-                      onClick={() => markTransferNotificationRead(n.id)}
-                      className={`flex items-center gap-4 p-4 rounded-2xl border transition-colors no-underline text-inherit ${
-                        n.read ? "bg-[#13161c] border-[#1e2230] hover:border-[#DDE048]/30" : "bg-[#1a1d12] border-[#DDE048]/20 hover:border-[#DDE048]/30"
-                      }`}>
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                        style={{ background: color[trType] + "22", border: `1px solid ${color[trType]}33` }}>
-                        <FileText size={18} color={color[trType]} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-bold text-white text-sm truncate">{label[trType] ?? trType}</span>
-                          {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
-                        </div>
-                        {r && (
-                          <div className="text-xs text-[#888]">
-                            {r.type === "installment"
-                              ? `${r.amount_per_period?.toFixed(2) ?? "—"} ${r.token} × ${r.total_periods ?? "?"} payments`
-                              : `${r.total_amount?.toFixed(2) ?? "—"} ${r.token}`}
-                          </div>
-                        )}
-                      </div>
-                      <div className="text-[#DDE048] text-xs font-bold shrink-0">View →</div>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Payment requests */}
-          {showRequests && paymentReqNotifs.length > 0 && (
-            <div className="mb-6">
-              <div className="text-[11px] text-[#555] tracking-[1.5px] mb-3">PAYMENT REQUESTS</div>
-              <div className="space-y-2">
-                {paymentReqNotifs.map((n) => {
-                  const req = n.payment_requests;
-                  if (!req) return null;
-                  const days = Math.ceil((new Date(req.deadline.replace(" ", "T")).getTime() - Date.now()) / 86400000);
-                  return (
-                    <Link key={n.id} href={req.status === "fulfilled" ? "#" : `/new-transfer?request=${req.id}&notif=${n.id}`}
-                      onClick={() => { if (req.status !== "fulfilled") markNotificationRead(n.id); }}
-                      className={`flex items-center gap-4 p-4 rounded-2xl border transition-colors no-underline text-inherit ${req.status === "fulfilled" ? "opacity-60 cursor-default border-[#1e2230] bg-[#13161c]" : n.read ? "bg-[#13161c] border-[#1e2230] hover:border-[#DDE048]/30" : "bg-[#1a1d12] border-[#DDE048]/20 hover:border-[#DDE048]/30"}`}>
-                      <div className="w-10 h-10 rounded-xl bg-[#DDE048]/10 border border-[#DDE048]/20 flex items-center justify-center shrink-0">
-                        <FileText size={18} color="#DDE048" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-bold text-white text-sm truncate">{req.title || "Payment Request"}</span>
-                          {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
-                        </div>
-                        <div className="text-xs text-[#888]">{req.amount.toFixed(2)} USDC · {days > 0 ? `${days}d left` : "Overdue"} · from {req.merchant_address.slice(0, 6)}…{req.merchant_address.slice(-4)}</div>
-                      </div>
-                      {req.status === "fulfilled"
-                        ? <div className="flex items-center gap-1 text-[#22c55e] text-xs font-bold shrink-0"><CheckCircle2 size={13} /> Paid</div>
-                        : <div className="text-[#DDE048] text-xs font-bold shrink-0">Pay →</div>}
-
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {loading && <LoadingSpinner />}
 
-          {!loading && showActivity && filteredActivity.length === 0 && (
+          {!loading && !hasAnyItems && (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <Bell size={40} color="#333" className="mb-3" />
               <div className="font-bold text-white mb-1.5">No activity yet</div>
@@ -591,27 +708,10 @@ export default function Notifications() {
             </div>
           )}
 
-          {!loading && showActivity && filteredActivity.length > 0 && (
+          {!loading && hasAnyItems && (
             <>
             <div className="bg-[#13161c] border border-[#1e2230] rounded-2xl overflow-hidden">
-              {paged.map((item) => {
-                const isUnread = !readIds.has(item.id);
-                const isExternal = item.href.startsWith("http");
-                const inner = (
-                  <div className={`flex items-center gap-4 px-6 py-4 border-b border-[#1e2230] last:border-0 hover:bg-[#15181f] transition-colors ${isUnread ? "bg-[#DDE04806]" : ""}`}>
-                    <ActivityIcon item={item} />
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-semibold ${isUnread ? "text-white" : "text-[#aaa]"}`}>{item.title}</div>
-                      <div className="text-xs text-[#555] mt-0.5">{item.sub}</div>
-                    </div>
-                    <AmountBadge item={item} />
-                    {isUnread && <div className="w-2 h-2 rounded-full bg-[#DDE048] flex-shrink-0" />}
-                  </div>
-                );
-                return isExternal
-                  ? <a key={item.id} href={item.href} target="_blank" rel="noopener noreferrer" className="block no-underline text-inherit">{inner}</a>
-                  : <Link key={item.id} href={item.href} className="block no-underline text-inherit">{inner}</Link>;
-              })}
+              {pagedRows.map((row) => <DesktopRow key={row.key} row={row} />)}
             </div>
             <Pagination />
             </>
@@ -646,108 +746,9 @@ export default function Notifications() {
           </div>
         )}
 
-        {/* Deadline warnings */}
-        {!loading && account && (tab === "all" || tab === "sent") && deadlineWarnings.length > 0 && (
-          <div className="mb-4">
-            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-2">URGENT · DEADLINE TODAY</div>
-            {deadlineWarnings.map((w) => (
-              <Link key={w.pledgeId} href={`/pledge/${w.pledgeId}`}
-                className="flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border border-[#f59e0b]/40 bg-[#f59e0b08] no-underline text-inherit">
-                <div className="w-10 h-10 rounded-full bg-[#f59e0b22] flex items-center justify-center shrink-0">
-                  <Clock size={18} color="#f59e0b" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-bold text-white text-sm truncate">Last day before grace period</span>
-                    <span className="w-2 h-2 rounded-full bg-[#f59e0b] shrink-0" />
-                  </div>
-                  <div className="text-xs text-[#888]">Pledge #{w.pledgeId} · {w.amount} USDC · {w.hoursLeft}h left</div>
-                </div>
-                <span className="text-[#f59e0b] text-xs font-bold shrink-0">Pay →</span>
-              </Link>
-            ))}
-          </div>
-        )}
-
-        {/* Transfer requests mobile */}
-        {!loading && account && showRequests && transferReqNotifs.length > 0 && (
-          <div className="mb-4">
-            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-2">TRANSFER REQUESTS</div>
-            {transferReqNotifs.map((n) => {
-              const r = n.transfer_requests;
-              const trType = n.type;
-              const label: Record<string, string> = {
-                new_request: "New transfer request", renegotiated: "Merchant proposed new terms",
-                accepted: "Merchant accepted your request", rejected: "Merchant rejected",
-                cancelled: "Request cancelled", confirmed: "Transfer confirmed",
-              };
-              const color: Record<string, string> = {
-                new_request: "#DDE048", renegotiated: "#60a5fa", accepted: "#22c55e",
-                rejected: "#ef4444", cancelled: "#888", confirmed: "#22c55e",
-              };
-              const isMerchantNotif = r && (r.merchant_address === profileUuid || r.merchant_address === account?.toLowerCase());
-              const detailHref = isMerchantNotif ? `/merchant/transfers/requests/${n.request_id}` : `/pledges/requests/${n.request_id}`;
-              return (
-                <Link key={n.id} href={detailHref}
-                  onClick={() => markTransferNotificationRead(n.id)}
-                  className={`flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border no-underline text-inherit ${n.read ? "border-[#1F2127] bg-[#11141A]" : "border-[#DDE048]/20 bg-[#1a1d12]"}`}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                    style={{ background: color[trType] + "22", border: `1px solid ${color[trType]}33` }}>
-                    <FileText size={18} color={color[trType]} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="font-bold text-white text-sm truncate">{label[trType] ?? trType}</span>
-                      {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
-                    </div>
-                    {r && (
-                      <div className="text-xs text-[#888]">
-                        {r.type === "installment" ? `${r.amount_per_period?.toFixed(2) ?? "—"} ${r.token} × ${r.total_periods ?? "?"}` : `${r.total_amount?.toFixed(2) ?? "—"} ${r.token}`}
-                      </div>
-                    )}
-                  </div>
-                  <span className="text-[#DDE048] text-xs font-bold shrink-0">View →</span>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Payment requests */}
-        {!loading && account && showRequests && paymentReqNotifs.length > 0 && (
-          <div className="mb-4">
-            <div className="text-[11px] text-[#555] tracking-[1.5px] mb-2">PAYMENT REQUESTS</div>
-            {paymentReqNotifs.map((n) => {
-              const req = n.payment_requests;
-              if (!req) return null;
-              const days = Math.ceil((new Date(req.deadline.replace(" ", "T")).getTime() - Date.now()) / 86400000);
-              return (
-                <Link key={n.id} href={req.status === "fulfilled" ? "#" : `/new-transfer?request=${req.id}&notif=${n.id}`}
-                  onClick={() => { if (req.status !== "fulfilled") markNotificationRead(n.id); }}
-                  className={`flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border no-underline text-inherit ${req.status === "fulfilled" ? "opacity-60 cursor-default border-[#1F2127] bg-[#11141A]" : n.read ? "border-[#1F2127] bg-[#11141A]" : "border-[#DDE048]/20 bg-[#1a1d12]"}`}>
-                  <div className="w-10 h-10 rounded-xl bg-[#DDE048]/10 border border-[#DDE048]/20 flex items-center justify-center shrink-0">
-                    <FileText size={18} color="#DDE048" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="font-bold text-white text-sm truncate">{req.title || "Payment Request"}</span>
-                      {!n.read && <span className="w-2 h-2 rounded-full bg-[#DDE048] shrink-0" />}
-                    </div>
-                    <div className="text-xs text-[#888]">{req.amount.toFixed(2)} USDC · {days > 0 ? `${days}d left` : "Overdue"}</div>
-                  </div>
-                  {req.status === "fulfilled"
-                    ? <span className="flex items-center gap-1 text-[#22c55e] text-xs font-bold shrink-0"><CheckCircle2 size={13} /> Paid</span>
-                    : <span className="text-[#DDE048] text-xs font-bold shrink-0">Pay →</span>}
-
-                </Link>
-              );
-            })}
-          </div>
-        )}
-
         {loading && <LoadingSpinner />}
 
-        {!loading && account && showActivity && filteredActivity.length === 0 && (
+        {!loading && account && !hasAnyItems && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Bell size={40} color="#444" className="mb-3" />
             <div className="font-bold mb-1.5">No activity yet</div>
@@ -755,30 +756,9 @@ export default function Notifications() {
           </div>
         )}
 
-        {!loading && account && showActivity && filteredActivity.length > 0 && (
+        {!loading && account && hasAnyItems && (
           <>
-            {paged.map((item) => {
-              const isUnread = !readIds.has(item.id);
-              const isExternal = item.href.startsWith("http");
-              const inner = (
-                <div className={`flex items-center gap-3.5 p-3.5 rounded-2xl mb-2 border ${isUnread ? "border-[#DDE04833] bg-[#DDE04808]" : "border-[#1F2127] bg-[#11141A]"}`}>
-                  <ActivityIcon item={item} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className={`text-sm font-semibold ${isUnread ? "text-white" : "text-[#aaa]"}`}>{item.title}</div>
-                      {isUnread && <div className="w-2 h-2 rounded-full bg-[#DDE048] flex-shrink-0" />}
-                    </div>
-                    <div className="flex items-center justify-between gap-2 mt-0.5">
-                      <div className="text-xs text-[#666] leading-relaxed truncate">{item.sub}</div>
-                      <AmountBadge item={item} />
-                    </div>
-                  </div>
-                </div>
-              );
-              return isExternal
-                ? <a key={item.id} href={item.href} target="_blank" rel="noopener noreferrer" className="block no-underline text-inherit">{inner}</a>
-                : <Link key={item.id} href={item.href} className="block no-underline text-inherit">{inner}</Link>;
-            })}
+            {pagedRows.map((row) => <MobileRow key={row.key} row={row} />)}
             <Pagination />
           </>
         )}
