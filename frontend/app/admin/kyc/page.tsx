@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
+import { deriveAccountId } from "../../../lib/accountId";
 import {
   Check, X, AlertTriangle, Loader, ExternalLink, Search,
   ShieldCheck, ShieldX, Clock, RefreshCw,
@@ -55,6 +56,7 @@ export default function KYCQueuePage() {
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [processing, setProcessing] = useState(false);
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
+  const [selectedLinkedWallets, setSelectedLinkedWallets] = useState<string[]>([]);
 
   async function load(silent = false) {
     silent ? setRefreshing(true) : setLoading(true);
@@ -71,6 +73,14 @@ export default function KYCQueuePage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!selected) { setSelectedLinkedWallets([]); return; }
+    fetch(`/api/admin/wallets/${selected.id}`)
+      .then(r => r.ok ? r.json() : { wallets: [] })
+      .then(({ wallets }) => setSelectedLinkedWallets((wallets ?? []).map((w: { wallet_address: string }) => w.wallet_address)))
+      .catch(() => setSelectedLinkedWallets([]));
+  }, [selected]);
 
   function showToast(text: string, ok: boolean) {
     setToast({ text, ok });
@@ -282,6 +292,12 @@ export default function KYCQueuePage() {
 
             {/* Details grid */}
             <div className="px-6 py-5 space-y-5">
+              {/* Account ID */}
+              <div className="bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3">
+                <div className="text-[10px] font-semibold text-[#444] uppercase tracking-[0.8px] mb-1">Account ID (on-chain)</div>
+                <div className="text-xs font-mono text-[#888] break-all">{deriveAccountId(selected.id)}</div>
+              </div>
+
               <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                 <Detail label="Full Name"         value={selected.name} />
                 <Detail label="Email Address"     value={selected.email} />
@@ -300,6 +316,20 @@ export default function KYCQueuePage() {
                   </>
                 )}
               </div>
+
+              {/* Linked wallets */}
+              {selectedLinkedWallets.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-semibold text-[#444] uppercase tracking-[0.8px] mb-2">Linked Wallets</div>
+                  <div className="space-y-1.5">
+                    {selectedLinkedWallets.map(w => (
+                      <div key={w} className="bg-[#0e1014] border border-[#1e2230] rounded-lg px-3 py-2 font-mono text-xs text-[#888]">
+                        {w}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Documents — inline preview */}
               {(selected.id_photo_url || selected.permit_url) && (

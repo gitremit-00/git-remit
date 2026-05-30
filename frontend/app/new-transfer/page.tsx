@@ -30,7 +30,8 @@ const STEP_AMOUNT = 3;
 const STEP_REVIEW = 4;
 
 interface FormState {
-  merchant: string;
+  merchant: string;       // accountId (bytes32) — used for on-chain calls
+  merchantUuid: string;   // profile UUID — used for DB queries
   merchantName: string;
   note: string;
   totalAmount: string;    // total (full/partial) OR amount per period (installment)
@@ -57,7 +58,7 @@ export default function NewTransfer() {
 function NewTransferContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { account, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();
+  const { account, accountId, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();
   const { fmt } = useCurrency();
 
   const [transferMode, setTransferMode] = useState<"merchant" | "p2p">("merchant");
@@ -66,7 +67,7 @@ function NewTransferContent() {
   const [installmentCount, setInstallmentCount] = useState(3);
   const [installmentInterval, setInstallmentInterval] = useState(30 * 86400);
   const [form, setForm] = useState<FormState>({
-    merchant: "", merchantName: "", note: "",
+    merchant: "", merchantUuid: "", merchantName: "", note: "",
     totalAmount: "", initialDeposit: "", commitmentDate: "",
   });
   const [requestId, setRequestId] = useState<string | null>(null);
@@ -81,6 +82,14 @@ function NewTransferContent() {
   const [txError, setTxError] = useState("");
   const [loading, setLoading] = useState(false);
   const [requestSent, setRequestSent] = useState(false);
+
+  // UUID-based recipient lookup
+  const [recipientUuid, setRecipientUuid] = useState("");
+  const [recipientPreview, setRecipientPreview] = useState<{
+    displayName: string; verified: boolean; hasLinkedWallet: boolean; accountId: string; role: string;
+  } | null>(null);
+  const [recipientError, setRecipientError] = useState<string | null>(null);
+  const [recipientLookupLoading, setRecipientLookupLoading] = useState(false);
 
   useEffect(() => {
     const to = searchParams.get("to");
@@ -103,6 +112,37 @@ function NewTransferContent() {
       }
     }
   }, []);
+
+  async function lookupRecipientUuid(uuid: string) {
+    setRecipientPreview(null);
+    setRecipientError(null);
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(uuid.trim())) {
+      if (uuid.trim()) setRecipientError("Not a valid RemitSafe account ID.");
+      return;
+    }
+    setRecipientLookupLoading(true);
+    try {
+      const res = await fetch(`/api/users/${uuid.trim()}`);
+      const data = await res.json() as { displayName?: string; verified?: boolean; hasLinkedWallet?: boolean; accountId?: string; role?: string; error?: string };
+      if (!res.ok) {
+        setRecipientError(data.error ?? "No account found.");
+        return;
+      }
+      setRecipientPreview({
+        displayName: data.displayName!,
+        verified: data.verified!,
+        hasLinkedWallet: data.hasLinkedWallet!,
+        accountId: data.accountId!,
+        role: data.role!,
+      });
+      setForm(f => ({ ...f, merchant: data.accountId!, merchantUuid: uuid.trim(), merchantName: data.displayName! }));
+    } catch {
+      setRecipientError("Lookup failed. Try again.");
+    } finally {
+      setRecipientLookupLoading(false);
+    }
+  }
 
   // Wizard step labels (excludes type picker step 0)
   const WIZARD_STEPS = transferMode === "p2p"
@@ -130,10 +170,10 @@ function NewTransferContent() {
   }
 
   async function fetchAccountData() {
-    if (!account) return;
+    if (!account || !accountId) return;
     const [pct, bps, uBal, tBal] = await Promise.all([
-      pledgeRead.getRequiredDepositPct(account),
-      pledgeRead.getServiceFeeBps(account),
+      pledgeRead.getAccountRequiredDepositPct(accountId),
+      pledgeRead.getServiceFeeBps(accountId),
       usdcRead.balanceOf(account),
       usdtRead.balanceOf(account),
     ]);
@@ -273,7 +313,7 @@ function NewTransferContent() {
       const fullDate = (() => { const d = new Date(); d.setDate(d.getDate() + 85); d.setHours(9, 0, 0, 0); return d.toISOString(); })();
       const req = await createTransferRequest({
         sender_address: account,
-        merchant_address: form.merchant,
+        merchant_address: form.merchantUuid,
         type: isInstallment ? "installment" : "partial",
         token: selectedToken,
         total_amount: isInstallment ? null : parseFloat(form.totalAmount),
@@ -286,7 +326,7 @@ function NewTransferContent() {
         note: form.note || null,
       });
       if (!req) { setTxError("Failed to send request. Please try again."); setLoading(false); return; }
-      await sendTransferRequestNotification(req.id, form.merchant, "new_request");
+      await sendTransferRequestNotification(req.id, form.merchantUuid, "new_request");
       savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: transferMode });
       setRequestSent(true);
       setTimeout(() => router.push("/pledges/requests"), 1800);
@@ -306,7 +346,7 @@ function NewTransferContent() {
     try {
       const amt = ethers.parseUnits(parseFloat(form.totalAmount).toFixed(6), 6);
       // Approve gross amount (amount + service fee) so the contract can pull the full debit
-      const feeBps = await pledgeRead.getServiceFeeBps(account) as bigint;
+      const feeBps = await pledgeRead.getServiceFeeBps(accountId) as bigint;
       const gross = amt + (amt * feeBps) / 10000n;
       const approveTx = await tokenWrite.approve(CONTRACTS.REMITTANCE_PLEDGE, gross);
       await approveTx.wait();
@@ -317,7 +357,7 @@ function NewTransferContent() {
       // Save P2P transaction to Supabase so it reflects in the UI
       const saved = await createTransferRequest({
         sender_address: account.toLowerCase(),
-        merchant_address: form.merchant.toLowerCase(),
+        merchant_address: form.merchantUuid.toLowerCase(),
         type: "partial",
         token: selectedToken as "USDC" | "USDT",
         total_amount: parseFloat(form.totalAmount),
@@ -547,32 +587,57 @@ function NewTransferContent() {
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">
-                  {transferMode === "p2p" ? "Recipient wallet address" : "Merchant wallet address"}
+                  RemitSafe Account ID (UUID)
                 </label>
                 <input
-                  className="w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/40 transition-colors"
-                  placeholder="0x..."
-                  value={form.merchant}
+                  className="w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/40 transition-colors font-mono"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  value={recipientUuid}
                   onChange={(e) => {
-                    const addr = e.target.value;
-                    const known = getPledgeMeta(addr);
-                    setForm({ ...form, merchant: addr, merchantName: known?.name ?? form.merchantName });
+                    setRecipientUuid(e.target.value);
+                    setRecipientPreview(null);
+                    setRecipientError(null);
                   }}
+                  onBlur={() => lookupRecipientUuid(recipientUuid)}
                 />
+                {recipientLookupLoading && (
+                  <div className="text-xs text-[#555] mt-1.5 flex items-center gap-1">
+                    <span className="inline-block w-3 h-3 border border-[#555] border-t-transparent rounded-full animate-spin" />
+                    Looking up…
+                  </div>
+                )}
+                {recipientError && (
+                  <div className="text-xs text-red-400 mt-1.5">{recipientError}</div>
+                )}
+                {recipientPreview && (
+                  <div className="mt-3 bg-[#1a1d24] border border-[#1e2230] rounded-xl px-4 py-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-semibold text-white text-sm">{recipientPreview.displayName}</div>
+                        <div className="text-[11px] mt-0.5">
+                          {recipientPreview.verified
+                            ? <span className="text-[#22c55e]">✓ Verified {recipientPreview.role === "merchant" ? "merchant" : "user"}</span>
+                            : <span className="text-[#f59e0b]">⚠ Not yet verified</span>}
+                        </div>
+                        {!recipientPreview.hasLinkedWallet && transferMode === "p2p" && (
+                          <div className="text-[11px] text-red-400 mt-0.5">⚠ Recipient hasn&apos;t connected a wallet yet</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => { setRecipientUuid(""); setRecipientPreview(null); setForm(f => ({ ...f, merchant: "", merchantUuid: "", merchantName: "" })); }}
+                        className="text-[11px] text-[#555] hover:text-[#888]"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="text-xs text-[#555] tracking-[0.5px] block mb-2">
-                  {transferMode === "p2p" ? "Recipient name" : "Merchant name"} <span className="text-[#444]">(optional)</span>
-                </label>
-                <input
-                  className="w-full bg-[#0e1014] border border-[#1e2230] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#DDE048]/40 transition-colors"
-                  placeholder={transferMode === "p2p" ? "e.g. Maria Santos" : "e.g. St. Theresa School"}
-                  value={form.merchantName}
-                  onChange={(e) => setForm({ ...form, merchantName: e.target.value })}
-                />
-              </div>
-              <button onClick={nextStep} disabled={!form.merchant}
-                className="bg-[#DDE048] text-black font-bold text-sm rounded-xl px-6 py-2.5 disabled:opacity-40">
+              <button
+                onClick={nextStep}
+                disabled={!form.merchant || (transferMode === "p2p" && !!recipientPreview && !recipientPreview.hasLinkedWallet)}
+                className="bg-[#DDE048] text-black font-bold text-sm rounded-xl px-6 py-2.5 disabled:opacity-40"
+              >
                 Continue →
               </button>
             </div>
@@ -992,26 +1057,55 @@ function NewTransferContent() {
               <div>
                 <h2 className="text-2xl font-extrabold mb-[22px]">Who are you sending to?</h2>
                 <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">
-                  {transferMode === "p2p" ? "Recipient wallet address" : "Merchant wallet address"}
+                  RemitSafe Account ID (UUID)
                 </label>
-                <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block"
-                  placeholder="0x..."
-                  value={form.merchant}
+                <input
+                  className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-2 outline-none block font-mono"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  value={recipientUuid}
                   onChange={(e) => {
-                    const addr = e.target.value;
-                    const known = getPledgeMeta(addr);
-                    setForm({ ...form, merchant: addr, merchantName: known?.name ?? form.merchantName });
-                  }} />
-                <label className="text-xs text-[#888] mb-2 block tracking-[0.5px]">
-                  {transferMode === "p2p" ? "Recipient name" : "Merchant name"} <span className="font-normal">(optional)</span>
-                </label>
-                <input className="w-full bg-[#11141A] border border-[#1F2127] rounded-[14px] px-4 py-[14px] text-white text-base mb-3.5 outline-none block"
-                  placeholder={transferMode === "p2p" ? "e.g. Maria Santos" : "e.g. Dr. Yanga's Colleges Inc."}
-                  value={form.merchantName} onChange={(e) => setForm({ ...form, merchantName: e.target.value })} />
-                <div className="flex items-start gap-1.5 mt-1.5">
+                    setRecipientUuid(e.target.value);
+                    setRecipientPreview(null);
+                    setRecipientError(null);
+                  }}
+                  onBlur={() => lookupRecipientUuid(recipientUuid)}
+                />
+                {recipientLookupLoading && (
+                  <div className="text-xs text-[#555] mb-2 flex items-center gap-1">
+                    <span className="inline-block w-3 h-3 border border-[#555] border-t-transparent rounded-full animate-spin" />
+                    Looking up…
+                  </div>
+                )}
+                {recipientError && (
+                  <div className="text-xs text-red-400 mb-2">{recipientError}</div>
+                )}
+                {recipientPreview && (
+                  <div className="bg-[#1a1a1a] border border-[#1F2127] rounded-[14px] px-4 py-3 mb-3.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-semibold text-white">{recipientPreview.displayName}</div>
+                        <div className="text-xs mt-0.5">
+                          {recipientPreview.verified
+                            ? <span className="text-[#22c55e]">✓ Verified {recipientPreview.role === "merchant" ? "merchant" : "user"}</span>
+                            : <span className="text-[#f59e0b]">⚠ Not yet verified</span>}
+                        </div>
+                        {!recipientPreview.hasLinkedWallet && transferMode === "p2p" && (
+                          <div className="text-xs text-red-400 mt-0.5">⚠ Recipient hasn&apos;t connected a wallet yet</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => { setRecipientUuid(""); setRecipientPreview(null); setForm(f => ({ ...f, merchant: "", merchantUuid: "", merchantName: "" })); }}
+                        className="text-xs text-[#555] hover:text-[#888]"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-start gap-1.5 mt-1">
                   <Info size={13} color="#666" />
                   <span className="text-xs text-[#888] leading-relaxed">
-                    {transferMode === "p2p" ? "Enter the recipient's wallet address." : "Enter the merchant's wallet address."}
+                    Paste the recipient&apos;s RemitSafe Account ID (UUID format).
                   </span>
                 </div>
               </div>

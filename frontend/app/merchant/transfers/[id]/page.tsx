@@ -12,6 +12,7 @@ import { useWallet } from "../../../../context/WalletContext";
 import { CONTRACTS } from "../../../../contracts/addresses";
 
 function tokenSymbol(addr: string) {
+  if (!addr) return "TOKEN";
   if (addr.toLowerCase() === CONTRACTS.MOCK_USDC.toLowerCase()) return "USDC";
   if (addr.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
   return "TOKEN";
@@ -24,6 +25,21 @@ const STATUS_COLOR: Record<string, string> = { PENDING: "#f59e0b", COMPLETED: "#
 const STATUS_BG: Record<string, string> = { PENDING: "#f59e0b22", COMPLETED: "#22c55e22", DEFAULTED: "#ef444422", CANCELLED: "#88888822" };
 
 interface PledgeRaw { id: bigint; payer: string; merchant: string; token: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; paidDuringGrace: boolean; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePledge(p: any): PledgeRaw {
+  return {
+    id: p.id,
+    payer: p.payerAccount ?? p.payer ?? "",
+    merchant: p.merchantAccount ?? p.merchant ?? "",
+    token: p.token,
+    totalAmount: p.totalAmount,
+    depositedAmount: p.depositedAmount,
+    commitmentDate: p.commitmentDate,
+    appliedFeeBps: p.appliedFeeBps,
+    status: Number(p.status),
+    paidDuringGrace: p.paidDuringGrace ?? false,
+  };
+}
 interface SenderRep { score: number; total: number; defaults: number; label: string; }
 
 function shortAddr(a: string) { return a.slice(0, 6) + "…" + a.slice(-4); }
@@ -76,11 +92,14 @@ export default function MerchantTransferDetail() {
 
   async function loadPledge() {
     try {
-      const pledgeData = await pledgeRead.getPledge(id) as PledgeRaw;
+      const pledgeData = normalizePledge(await pledgeRead.getPledge(id));
       setPledge(pledgeData);
-      const r = await pledgeRead.getReputation(pledgeData.payer);
-      const score = Math.round(Number(r.basisPoints) / 100);
-      setRep({ score, total: Number(r.totalCount), defaults: Number(r.defaultCount ?? 0), label: trustLabel(score) });
+      const payerAccountId = await pledgeRead.getWalletAccount(pledgeData.payer).catch(() => null);
+      const r = payerAccountId ? await pledgeRead.getAccountReputation(payerAccountId).catch(() => null) : null;
+      if (r) {
+        const score = Math.round(Number(r.basisPoints) / 100);
+        setRep({ score, total: Number(r.totalCount), defaults: Number(r.defaultCount ?? 0), label: trustLabel(score) });
+      }
     } finally { setLoading(false); }
   }
 

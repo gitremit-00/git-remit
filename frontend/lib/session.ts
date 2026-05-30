@@ -32,8 +32,16 @@ async function sign(data: string, secret: string) {
   return Buffer.from(signature).toString("base64url");
 }
 
-function sessionSecret() {
-  return process.env.AUTH_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "remitsafe-dev-session-secret";
+function sessionSecret(): string {
+  const secret = process.env.AUTH_SESSION_SECRET;
+  if (!secret) {
+    throw new Error(
+      "AUTH_SESSION_SECRET env var is not set. " +
+      "Generate a random 32-byte hex string and add it to .env.local. " +
+      "Do NOT reuse SUPABASE_SERVICE_ROLE_KEY for this."
+    );
+  }
+  return secret;
 }
 
 export async function createSessionCookie(session: AuthSession) {

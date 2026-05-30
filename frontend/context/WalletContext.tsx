@@ -1,26 +1,66 @@
 "use client";
-import { createContext, useContext, useState, useCallback, useMemo, useEffect, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  ReactNode,
+} from "react";
 import { Contract, JsonRpcProvider, BrowserProvider, Signer } from "ethers";
 import { MORPH_TESTNET, CONTRACTS } from "../contracts/addresses";
 import MockUSDCABI from "../contracts/MockTokens.json";
 import RemittancePledgeABI from "../contracts/RemittancePledge.json";
+import { deriveAccountId } from "../lib/accountId";
+
+export interface LinkedWallet {
+  address: string;
+  isPrimary: boolean;
+}
 
 interface WalletContextType {
+  // Active wallet (the one MetaMask is currently connected to)
+  activeWallet: string | null;
+  activeSigner: Signer | null;
+
+  // All wallets linked to the current profile's account
+  linkedWallets: LinkedWallet[];
+
+  // The user's accountId derived from their profile UUID
+  accountId: string | null;
+
+  // Account-level flags (read from on-chain / session)
+  accountVerified: boolean;
+
+  // Legacy field — still used by pages that haven't been updated yet
   account: string | null;
   signer: Signer | null;
-  provider: JsonRpcProvider;
-  error: string | null;
   walletVerified: boolean;
   walletLoading: boolean;
-  connect: () => Promise<void>;
-  confirmWallet: () => Promise<void>;
-  disconnect: () => void;
+  error: string | null;
+
+  // Read-only RPC provider
+  provider: JsonRpcProvider;
+
+  // Contract instances
   usdcRead: Contract;
   usdtRead: Contract;
   pledgeRead: Contract;
   usdcWrite: Contract | null;
   usdtWrite: Contract | null;
   pledgeWrite: Contract | null;
+
+  // Actions
+  connect: () => Promise<void>;
+  linkActiveWallet: () => Promise<void>;
+  unlinkWallet: (address: string) => Promise<void>;
+  setActiveWallet: (address: string) => void;
+  disconnect: () => void;
+  refreshLinkedWallets: () => Promise<void>;
+
+  // Legacy
+  confirmWallet: () => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType | null>(null);
@@ -33,22 +73,45 @@ function getReadProvider(): JsonRpcProvider {
 function getMetaMaskProvider() {
   const ethereum = typeof window !== "undefined" ? window.ethereum : undefined;
   if (!ethereum) return null;
-
   const providers = ethereum.providers;
   if (providers?.length) {
-    return providers.find((provider) => provider?.isMetaMask) ?? null;
+    return providers.find((p: { isMetaMask?: boolean }) => p?.isMetaMask) ?? null;
   }
-
   return ethereum.isMetaMask ? ethereum : null;
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const [account, setAccount] = useState<string | null>(null);
-  const [signer, setSigner] = useState<Signer | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [activeWallet, setActiveWalletState] = useState<string | null>(null);
+  const [activeSigner, setActiveSigner] = useState<Signer | null>(null);
+  const [linkedWallets, setLinkedWallets] = useState<LinkedWallet[]>([]);
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const [accountVerified, setAccountVerified] = useState(false);
   const [walletVerified, setWalletVerified] = useState(false);
   const [walletLoading, setWalletLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [readProvider] = useState<JsonRpcProvider>(() => getReadProvider());
+
+  // Derive accountId from session on mount
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(me => {
+        if (!me?.userId) return;
+        const id = deriveAccountId(me.userId);
+        setAccountId(id);
+        setAccountVerified(me.kycStatus === "verified");
+      })
+      .catch(() => { /* non-critical */ });
+  }, []);
+
+  const refreshLinkedWallets = useCallback(async () => {
+    try {
+      const walletsRes = await fetch("/api/wallet/list");
+      if (!walletsRes.ok) return;
+      const { wallets } = await walletsRes.json() as { wallets: LinkedWallet[] };
+      setLinkedWallets(wallets ?? []);
+    } catch { /* non-critical */ }
+  }, []);
 
   const connect = useCallback(async () => {
     try {
@@ -59,7 +122,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        await injectedProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: MORPH_TESTNET.chainId }] });
+        await injectedProvider.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: MORPH_TESTNET.chainId }],
+        });
       } catch (e: unknown) {
         if ((e as { code: number }).code === 4902) {
           await injectedProvider.request({ method: "wallet_addEthereumChain", params: [MORPH_TESTNET] });
@@ -69,23 +135,109 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       await provider.send("eth_requestAccounts", []);
       const _signer = await provider.getSigner();
       const address = await _signer.getAddress();
-      setAccount(address);
-      setSigner(_signer);
-      setWalletVerified(sessionStorage.getItem(`rs_wallet_confirmed_${address.toLowerCase()}`) === "1");
+      setActiveWalletState(address);
+      setActiveSigner(_signer);
+      setWalletVerified(
+        sessionStorage.getItem(`rs_wallet_confirmed_${address.toLowerCase()}`) === "1"
+      );
       setError(null);
     } catch (err: unknown) {
       setError((err as Error).message);
     }
   }, []);
 
-  const confirmWallet = useCallback(async () => {
+  const linkActiveWallet = useCallback(async () => {
+    if (!activeWallet || !activeSigner) {
+      setError("Connect a wallet first.");
+      return;
+    }
     try {
-      if (!signer) {
-        await connect();
+      // 1. Get operator signature
+      const sigRes = await fetch("/api/wallet/link-signature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: activeWallet }),
+      });
+      if (!sigRes.ok) {
+        const { error: e } = await sigRes.json() as { error: string };
+        setError(e);
+        return;
+      }
+      const { accountId: accId, sigExpiry, operatorSig } = await sigRes.json() as {
+        accountId: string;
+        sigExpiry: number;
+        operatorSig: string;
+      };
+
+      // 2. Send on-chain linkWallet tx
+      const pledgeWrite = new Contract(CONTRACTS.REMITTANCE_PLEDGE, RemittancePledgeABI, activeSigner);
+      const tx = await pledgeWrite.linkWallet(accId, sigExpiry, operatorSig);
+      const receipt = await tx.wait();
+
+      // 3. Persist to DB
+      const addRes = await fetch("/api/wallet/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: activeWallet, txHash: receipt.hash }),
+      });
+      if (!addRes.ok) {
+        const { error: e } = await addRes.json() as { error: string };
+        setError(e);
         return;
       }
 
-      const address = await signer.getAddress();
+      sessionStorage.setItem(`rs_wallet_confirmed_${activeWallet.toLowerCase()}`, "1");
+      setWalletVerified(true);
+      await refreshLinkedWallets();
+    } catch (err: unknown) {
+      setError((err as Error).message);
+    }
+  }, [activeWallet, activeSigner, refreshLinkedWallets]);
+
+  const unlinkWallet = useCallback(async (address: string) => {
+    if (!activeSigner) return;
+    try {
+      const message = `RemitSafe: remove wallet ${address.toLowerCase()} from my account`;
+      const signedMessage = await activeSigner.signMessage(message);
+      const res = await fetch("/api/wallet/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: address, signedMessage }),
+      });
+      if (!res.ok) {
+        const { error: e } = await res.json() as { error: string };
+        setError(e);
+        return;
+      }
+      await refreshLinkedWallets();
+    } catch (err: unknown) {
+      setError((err as Error).message);
+    }
+  }, [activeSigner, refreshLinkedWallets]);
+
+  const setActiveWallet = useCallback((address: string) => {
+    setActiveWalletState(address);
+  }, []);
+
+  const disconnect = useCallback(() => {
+    if (activeWallet) sessionStorage.removeItem(`rs_wallet_confirmed_${activeWallet.toLowerCase()}`);
+    sessionStorage.setItem("rs_disconnected", "1");
+    setActiveWalletState(null);
+    setActiveSigner(null);
+    setWalletVerified(false);
+    const injectedProvider = getMetaMaskProvider();
+    if (!injectedProvider) return;
+    injectedProvider.request({
+      method: "wallet_revokePermissions",
+      params: [{ eth_accounts: {} }],
+    }).catch(() => { /* some wallets don't support this */ });
+  }, [activeWallet]);
+
+  // Legacy confirmWallet — signs a message to "verify" the wallet session-side
+  const confirmWallet = useCallback(async () => {
+    try {
+      if (!activeSigner) { await connect(); return; }
+      const address = await activeSigner.getAddress();
       const message = [
         "RemitSafe dashboard access",
         "",
@@ -93,43 +245,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         `Wallet: ${address}`,
         `Time: ${new Date().toISOString()}`,
       ].join("\n");
-
-      await signer.signMessage(message);
+      await activeSigner.signMessage(message);
       sessionStorage.setItem(`rs_wallet_confirmed_${address.toLowerCase()}`, "1");
       setWalletVerified(true);
       setError(null);
-
-      // Persist wallet address to profile so KYC approval can whitelist it on-chain
-      fetch("/api/profile/wallet", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: address }),
-      }).catch(() => {/* non-critical — dashboard still works */});
     } catch (err: unknown) {
       setWalletVerified(false);
       setError((err as Error).message || "MetaMask confirmation was rejected.");
     }
-  }, [connect, signer]);
+  }, [connect, activeSigner]);
 
-  const disconnect = useCallback(() => {
-    if (account) sessionStorage.removeItem(`rs_wallet_confirmed_${account.toLowerCase()}`);
-    sessionStorage.setItem("rs_disconnected", "1");
-    setAccount(null);
-    setSigner(null);
-    setWalletVerified(false);
-
-    const injectedProvider = getMetaMaskProvider();
-    if (!injectedProvider) return;
-
-    injectedProvider.request({
-      method: "wallet_revokePermissions",
-      params: [{ eth_accounts: {} }],
-    }).catch(() => {
-      // Some wallets do not support permission revocation — local disconnect still succeeds.
-    });
-  }, [account]);
-
-  // Auto-reconnect if MetaMask is already connected (skipped if user explicitly disconnected)
+  // Auto-reconnect on mount
   useEffect(() => {
     async function tryReconnect() {
       try {
@@ -141,29 +267,53 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         const provider = new BrowserProvider(injectedProvider);
         const _signer = await provider.getSigner();
         const address = await _signer.getAddress();
-        setAccount(address);
-        setSigner(_signer);
-        setWalletVerified(sessionStorage.getItem(`rs_wallet_confirmed_${address.toLowerCase()}`) === "1");
-      } catch {
-        // silently fail — user just isn't connected
-      } finally {
+        setActiveWalletState(address);
+        setActiveSigner(_signer);
+        setWalletVerified(
+          sessionStorage.getItem(`rs_wallet_confirmed_${address.toLowerCase()}`) === "1"
+        );
+      } catch { /* silently fail */ } finally {
         setWalletLoading(false);
       }
     }
     tryReconnect();
-  }, []);
+    refreshLinkedWallets();
+  }, [refreshLinkedWallets]);
 
   const contracts = useMemo(() => ({
     usdcRead: new Contract(CONTRACTS.MOCK_USDC, MockUSDCABI, readProvider),
     usdtRead: new Contract(CONTRACTS.MOCK_USDT, MockUSDCABI, readProvider),
     pledgeRead: new Contract(CONTRACTS.REMITTANCE_PLEDGE, RemittancePledgeABI, readProvider),
-    usdcWrite: signer ? new Contract(CONTRACTS.MOCK_USDC, MockUSDCABI, signer) : null,
-    usdtWrite: signer ? new Contract(CONTRACTS.MOCK_USDT, MockUSDCABI, signer) : null,
-    pledgeWrite: signer ? new Contract(CONTRACTS.REMITTANCE_PLEDGE, RemittancePledgeABI, signer) : null,
-  }), [signer, readProvider]);
+    usdcWrite: activeSigner ? new Contract(CONTRACTS.MOCK_USDC, MockUSDCABI, activeSigner) : null,
+    usdtWrite: activeSigner ? new Contract(CONTRACTS.MOCK_USDT, MockUSDCABI, activeSigner) : null,
+    pledgeWrite: activeSigner ? new Contract(CONTRACTS.REMITTANCE_PLEDGE, RemittancePledgeABI, activeSigner) : null,
+  }), [activeSigner, readProvider]);
+
+  const value: WalletContextType = {
+    activeWallet,
+    activeSigner,
+    linkedWallets,
+    accountId,
+    accountVerified,
+    // Legacy aliases
+    account: activeWallet,
+    signer: activeSigner,
+    walletVerified,
+    walletLoading,
+    error,
+    provider: readProvider,
+    ...contracts,
+    connect,
+    linkActiveWallet,
+    unlinkWallet,
+    setActiveWallet,
+    disconnect,
+    refreshLinkedWallets,
+    confirmWallet,
+  };
 
   return (
-    <WalletContext.Provider value={{ account, signer, provider: readProvider, error, walletVerified, walletLoading, connect, confirmWallet, disconnect, ...contracts }}>
+    <WalletContext.Provider value={value}>
       {children}
     </WalletContext.Provider>
   );

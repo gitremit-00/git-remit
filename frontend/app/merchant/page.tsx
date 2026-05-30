@@ -15,6 +15,20 @@ import DashboardWalletConfirm from "../../components/DashboardWalletConfirm";
 import KYCBanner from "../../components/KYCBanner";
 
 interface PledgeRaw { id: bigint; payer: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePledge(p: any): PledgeRaw {
+  return {
+    id: p.id,
+    payer: p.payerAccount ?? p.payer ?? "",
+    merchant: p.merchantAccount ?? p.merchant ?? "",
+    totalAmount: p.totalAmount,
+    depositedAmount: p.depositedAmount,
+    commitmentDate: p.commitmentDate,
+    status: Number(p.status),
+    token: p.token,
+    appliedFeeBps: p.appliedFeeBps,
+  };
+}
 
 function tokenSymbol(addr: string): string {
   if (addr?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
@@ -26,7 +40,7 @@ const STATUS = ["PENDING", "COMPLETED", "DEFAULTED", "CANCELLED"];
 const STATUS_COLOR: Record<string, string> = { PENDING: "#f59e0b", COMPLETED: "#22c55e", DEFAULTED: "#ef4444", CANCELLED: "#888" };
 const STATUS_BG: Record<string, string> = { PENDING: "#f59e0b22", COMPLETED: "#22c55e22", DEFAULTED: "#ef444422", CANCELLED: "#88888822" };
 
-function shortAddr(a: string) { return a.slice(0, 6) + "…" + a.slice(-4); }
+function shortAddr(a: string) { return a?.slice(0, 6) + "…" + a?.slice(-4); }
 function fmtDate(ts: bigint) { return new Date(Number(ts) * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
 function daysOverdue(ts: bigint) { return Math.max(0, Math.floor((Date.now() / 1000 - Number(ts)) / 86400)); }
 function initials(addr: string) { return addr.slice(2, 4).toUpperCase(); }
@@ -35,7 +49,7 @@ const AVATAR_COLORS = ["#DDE048", "#60a5fa", "#f59e0b", "#22c55e", "#f87171", "#
 function avatarColor(addr: string) { return AVATAR_COLORS[parseInt(addr.slice(2, 4), 16) % AVATAR_COLORS.length]; }
 
 export default function MerchantDashboard() {
-  const { account, connect, confirmWallet, walletVerified, error, pledgeRead, walletLoading } = useWallet();
+  const { account, accountId, connect, confirmWallet, walletVerified, error, pledgeRead, walletLoading } = useWallet();
   const { fmt } = useCurrency();
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
   const [senderReps, setSenderReps] = useState<Record<string, SenderRep>>({});
@@ -44,20 +58,22 @@ export default function MerchantDashboard() {
   const [search, setSearch] = useState("");
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => { if (account) loadData(); }, [account]);
+  useEffect(() => { if (account && accountId) loadData(); }, [account, accountId]);
 
   async function loadData() {
     setLoading(true);
     try {
-      const ids = await pledgeRead.getMerchantPledges(account) as bigint[];
-      const details = await Promise.all(ids.map((id) => pledgeRead.getPledge(id))) as PledgeRaw[];
+      const ids = await pledgeRead.getAccountMerchantPledges(accountId) as bigint[];
+      const details = (await Promise.all(ids.map((id) => pledgeRead.getPledge(id)))).map(normalizePledge);
       setPledges(details);
       const uniqueSenders = [...new Set(details.map((p) => p.payer.toLowerCase()))];
-      const reps = await Promise.all(uniqueSenders.map((s) => pledgeRead.getReputation(s)));
+      const reps = await Promise.all(uniqueSenders.map(async (s) => {
+        try { const aid = await pledgeRead.getWalletAccount(s); return aid ? await pledgeRead.getAccountReputation(aid) : null; } catch { return null; }
+      }));
       const repMap: Record<string, SenderRep> = {};
       uniqueSenders.forEach((s, i) => {
         const r = reps[i];
-        repMap[s] = { score: Math.round(Number(r.basisPoints) / 100), total: Number(r.totalCount), defaults: Number(r.defaultCount ?? 0) };
+        if (r) repMap[s] = { score: Math.round(Number(r.basisPoints) / 100), total: Number(r.totalCount), defaults: Number(r.defaultCount ?? 0) };
       });
       setSenderReps(repMap);
     } finally { setLoading(false); }

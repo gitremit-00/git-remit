@@ -64,7 +64,7 @@ const PLEDGE_BG: Record<string, string> = {
 };
 
 export default function Notifications() {
-  const { account, provider, pledgeRead, walletLoading } = useWallet();
+  const { account, accountId, provider, pledgeRead, walletLoading } = useWallet();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -76,9 +76,9 @@ export default function Notifications() {
   const PAGE_SIZE = 10;
 
   useEffect(() => {
-    if (account) { setReadIds(getReadIds()); loadAll(); }
+    if (account && accountId) { setReadIds(getReadIds()); loadAll(); }
     else if (!walletLoading) setLoading(false);
-  }, [account, walletLoading]);
+  }, [account, accountId, walletLoading]);
 
   async function loadAll() {
     setLoading(true);
@@ -131,17 +131,26 @@ export default function Notifications() {
     const pledgeIface = new ethers.Interface(RemittancePledgeABI);
     const usdcIface = new ethers.Interface(MockUSDCABI);
     const addr = account!.toLowerCase();
+    const addrAccountId = accountId?.toLowerCase() ?? "";
     const pledgeContract = CONTRACTS.REMITTANCE_PLEDGE.toLowerCase();
     const latest = await provider.getBlockNumber();
     const fromBlock = Math.max(0, latest - 4998);
 
+    // New contract uses bytes32 accountId in indexed topics
+    const paddedAccountId = addrAccountId ? addrAccountId : ethers.zeroPadValue(account!, 32);
+
     const [createdSender, createdMerchant, completed, defaulted, deposits, cancelled, usdcSent, usdcReceived] = await Promise.all([
-      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCreated(uint256,address,address,uint256,uint256,uint256)"), null, ethers.zeroPadValue(account!, 32)], fromBlock }),
-      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCreated(uint256,address,address,uint256,uint256,uint256)"), null, null, ethers.zeroPadValue(account!, 32)], fromBlock }),
-      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCompleted(uint256,address,uint256)"), null, ethers.zeroPadValue(account!, 32)], fromBlock }),
-      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeDefaulted(uint256,address,uint256)"), null, ethers.zeroPadValue(account!, 32)], fromBlock }),
-      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("DepositMade(uint256,address,uint256,uint256)"), null, ethers.zeroPadValue(account!, 32)], fromBlock }),
-      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCancelled(uint256,address,address,uint256)"), null, ethers.zeroPadValue(account!, 32)], fromBlock }),
+      // PledgeCreated(uint256 pledgeId, bytes32 merchantAccount, bytes32 payerAccount, ...)
+      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCreated(uint256,bytes32,bytes32,address,uint256,uint256,uint256)"), null, null, paddedAccountId], fromBlock }),
+      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCreated(uint256,bytes32,bytes32,address,uint256,uint256,uint256)"), null, paddedAccountId], fromBlock }),
+      // PledgeCompleted(uint256 pledgeId, bytes32 merchantAccount, uint256 amount)
+      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCompleted(uint256,bytes32,uint256)"), null, paddedAccountId], fromBlock }),
+      // PledgeDefaulted(uint256 pledgeId, bytes32 merchantAccount, uint256 amount)
+      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeDefaulted(uint256,bytes32,uint256)"), null, paddedAccountId], fromBlock }),
+      // DepositMade(uint256 pledgeId, bytes32 payerAccount, address wallet, uint256 amount, uint256 totalDeposited)
+      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("DepositMade(uint256,bytes32,address,uint256,uint256)"), null, paddedAccountId], fromBlock }),
+      // PledgeCancelled(uint256 pledgeId, bytes32 payerAccount, bytes32 merchantAccount, uint256 refund)
+      provider.getLogs({ address: CONTRACTS.REMITTANCE_PLEDGE, topics: [ethers.id("PledgeCancelled(uint256,bytes32,bytes32,uint256)"), null, paddedAccountId], fromBlock }),
       provider.getLogs({ address: CONTRACTS.MOCK_USDC, topics: [ethers.id("Transfer(address,address,uint256)"), ethers.zeroPadValue(account!, 32)], fromBlock }),
       provider.getLogs({ address: CONTRACTS.MOCK_USDC, topics: [ethers.id("Transfer(address,address,uint256)"), null, ethers.zeroPadValue(account!, 32)], fromBlock }),
     ]);
@@ -155,21 +164,20 @@ export default function Notifications() {
     for (const log of [...createdSender, ...createdMerchant]) {
       const p = pledgeIface.parseLog(log); if (!p) continue;
       const pledgeId = p.args[0].toString();
-      const isMerchant = p.args[1].toLowerCase() === addr;  // args[1] = merchant
-      const isPayer   = p.args[2].toLowerCase() === addr;   // args[2] = payer
-      const total = parseFloat(ethers.formatUnits(p.args[4], 6)); // args[4] = totalAmount
+      // PledgeCreated(pledgeId, merchantAccount, payerAccount, token, totalAmount, commitmentDate, appliedFeeBps)
+      const isMerchant = p.args[1].toLowerCase() === addrAccountId;
+      const isPayer    = p.args[2].toLowerCase() === addrAccountId;
+      const total = parseFloat(ethers.formatUnits(p.args[4], 6));
       const fee = parseFloat((total * 0.01).toFixed(2));
       pledgeTotalMap.set(pledgeId, total);
 
       results.push({ id: log.transactionHash + "_created", kind: "pledge", type: "created", pledgeId, amount: total.toFixed(2),
         fee: isMerchant ? fee.toFixed(2) : undefined,
-        sign: isMerchant ? "positive" : "negative",
-        title: isMerchant ? "Pledge invoice created" : "New pledge received",
-        sub: isMerchant
-          ? `${total.toFixed(2)} USDC requested from payer · #${pledgeId}`
-          : isPayer
-            ? `${total.toFixed(2)} USDC payment requested · #${pledgeId}`
-            : `${total.toFixed(2)} USDC · #${pledgeId}`,
+        sign: isPayer ? "negative" : "positive",
+        title: isPayer ? "Pledge payment requested" : "Pledge invoice created",
+        sub: isPayer
+          ? `${total.toFixed(2)} USDC payment requested · #${pledgeId}`
+          : `${total.toFixed(2)} USDC requested from payer · #${pledgeId}`,
         href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
     }
     for (const log of completed) {
@@ -191,11 +199,11 @@ export default function Notifications() {
         href: `/pledge/${pledgeId}`, blockNumber: log.blockNumber });
     }
     for (const log of deposits) {
-      // DepositMade args: pledgeId, sender, amount, totalDeposited
+      // DepositMade(pledgeId, payerAccount, wallet, amount, totalDeposited)
       const p = pledgeIface.parseLog(log); if (!p) continue;
       const pledgeId = p.args[0].toString();
-      const amount = parseFloat(ethers.formatUnits(p.args[2], 6));
-      const totalDeposited = parseFloat(ethers.formatUnits(p.args[3], 6));
+      const amount = parseFloat(ethers.formatUnits(p.args[3], 6));
+      const totalDeposited = parseFloat(ethers.formatUnits(p.args[4], 6));
       const pledgeTotal = pledgeTotalMap.get(pledgeId);
       const isFullPayment = pledgeTotal !== undefined && totalDeposited >= pledgeTotal;
       results.push({ id: log.transactionHash + "_deposit", kind: "pledge",
@@ -240,13 +248,14 @@ export default function Notifications() {
     // Fetch ALL pledge IDs from contract storage (not limited by block range)
     try {
       const [senderIds, merchantIds] = await Promise.all([
-        pledgeRead.getPayerPledges(account!) as Promise<bigint[]>,
-        pledgeRead.getMerchantPledges(account!) as Promise<bigint[]>,
+        accountId ? (pledgeRead.getAccountPayerPledges(accountId) as Promise<bigint[]>) : Promise.resolve([]),
+        accountId ? (pledgeRead.getAccountMerchantPledges(accountId) as Promise<bigint[]>) : Promise.resolve([]),
       ]);
       const allIds = [...new Set([...senderIds, ...merchantIds].map((id) => id.toString()))];
-      const allPledges = await Promise.all(
-        allIds.map((id) => pledgeRead.getPledge(id) as Promise<{ id: bigint; payer: string; merchant: string; totalAmount: bigint; commitmentDate: bigint; status: number }>)
-      );
+      const allPledges = (await Promise.all(
+        allIds.map((id) => pledgeRead.getPledge(id))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      )).map((p: any) => ({ ...p, payer: p.payerAccount ?? p.payer ?? "", merchant: p.merchantAccount ?? p.merchant ?? "", status: Number(p.status) }));
 
       // Entries with type "downpayment"/"fulfilment"/"deposit" share a pledgeId with "created" — only skip if
       // the pledge itself (created event) was already seen
@@ -262,7 +271,7 @@ export default function Notifications() {
         // Populate map so any DepositMade log for this pledge can detect full payments
         if (!pledgeTotalMap.has(pledgeId)) pledgeTotalMap.set(pledgeId, total);
         if (seenCreatedIds.has(pledgeId)) continue;
-        const isPayer = p.payer.toLowerCase() === addr;
+        const isPayer = p.payer.toLowerCase() === addrAccountId || p.payer.toLowerCase() === addr;
         const statusLabel = STATUS_LABELS[p.status] ?? "UNKNOWN";
         results.push({
           id: `pledge_${pledgeId}_contract`,
@@ -279,7 +288,7 @@ export default function Notifications() {
       }
 
       // Deadline warnings: pending pledges where user is payer and deadline is within 24h
-      const pendingForWarning = allPledges.filter((p) => p.status === 0 && p.payer.toLowerCase() === addr);
+      const pendingForWarning = allPledges.filter((p) => p.status === 0 && (p.payer.toLowerCase() === addrAccountId || p.payer.toLowerCase() === addr));
       await loadDeadlineWarnings(pendingForWarning.map((p) => ({ id: p.id.toString(), commitmentDate: p.commitmentDate, totalAmount: p.totalAmount })));
     } catch (_) {
       // contract read failed, continue with log-based results only

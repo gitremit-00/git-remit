@@ -13,6 +13,7 @@ import { getPledgeMeta } from "../../lib/pledgeMeta";
 import { CONTRACTS } from "../../contracts/addresses";
 
 function tokenSymbol(addr: string) {
+  if (!addr) return "TOKEN";
   if (addr.toLowerCase() === CONTRACTS.MOCK_USDC.toLowerCase()) return "USDC";
   if (addr.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
   return "TOKEN";
@@ -32,13 +33,28 @@ const TABS = ["All", "Sent", "Received"] as const;
 type Tab = typeof TABS[number];
 
 interface PledgeRaw { id: bigint; payer: string; merchant: string; token: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePledge(p: any): PledgeRaw {
+  return {
+    id: p.id,
+    payer: p.payerAccount ?? p.payer ?? "",
+    merchant: p.merchantAccount ?? p.merchant ?? "",
+    token: p.token,
+    totalAmount: p.totalAmount,
+    depositedAmount: p.depositedAmount,
+    commitmentDate: p.commitmentDate,
+    appliedFeeBps: p.appliedFeeBps,
+    status: Number(p.status),
+  };
+}
 
-function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
+
+function shortAddr(a: string) { return a?.slice(0, 6) + "..." + a?.slice(-4); }
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
 function fmtDate(ts: bigint) { return new Date(Number(ts) * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
 
 export default function Pledges() {
-  const { account, connect, pledgeRead, walletLoading } = useWallet();
+  const { account, accountId, connect, pledgeRead, walletLoading } = useWallet();
   const { fmt } = useCurrency();
   const [tab, setTab] = useState<Tab>("All");
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
@@ -51,16 +67,16 @@ export default function Pledges() {
     setTimeout(() => setCopiedAddr(null), 1500);
   }
 
-  useEffect(() => { if (account) loadPledges(); }, [account, tab]);
+  useEffect(() => { if (account && accountId) loadPledges(); }, [account, accountId, tab]);
 
   async function loadPledges() {
     setLoading(true);
     try {
       let ids: bigint[] = [];
-      if (tab === "Sent" || tab === "All") ids = [...ids, ...(await pledgeRead.getPayerPledges(account)) as bigint[]];
-      if (tab === "Received" || tab === "All") ids = [...ids, ...(await pledgeRead.getMerchantPledges(account)) as bigint[]];
+      if (tab === "Sent" || tab === "All") ids = [...ids, ...(await pledgeRead.getAccountPayerPledges(accountId)) as bigint[]];
+      if (tab === "Received" || tab === "All") ids = [...ids, ...(await pledgeRead.getAccountMerchantPledges(accountId)) as bigint[]];
       const unique = [...new Set(ids.map((id) => id.toString()))];
-      const list = (await Promise.all(unique.map((id) => pledgeRead.getPledge(id)))) as PledgeRaw[];
+      const list = (await Promise.all(unique.map((id) => pledgeRead.getPledge(id)))).map(normalizePledge);
       setPledges(list.slice().reverse());
     } finally { setLoading(false); }
   }

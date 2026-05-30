@@ -401,16 +401,16 @@ export async function getSenderTransferRequests(senderAddress: string): Promise<
   return data as TransferRequest[];
 }
 
-export async function getMerchantTransferRequests(merchantAddress: string): Promise<TransferRequest[]> {
+export async function getMerchantTransferRequests(merchantUuid: string): Promise<TransferRequest[]> {
   if (!supabase) { console.warn("[getMerchantTransferRequests] supabase not configured"); return []; }
   const { data, error } = await supabase
     .from("transfer_requests")
     .select("*")
-    .eq("merchant_address", merchantAddress.toLowerCase())
+    .eq("merchant_address", merchantUuid)
     .order("created_at", { ascending: false });
-  if (error) { console.error("[getMerchantTransferRequests] error:", error, "address:", merchantAddress.toLowerCase()); return []; }
+  if (error) { console.error("[getMerchantTransferRequests] error:", error, "uuid:", merchantUuid); return []; }
   if (!data) return [];
-  console.log("[getMerchantTransferRequests] found", data.length, "rows for", merchantAddress.toLowerCase());
+  console.log("[getMerchantTransferRequests] found", data.length, "rows for", merchantUuid);
   return data as TransferRequest[];
 }
 

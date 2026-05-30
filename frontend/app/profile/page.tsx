@@ -17,7 +17,7 @@ interface SenderCounts { pending: number; completed: number; defaulted: number; 
 interface MerchantCounts { pending: number; completed: number; defaulted: number; totalReceived: number; }
 
 export default function Profile() {
-  const { account, connect, confirmWallet, disconnect, walletVerified, error: walletError, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
+  const { account, connect, confirmWallet, disconnect, walletVerified, error: walletError, pledgeRead, usdcRead, usdtRead, walletLoading, accountId } = useWallet();
   const { role, displayName, setDisplayName, setAvatarUrl } = useRole();
   const { fmt } = useCurrency();
   const isMerchant = role === "merchant";
@@ -27,6 +27,7 @@ export default function Profile() {
   const [usdcBal, setUsdcBal] = useState<string | null>(null);
   const [usdtBal, setUsdtBal] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [accountIdCopied, setAccountIdCopied] = useState(false);
 
   // Profile card state
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -48,39 +49,41 @@ export default function Profile() {
   const [merchantCounts, setMerchantCounts] = useState<MerchantCounts | null>(null);
 
   useEffect(() => {
-    if (account) {
+    if (account && accountId) {
       loadAll();
       fetch("/api/auth/me")
         .then(r => r.ok ? r.json() : null)
         .then(me => {
           if (!me) return;
           if (me.kycStatus) setKycStatus(me.kycStatus);
-          if (!me.userId) return;
-          fetch(`/api/profile?address=${me.userId}`)
+          fetch(`/api/profile`)
             .then(r => r.ok ? r.json() : null)
             .then(data => { if (data) setProfile(data); });
         });
     }
-  }, [account, role]);
+  }, [account, accountId, role]);
 
   async function loadAll() {
-    const [repData, uBal, tBal] = await Promise.all([
-      pledgeRead.getReputation(account),
+    const [repData, trustScore, uBal, tBal] = await Promise.all([
+      accountId ? pledgeRead.getAccountReputation(accountId).catch(() => null) : Promise.resolve(null),
+      accountId ? pledgeRead.getAccountTrustScore(accountId).catch(() => null) : Promise.resolve(null),
       usdcRead.balanceOf(account),
       usdtRead.balanceOf(account),
     ]);
     setRep({
-      score: Math.round(Number(repData.basisPoints) / 100),
-      onTime: Number(repData.onTimeCount),
-      late: Number(repData.lateCount),
-      defaults: Number(repData.defaultCount),
-      total: Number(repData.totalCount),
+      score: trustScore !== null
+        ? Math.round(Number(trustScore) / 100)
+        : repData ? Math.round(Number(repData.basisPoints) / 100) : 0,
+      onTime: Number(repData?.onTimeCount ?? 0),
+      late: Number(repData?.lateCount ?? 0),
+      defaults: Number(repData?.defaultCount ?? 0),
+      total: Number(repData?.totalCount ?? 0),
     });
     setUsdcBal(ethers.formatUnits(uBal, 6));
     setUsdtBal(ethers.formatUnits(tBal, 6));
 
     if (isMerchant) {
-      const ids = await pledgeRead.getMerchantPledges(account) as bigint[];
+      const ids = await pledgeRead.getAccountMerchantPledges(accountId) as bigint[];
       const pledgeList = await Promise.all(ids.map((id) => pledgeRead.getPledge(id))) as { status: number; totalAmount: bigint }[];
       let pending = 0, completed = 0, defaulted = 0, totalReceived = 0;
       for (const p of pledgeList) {
@@ -92,9 +95,9 @@ export default function Profile() {
       setMerchantCounts({ pending, completed, defaulted, totalReceived });
     } else {
       const [max, pct, ids] = await Promise.all([
-        pledgeRead.getMaxActivePledges(account),
-        pledgeRead.getRequiredDepositPct(account),
-        pledgeRead.getPayerPledges(account),
+        pledgeRead.getAccountMaxActivePledges(accountId),
+        pledgeRead.getAccountRequiredDepositPct(accountId),
+        pledgeRead.getAccountPayerPledges(accountId),
       ]);
       setMaxActive(Number(max));
       setReqPct(Number(pct));
@@ -109,6 +112,13 @@ export default function Profile() {
       setActivePledges(c.pending);
       setSenderCounts(c);
     }
+  }
+
+  function copyAccountId() {
+    if (!profile?.id) return;
+    navigator.clipboard.writeText(profile.id);
+    setAccountIdCopied(true);
+    setTimeout(() => setAccountIdCopied(false), 2000);
   }
 
   function copyAddress() {
@@ -129,7 +139,7 @@ export default function Profile() {
     const res = await fetch("/api/profile", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: account, [field]: editValue || null }),
+      body: JSON.stringify({ [field]: editValue || null }),
     });
     if (res.ok) {
       const updated = await res.json();
@@ -154,7 +164,7 @@ export default function Profile() {
       const res = await fetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: account, avatar_url: publicUrl }),
+        body: JSON.stringify({ avatar_url: publicUrl }),
       });
       if (!res.ok) console.error("Failed to save avatar_url", await res.text());
     }
@@ -369,6 +379,15 @@ export default function Profile() {
                 <button onClick={copyAddress} className="flex items-center gap-1.5 mt-1.5 text-[#555] text-xs hover:text-[#888] transition-colors">
                   <Copy size={11} /> {copied ? <span className="text-[#DDE048]">Copied!</span> : "Copy address"}
                 </button>
+                {profile?.id && (
+                  <div className="mt-3 pt-3 border-t border-[#1e2230]">
+                    <div className="text-[10px] text-[#555] tracking-[1px] mb-1">ACCOUNT ID</div>
+                    <div className="text-[11px] font-mono text-white break-all leading-tight mb-1.5">{profile.id}</div>
+                    <button onClick={copyAccountId} className="flex items-center gap-1.5 text-[#555] text-xs hover:text-[#888] transition-colors">
+                      <Copy size={11} /> {accountIdCopied ? <span className="text-[#DDE048]">Copied!</span> : "Copy account ID"}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -541,10 +560,21 @@ export default function Profile() {
           <div className="text-[#888] text-[13px]">{isMerchant ? "Merchant wallet," : "Your wallet,"}</div>
           <div className="font-bold text-2xl">{account.slice(0, 6)}...{account.slice(-4)}</div>
         </div>
-        <div className="inline-flex items-center bg-[#1e1e1e] border border-[#1F2127] rounded-[20px] px-3 py-[5px] text-[13px] text-[#ccc] mb-4 cursor-pointer" onClick={copyAddress}>
+        <div className="inline-flex items-center bg-[#1e1e1e] border border-[#1F2127] rounded-[20px] px-3 py-[5px] text-[13px] text-[#ccc] mb-3 cursor-pointer" onClick={copyAddress}>
           <span>{copied ? "Copied!" : `${account.slice(0, 10)}...${account.slice(-8)}`}</span>
           <Copy size={12} color={copied ? "#DDE048" : "#666"} className="ml-1.5" />
         </div>
+
+        {/* Account ID (UUID) — shareable */}
+        {profile?.id && (
+          <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl px-4 py-3 mb-4">
+            <div className="text-[10px] text-[#888] tracking-[1.5px] mb-1.5">ACCOUNT ID</div>
+            <div className="font-mono text-sm text-white break-all leading-snug mb-2">{profile.id}</div>
+            <button onClick={copyAccountId} className="flex items-center gap-1.5 text-[#DDE048] text-xs font-semibold">
+              <Copy size={12} /> {accountIdCopied ? "Copied!" : "Copy to share"}
+            </button>
+          </div>
+        )}
 
         {/* Profile card (mobile) */}
         <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl overflow-hidden mb-3.5">

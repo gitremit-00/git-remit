@@ -18,7 +18,7 @@ const senderNav = [
   { href: "/pledges", label: "My Transfers", Icon: FileText },
   { href: "/pledges/requests", label: "My Requests", Icon: ClipboardList },
   { href: "/recipients", label: "Recipients", Icon: Users },
-  { href: "/wallet", label: "Wallet", Icon: Wallet },
+  { href: "/wallets", label: "Wallet", Icon: Wallet },
   { href: "/notifications", label: "Activity", Icon: Bell, badge: true },
   { href: "/profile", label: "Profile · Trust", Icon: Shield },
 ];
@@ -26,7 +26,7 @@ const senderNav = [
 const merchantNav = [
   { href: "/merchant", label: "Dashboard", Icon: Home },
   { href: "/merchant/transfers", label: "Incoming Transfers", Icon: FileText },
-  { href: "/wallet", label: "Wallet", Icon: Wallet },
+  { href: "/wallets", label: "Wallet", Icon: Wallet },
   { href: "/notifications", label: "Activity", Icon: Bell, badge: true },
   { href: "/profile", label: "Profile", Icon: Shield },
 ];

@@ -16,18 +16,30 @@ import KYCBanner from "../components/KYCBanner";
 import { useRole } from "../context/RoleContext";
 
 interface RepState { score: number; onTime: number; total: number; defaults: number; late: number; }
-interface PledgeRaw { id: bigint; sender: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
+interface PledgeRaw { id: bigint; payer: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePledge(p: any): PledgeRaw {
+  return {
+    id: p.id,
+    payer: p.payerAccount ?? p.payer ?? p.sender ?? "",
+    merchant: p.merchantAccount ?? p.merchant ?? "",
+    totalAmount: p.totalAmount,
+    depositedAmount: p.depositedAmount,
+    commitmentDate: p.commitmentDate,
+    status: Number(p.status),
+  };
+}
 interface ActivityItem { type: "success" | "warning" | "error" | "info"; label: string; sub: string; time: string; }
 
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
-function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
+function shortAddr(a: string) { return a?.slice(0, 6) + "..." + a?.slice(-4); }
 function fmtDate(ts: bigint) { const d = new Date(Number(ts) * 1000); return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + " at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); }
 function fmtShortDate(ts: bigint) { const d = new Date(Number(ts) * 1000); return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
 function scoreLabel(s: number) { return s >= 80 ? "Excellent" : s >= 50 ? "Good" : s >= 20 ? "Fair" : "Poor"; }
 function scoreColor(s: number) { return s >= 80 ? "#22c55e" : s >= 50 ? "#DDE048" : s >= 20 ? "#f59e0b" : "#ef4444"; }
 
 export default function Home() {
-  const { account, connect, confirmWallet, walletVerified, error, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
+  const { account, accountId, connect, confirmWallet, walletVerified, error, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
   const { fmt, fmtAlt, currency } = useCurrency();
   const { kycStatus } = useRole();
   const isVerified = kycStatus === "verified";
@@ -48,29 +60,32 @@ export default function Home() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  useEffect(() => { if (account) loadData(); }, [account]);
+  useEffect(() => { if (account && accountId) loadData(); }, [account, accountId]);
 
   async function loadData() {
     setLoading(true);
     try {
-      const [uBal, tBal, repData, ids, maxAct] = await Promise.all([
+      const [uBal, tBal, repData, trustScore, ids, maxAct] = await Promise.all([
         usdcRead.balanceOf(account),
         usdtRead.balanceOf(account),
-        pledgeRead.getReputation(account),
-        pledgeRead.getPayerPledges(account),
-        pledgeRead.getMaxActivePledges(account),
+        accountId ? pledgeRead.getAccountReputation(accountId).catch(() => null) : Promise.resolve(null),
+        accountId ? pledgeRead.getAccountTrustScore(accountId).catch(() => null) : Promise.resolve(null),
+        accountId ? pledgeRead.getAccountPayerPledges(accountId) : Promise.resolve([]),
+        accountId ? pledgeRead.getAccountMaxActivePledges(accountId) : Promise.resolve(0n),
       ]);
       setUsdcBal(ethers.formatUnits(uBal, 6));
       setUsdtBal(ethers.formatUnits(tBal, 6));
       setRep({
-        score: Math.round(Number(repData.basisPoints) / 100),
-        onTime: Number(repData.onTimeCount),
-        total: Number(repData.totalCount),
-        defaults: Number(repData.defaultCount ?? 0),
+        score: trustScore !== null
+          ? Math.round(Number(trustScore) / 100)
+          : repData ? Math.round(Number(repData.basisPoints) / 100) : 0,
+        onTime: Number(repData?.onTimeCount ?? 0),
+        total: Number(repData?.totalCount ?? 0),
+        defaults: Number(repData?.defaultCount ?? 0),
         late: Number(repData.lateCount ?? 0),
       });
       setMaxActive(Number(maxAct));
-      const details = (await Promise.all((ids as bigint[]).map((id) => pledgeRead.getPledge(id)))) as PledgeRaw[];
+      const details = (await Promise.all((ids as bigint[]).map((id) => pledgeRead.getPledge(id)))).map(normalizePledge);
       setAllPledges(details);
       setActivePledges(details.filter((p) => Number(p.status) === 0));
       setCompletedPledges(details.filter((p) => Number(p.status) === 1));

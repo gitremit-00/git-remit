@@ -13,6 +13,9 @@ const SENDER_ONLY_PREFIXES = [
 // Pages accessible by both senders and merchants
 const SHARED_PREFIXES = [
   "/wallet",
+  "/wallets",
+  "/withdraw",
+  "/withdrawals",
   "/profile",
   "/settings",
   "/notifications",

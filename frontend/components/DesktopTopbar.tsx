@@ -9,7 +9,7 @@ import Link from "next/link";
 
 
 export default function DesktopTopbar() {
-  const { account, pledgeRead, disconnect } = useWallet();
+  const { account, accountId, pledgeRead, disconnect } = useWallet();
   const { currency, toggle } = useCurrency();
   const { avatarUrl, displayName } = useRole();
 
@@ -22,11 +22,11 @@ export default function DesktopTopbar() {
   const [score, setScore] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!account) return;
-    pledgeRead.getReputation(account)
-      .then((r: { basisPoints: bigint }) => setScore(Math.round(Number(r.basisPoints) / 100)))
+    if (!accountId) return;
+    pledgeRead.getAccountTrustScore(accountId)
+      .then((s: bigint) => setScore(Math.round(Number(s) / 100)))
       .catch(() => {});
-  }, [account]);
+  }, [accountId]);
 
   const scoreLabel = (s: number) => s >= 80 ? "EXCELLENT" : s >= 50 ? "GOOD" : s >= 20 ? "FAIR" : "POOR";
   const scoreColor = (s: number) => s >= 80 ? "#22c55e" : s >= 50 ? "#DDE048" : s >= 20 ? "#f59e0b" : "#ef4444";

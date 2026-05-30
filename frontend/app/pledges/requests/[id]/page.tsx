@@ -85,7 +85,7 @@ function ReviewRow({ label, value, accent, last }: { label: string; value: strin
 export default function SenderRequestDetail() {
   const params = useParams();
   const router = useRouter();
-  const { account, signer, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();
+  const { account, accountId, signer, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite } = useWallet();
   const id = params.id as string;
 
   const [req, setReq] = useState<TransferRequest | null>(null);
@@ -119,8 +119,8 @@ export default function SenderRequestDetail() {
   async function fetchFeeData() {
     try {
       const [pct, bps] = await Promise.all([
-        pledgeRead.getRequiredDepositPct(account),
-        pledgeRead.getServiceFeeBps(account),
+        pledgeRead.getAccountRequiredDepositPct(accountId),
+        pledgeRead.getServiceFeeBps(accountId),
       ]);
       setRequiredPct(Number(pct));
       setFeeBps(Number(bps));

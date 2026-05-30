@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { ethers } from "ethers";
 import { adminClient } from "../../../../../lib/auth-server";
 import { verifySessionCookie } from "../../../../../lib/session";
+import { deriveAccountId } from "../../../../../lib/accountId";
 import RemittancePledgeABI from "../../../../../contracts/RemittancePledge.json";
+import { CONTRACTS } from "../../../../../contracts/addresses";
 
-const PLEDGE_ADDRESS = "0x18d74B544Fa754f1A8927e916506205b9dbF2721";
 const RPC_URL = process.env.MORPH_RPC_URL ?? "https://rpc-hoodi.morph.network";
 
 async function getOwnerContract() {
@@ -12,19 +13,19 @@ async function getOwnerContract() {
   if (!ownerKey) throw new Error("OWNER_PRIVATE_KEY not set");
   const provider = new ethers.JsonRpcProvider(RPC_URL);
   const wallet = new ethers.Wallet(ownerKey, provider);
-  return new ethers.Contract(PLEDGE_ADDRESS, RemittancePledgeABI, wallet);
+  return new ethers.Contract(CONTRACTS.REMITTANCE_PLEDGE, RemittancePledgeABI, wallet);
 }
 
-async function setMerchantVerifiedOnChain(merchantAddress: string, verified: boolean): Promise<void> {
+async function setMerchantVerifiedOnChain(accountId: string, verified: boolean): Promise<void> {
   const contract = await getOwnerContract();
-  const tx = await contract.setMerchantVerified(merchantAddress, verified);
+  const tx = await contract.setMerchantVerified(accountId, verified);
   await tx.wait();
 }
 
-async function setPayerVerifiedOnChain(payerAddress: string, verified: boolean): Promise<void> {
+async function setVerificationBaselineOnChain(accountId: string, verified: boolean): Promise<void> {
   const contract = await getOwnerContract();
   // BASELINE_KYC = 5000, 0 = unverified
-  const tx = await contract.setVerificationBaseline(payerAddress, verified ? 5000 : 0);
+  const tx = await contract.setVerificationBaseline(accountId, verified ? 5000 : 0);
   await tx.wait();
 }
 
@@ -58,10 +59,9 @@ export async function PATCH(
 
     const admin = adminClient();
 
-    // Fetch the profile first so we have the role and wallet address
     const { data: profile, error: fetchError } = await admin
       .from("profiles")
-      .select("role, wallet_address")
+      .select("role")
       .eq("id", id)
       .single();
 
@@ -82,28 +82,21 @@ export async function PATCH(
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // Mirror verification status on-chain for both merchants and senders
-    if (profile.wallet_address) {
-      try {
-        if (profile.role === "merchant") {
-          await setMerchantVerifiedOnChain(profile.wallet_address, action === "approve");
-        } else {
-          // sender / ofw_sender — set verificationBaseline
-          await setPayerVerifiedOnChain(profile.wallet_address, action === "approve");
-        }
-      } catch (chainErr) {
-        console.error("On-chain verification failed:", chainErr);
-        return NextResponse.json({
-          ok: true,
-          status: statusMap[action],
-          warning: "DB updated but on-chain verification failed. Check OWNER_PRIVATE_KEY and RPC.",
-        });
+    // Mirror on-chain using accountId (UUID-derived), not wallet address
+    const accountId = deriveAccountId(id);
+    try {
+      // All accounts get a verification baseline (drives trust score)
+      await setVerificationBaselineOnChain(accountId, action === "approve");
+      // Merchants additionally need the merchant-verified flag
+      if (profile.role === "merchant") {
+        await setMerchantVerifiedOnChain(accountId, action === "approve");
       }
-    } else if (action === "approve") {
+    } catch (chainErr) {
+      console.error("On-chain verification failed:", chainErr);
       return NextResponse.json({
         ok: true,
         status: statusMap[action],
-        warning: "User has no wallet address on file. They must connect their wallet before on-chain verification can be applied.",
+        warning: "DB updated but on-chain verification failed. Check OWNER_PRIVATE_KEY and RPC.",
       });
     }
 

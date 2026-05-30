@@ -62,7 +62,7 @@ function TermRow({ label, value, accent, last }: { label: string; value: string;
 export default function MerchantRequestDetail() {
   const params = useParams();
   const router = useRouter();
-  const { signer, pledgeWrite } = useWallet();
+  const { signer, pledgeRead, pledgeWrite } = useWallet();
   const id = params.id as string;
 
   const [req, setReq] = useState<TransferRequest | null>(null);
@@ -100,6 +100,14 @@ export default function MerchantRequestDetail() {
       const useCounter = req.status === "renegotiating" && req.counter_total_amount !== null;
       const tokenAddress = req.token === "USDC" ? CONTRACTS.MOCK_USDC : CONTRACTS.MOCK_USDT;
 
+      // Resolve sender's accountId (bytes32) from their wallet address
+      const payerAccountId = await pledgeRead.getWalletAccount(req.sender_address) as string;
+      if (!payerAccountId || payerAccountId === ethers.ZeroHash) {
+        setError("Sender has not linked their wallet to a RemitSafe account.");
+        setActionLoading(false);
+        return;
+      }
+
       let txHash: string;
       let pledgeId: string;
 
@@ -111,7 +119,7 @@ export default function MerchantRequestDetail() {
 
         // Step 2 — merchant calls createPledge on-chain
         const createData = pledgeWrite.interface.encodeFunctionData("createPledge", [
-          tokenAddress, req.sender_address, totalAmt, commitTs,
+          tokenAddress, payerAccountId, totalAmt, commitTs,
         ]);
         const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
         const receipt = await tx.wait();
@@ -130,7 +138,7 @@ export default function MerchantRequestDetail() {
         const firstDueTs = Math.floor(new Date(firstDue).getTime() / 1000);
 
         const createData = pledgeWrite.interface.encodeFunctionData("createRecurringPledge", [
-          tokenAddress, req.sender_address, amtAmt, intervalSecs, totalPeriods, firstDueTs,
+          tokenAddress, payerAccountId, amtAmt, intervalSecs, totalPeriods, firstDueTs,
         ]);
         const tx = await signer.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: createData });
         const receipt = await tx.wait();
@@ -145,8 +153,12 @@ export default function MerchantRequestDetail() {
       await sendTransferRequestNotification(id, req.sender_address, "accepted");
       await loadRequest();
     } catch (err: unknown) {
-      const e = err as { reason?: string; message?: string };
-      setError(e.reason ?? e.message ?? "Transaction failed.");
+      const e = err as { reason?: string; message?: string; code?: string | number };
+      if (e.code === "ACTION_REJECTED" || e.code === 4001 || e.message?.includes("user rejected") || e.message?.includes("User denied")) {
+        setError("Transaction cancelled — request was not accepted.");
+      } else {
+        setError(e.reason ?? e.message ?? "Transaction failed.");
+      }
     } finally {
       setActionLoading(false);
     }

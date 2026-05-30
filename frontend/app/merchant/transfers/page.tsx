@@ -13,6 +13,20 @@ import { CONTRACTS } from "../../../contracts/addresses";
 import { getMerchantTransferRequests, type TransferRequest } from "../../../lib/supabase";
 
 interface PledgeRaw { id: bigint; payer: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePledge(p: any): PledgeRaw {
+  return {
+    id: p.id,
+    payer: p.payerAccount ?? p.payer ?? "",
+    merchant: p.merchantAccount ?? p.merchant ?? "",
+    totalAmount: p.totalAmount,
+    depositedAmount: p.depositedAmount,
+    commitmentDate: p.commitmentDate,
+    status: Number(p.status),
+    token: p.token,
+    appliedFeeBps: p.appliedFeeBps,
+  };
+}
 
 function tokenSymbol(addr: string): string {
   if (addr?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
@@ -30,7 +44,7 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
   CANCELLED: <XCircle size={14} color="#888" />,
 };
 
-function shortAddr(a: string) { return a.slice(0, 6) + "…" + a.slice(-4); }
+function shortAddr(a: string) { return a?.slice(0, 6) + "…" + a?.slice(-4); }
 function fmtDate(ts: bigint) { return new Date(Number(ts) * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
 const AVATAR_COLORS = ["#DDE048", "#60a5fa", "#f59e0b", "#22c55e", "#f87171", "#a78bfa", "#34d399"];
 function avatarColor(addr: string) { return AVATAR_COLORS[parseInt(addr.slice(2, 4), 16) % AVATAR_COLORS.length]; }
@@ -59,7 +73,8 @@ const TR_STATUS_BG: Record<string, string> = {
 };
 
 export default function MerchantTransfers() {
-  const { account, connect, pledgeRead } = useWallet();
+  const { account, accountId, connect, pledgeRead } = useWallet();
+  const [profileUuid, setProfileUuid] = useState<string | null>(null);
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
   const [transferRequests, setTransferRequests] = useState<TransferRequest[]>([]);
   const [senderReps, setSenderReps] = useState<Record<string, SenderRep>>({});
@@ -67,26 +82,32 @@ export default function MerchantTransfers() {
   const [filter, setFilter] = useState("ALL");
   const [search, setSearch] = useState("");
 
-  useEffect(() => { if (account) loadData(); }, [account]);
+  useEffect(() => {
+    fetch("/api/auth/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.userId) setProfileUuid(me.userId); });
+  }, []);
+
+  useEffect(() => { if (account && accountId && profileUuid) loadData(); }, [account, accountId, profileUuid]);
 
   async function loadData() {
     setLoading(true);
     console.log("[MerchantTransfers] loadData for account:", account);
     try {
       const [idsResult, trData] = await Promise.all([
-        (pledgeRead.getMerchantPledges(account) as Promise<bigint[]>).catch((e) => { console.error("[MerchantTransfers] getMerchantPledges error:", e); return [] as bigint[]; }),
-        getMerchantTransferRequests(account!),
+        (pledgeRead.getAccountMerchantPledges(accountId) as Promise<bigint[]>).catch((e) => { console.error("[MerchantTransfers] getAccountMerchantPledges error:", e); return [] as bigint[]; }),
+        getMerchantTransferRequests(profileUuid!),
       ]);
       console.log("[MerchantTransfers] transferRequests:", trData.length, "pledges:", idsResult.length);
       setTransferRequests(trData);
-      const details = await Promise.all(idsResult.map((id) => pledgeRead.getPledge(id))) as PledgeRaw[];
+      const details = (await Promise.all(idsResult.map((id) => pledgeRead.getPledge(id)))).map(normalizePledge);
       setPledges(details.reverse());
       const uniqueSenders = [...new Set(details.map((p) => p.payer.toLowerCase()))];
-      const reps = await Promise.all(uniqueSenders.map((s) => pledgeRead.getReputation(s)));
+      const reps = await Promise.all(uniqueSenders.map(async (s) => {
+        try { const aid = await pledgeRead.getWalletAccount(s); return aid ? await pledgeRead.getAccountReputation(aid) : null; } catch { return null; }
+      }));
       const repMap: Record<string, SenderRep> = {};
       uniqueSenders.forEach((s, i) => {
         const r = reps[i];
-        repMap[s] = { score: Math.round(Number(r.basisPoints) / 100), total: Number(r.totalCount), defaults: Number(r.defaultCount ?? 0) };
+        if (r) repMap[s] = { score: Math.round(Number(r.basisPoints) / 100), total: Number(r.totalCount), defaults: Number(r.defaultCount ?? 0) };
       });
       setSenderReps(repMap);
     } finally { setLoading(false); }

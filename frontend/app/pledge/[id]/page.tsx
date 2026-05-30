@@ -11,6 +11,7 @@ import ProgressBar from "../../../components/ProgressBar";
 import { CONTRACTS, PHP_PER_USDC } from "../../../contracts/addresses";
 
 function tokenSymbol(addr: string) {
+  if (!addr) return "TOKEN";
   if (addr.toLowerCase() === CONTRACTS.MOCK_USDC.toLowerCase()) return "USDC";
   if (addr.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase()) return "USDT";
   return "TOKEN";
@@ -24,14 +25,29 @@ const STATUS_COLOR: Record<string, string> = { PENDING: "#f59e0b", COMPLETED: "#
 const STATUS_BG: Record<string, string> = { PENDING: "#f59e0b22", COMPLETED: "#22c55e22", DEFAULTED: "#ef444422", CANCELLED: "#88888822" };
 
 interface PledgeRaw { id: bigint; payer: string; merchant: string; token: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; appliedFeeBps: bigint; status: number; paidDuringGrace: boolean; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePledge(p: any): PledgeRaw {
+  return {
+    id: p.id,
+    payer: p.payerAccount ?? p.payer ?? "",
+    merchant: p.merchantAccount ?? p.merchant ?? "",
+    token: p.token,
+    totalAmount: p.totalAmount,
+    depositedAmount: p.depositedAmount,
+    commitmentDate: p.commitmentDate,
+    appliedFeeBps: p.appliedFeeBps,
+    status: Number(p.status),
+    paidDuringGrace: p.paidDuringGrace ?? false,
+  };
+}
 
-function shortAddr(a: string) { return a.slice(0, 6) + "..." + a.slice(-4); }
+function shortAddr(a: string) { return a?.slice(0, 6) + "..." + a?.slice(-4); }
 function daysLeft(ts: bigint) { return Math.max(0, Math.ceil((Number(ts) - Date.now() / 1000) / 86400)); }
 
 export default function PledgeDetail() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { account, signer, provider, pledgeRead, pledgeWrite, usdcRead, usdcWrite, walletLoading } = useWallet();
+  const { account, accountId, signer, provider, pledgeRead, pledgeWrite, usdcRead, usdcWrite, usdtRead, usdtWrite, walletLoading } = useWallet();
   const [pledge, setPledge] = useState<PledgeRaw | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -48,27 +64,30 @@ export default function PledgeDetail() {
   async function loadPledge() {
     try {
       const pledgeData = await pledgeRead.getPledge(id);
-      setPledge(pledgeData as PledgeRaw);
+      setPledge(normalizePledge(pledgeData));
     } finally { setLoading(false); }
   }
 
   async function handleDeposit() {
-    if (!pledgeWrite || !usdcWrite || !pledge || !signer) return;
+    const tokenWrite = pledge?.token?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase() ? usdtWrite : usdcWrite;
+    const tokenRead = pledge?.token?.toLowerCase() === CONTRACTS.MOCK_USDT.toLowerCase() ? usdtRead : usdcRead;
+    if (!pledgeWrite || !tokenWrite || !pledge || !signer) return;
     const gross = pledge.totalAmount + pledge.totalAmount * pledge.appliedFeeBps / 10000n;
     const remaining = gross - pledge.depositedAmount;
-    const balance: bigint = await usdcRead.balanceOf(account);
+    const balance: bigint = await tokenRead.balanceOf(account);
+    const sym = tokenSymbol(pledge.token);
     if (balance < remaining) {
       const has = (Number(balance) / 1e6).toFixed(2);
       const needs = (Number(remaining) / 1e6).toFixed(2);
-      setTxStatus(`error:Insufficient USDC balance. You have ${has} USDC but need ${needs} USDC.`);
+      setTxStatus(`error:Insufficient ${sym} balance. You have ${has} ${sym} but need ${needs} ${sym}.`);
       return;
     }
-    const approveData = usdcWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, remaining]);
+    const approveData = tokenWrite.interface.encodeFunctionData("approve", [CONTRACTS.REMITTANCE_PLEDGE, remaining]);
     const depositData = pledgeWrite.interface.encodeFunctionData("submitDeposit", [id, remaining]);
     const frozenSigner = signer;
     setTxLoading(true); setTxStatus("approving");
     try {
-      const approveTx = await frozenSigner.sendTransaction({ to: CONTRACTS.MOCK_USDC, data: approveData });
+      const approveTx = await frozenSigner.sendTransaction({ to: pledge.token, data: approveData });
       await approveTx.wait();
       setTxStatus("depositing");
       const depositTx = await frozenSigner.sendTransaction({ to: CONTRACTS.REMITTANCE_PLEDGE, data: depositData });
@@ -118,8 +137,12 @@ export default function PledgeDetail() {
   const deadline = new Date(Number(pledge.commitmentDate) * 1000);
   const graceEnd = new Date((Number(pledge.commitmentDate) + 7 * 86400) * 1000);
   const days = daysLeft(pledge.commitmentDate);
-  const isSender = account?.toLowerCase() === pledge.payer.toLowerCase();
-  const isMerchant = account?.toLowerCase() === pledge.merchant.toLowerCase();
+  const isSender = accountId
+    ? accountId.toLowerCase() === pledge.payer.toLowerCase()
+    : account?.toLowerCase() === pledge.payer.toLowerCase();
+  const isMerchant = accountId
+    ? accountId.toLowerCase() === pledge.merchant.toLowerCase()
+    : account?.toLowerCase() === pledge.merchant.toLowerCase();
   const isGraceOver = Date.now() / 1000 > Number(pledge.commitmentDate) + 3 * 86400;
   const meta = getPledgeMeta(pledge.merchant);
   const pledgeIdShort = `0x${pledge.id.toString(16).slice(0, 6)}…${pledge.id.toString(16).slice(-4)}`;
@@ -222,9 +245,9 @@ export default function PledgeDetail() {
             </div>
             <div className="flex flex-col gap-0">
               <TimelineStep state="done" title="Pledge created"
-                sub={`Merchant created payment request · deposit pending`}
+                sub={`Merchant created payment request · due ${deadline.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                 amount={`${total.toFixed(2)} USDC`}
-                date={deadline.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                date={null}
                 isLast={false} lineActive={true} />
               <TimelineStep
                 state={status === "COMPLETED" ? "done" : status === "DEFAULTED" ? "failed" : status === "CANCELLED" ? "failed" : remaining <= 0 ? "done" : "active"}
@@ -414,8 +437,8 @@ export default function PledgeDetail() {
         <div className="bg-[#11141A] border border-[#1F2127] rounded-2xl p-4 mb-3">
           <div className="text-[11px] text-[#888] tracking-[1.5px] mb-5 uppercase">Timeline</div>
           <div className="flex flex-col gap-0">
-            <TimelineStep state="done" title="Pledge created" sub={`Merchant created payment request · deposit pending`}
-              date={deadline.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} isLast={false} lineActive={true} />
+            <TimelineStep state="done" title="Pledge created" sub={`Merchant created payment request · due ${deadline.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+              date={null} isLast={false} lineActive={true} />
             <TimelineStep
               state={status === "COMPLETED" ? "done" : status === "DEFAULTED" ? "failed" : status === "CANCELLED" ? "failed" : remaining <= 0 ? "done" : "active"}
               title={status === "COMPLETED" ? "Fully funded" : status === "DEFAULTED" ? "Payment missed" : status === "CANCELLED" ? "Cancelled" : remaining <= 0 ? "Fully funded" : "Deposit remaining"}
@@ -498,15 +521,16 @@ export default function PledgeDetail() {
 }
 
 function parseContractError(err: unknown): string {
-  const e = err as { reason?: string; data?: string; message?: string };
+  const e = err as { reason?: string; data?: string; message?: string; code?: string | number };
+  if (e.code === "ACTION_REJECTED" || e.code === 4001 || e.message?.includes("user rejected") || e.message?.includes("User denied"))
+    return "Transaction cancelled — nothing was sent.";
   if (e.reason) return e.reason;
   if (e.data?.startsWith("0xe450d38c")) {
     const needed = BigInt("0x" + e.data.slice(130, 194));
     const has = BigInt("0x" + e.data.slice(66, 130));
-    return `Insufficient USDC balance. You have ${(Number(has) / 1e6).toFixed(2)} USDC but need ${(Number(needed) / 1e6).toFixed(2)} USDC.`;
+    return `Insufficient balance. You have ${(Number(has) / 1e6).toFixed(2)} but need ${(Number(needed) / 1e6).toFixed(2)}.`;
   }
-  if (e.data?.startsWith("0xfb8f41b2")) return "USDC allowance too low. Please try again.";
-  if (e.message?.includes("user rejected")) return "Transaction rejected in MetaMask.";
+  if (e.data?.startsWith("0xfb8f41b2")) return "Token allowance too low. Please try again.";
   return e.message ?? "Transaction failed.";
 }
 
@@ -541,7 +565,7 @@ function BreakdownRow({ label, value, accent, green }: { label: string; value: s
 
 function TimelineStep({ state, title, sub, amount, date, isLast, lineActive }: {
   state: "done" | "done-green" | "active" | "inactive" | "failed";
-  title: string; sub: string; amount?: string; date: string;
+  title: string; sub: string; amount?: string; date: string | null;
   isLast: boolean; lineActive: boolean;
 }) {
   const nodeStyle = state === "done" ? "bg-[#DDE048] border-[#DDE048]" : state === "done-green" ? "bg-[#0d1f0d] border-[#22c55e]" : state === "active" ? "bg-transparent border-amber-400" : state === "failed" ? "bg-transparent border-red-500" : "bg-[#1a1a1a] border-[#2a2a2a]";
