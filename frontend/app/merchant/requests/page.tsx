@@ -7,6 +7,7 @@ import {
   Trash2, FileText, Link2, Calendar, ChevronRight, Info,
 } from "lucide-react";
 import Header from "../../../components/Header";
+import KYCGate from "../../../components/KYCGate";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import BottomNav from "../../../components/BottomNav";
 import DateTimePicker from "../../../components/DateTimePicker";
@@ -851,7 +852,7 @@ export default function MerchantRequests() {
     </div>
   );
 
-  return <>{SendModal}{Desktop}{Mobile}</>;
+  return <KYCGate featureName="Payment Requests">{SendModal}{Desktop}{Mobile}</KYCGate>;
 }
 
 function ReviewRow({ label, value, accent, last }: { label: string; value: string; accent?: boolean; last?: boolean }) {

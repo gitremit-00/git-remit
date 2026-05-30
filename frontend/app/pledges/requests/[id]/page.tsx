@@ -8,6 +8,7 @@ import {
   Store, ChevronRight, Shield, AlertCircle,
 } from "lucide-react";
 import Header from "../../../../components/Header";
+import KYCGate from "../../../../components/KYCGate";
 import LoadingSpinner from "../../../../components/LoadingSpinner";
 import TxGuard from "../../../../components/TxGuard";
 import { useWallet } from "../../../../context/WalletContext";
@@ -549,12 +550,12 @@ export default function SenderRequestDetail() {
   );
 
   return (
-    <>
+    <KYCGate featureName="Request Detail">
       <div className="hidden md:block">{PageContent}</div>
       <div className="md:hidden min-h-screen">
         <Header title="Request Detail" back />
         {PageContent}
       </div>
-    </>
+    </KYCGate>
   );
 }

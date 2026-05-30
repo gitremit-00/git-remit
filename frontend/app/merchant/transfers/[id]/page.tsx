@@ -1,5 +1,6 @@
 "use client";
 import Header from "../../../../components/Header";
+import KYCGate from "../../../../components/KYCGate";
 import LoadingSpinner from "../../../../components/LoadingSpinner";
 import CircularScore from "../../../../components/CircularScore";
 import ProgressBar from "../../../../components/ProgressBar";
@@ -514,10 +515,10 @@ export default function MerchantTransferDetail() {
   );
 
   return (
-    <>
+    <KYCGate featureName="Transfer Detail">
       {DesktopDetail}
       {MobileDetail}
-    </>
+    </KYCGate>
   );
 }
 

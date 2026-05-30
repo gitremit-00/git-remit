@@ -1,5 +1,6 @@
 "use client";
 import Header from "../../../components/Header";
+import KYCGate from "../../../components/KYCGate";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ethers } from "ethers";
@@ -515,10 +516,10 @@ export default function PledgeDetail() {
   );
 
   return (
-    <>
+    <KYCGate featureName="Pledge Detail">
       {DesktopDetail}
       {MobileDetail}
-    </>
+    </KYCGate>
   );
 }
 

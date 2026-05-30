@@ -7,6 +7,7 @@ import {
   ChevronRight, User,
 } from "lucide-react";
 import Header from "../../../../../components/Header";
+import KYCGate from "../../../../../components/KYCGate";
 import LoadingSpinner from "../../../../../components/LoadingSpinner";
 import { ethers } from "ethers";
 import { useWallet } from "../../../../../context/WalletContext";
@@ -451,12 +452,12 @@ export default function MerchantRequestDetail() {
   );
 
   return (
-    <>
+    <KYCGate featureName="Review Request">
       <div className="hidden md:block">{PageContent}</div>
       <div className="md:hidden min-h-screen">
         <Header title="Review Request" back />
         {PageContent}
       </div>
-    </>
+    </KYCGate>
   );
 }

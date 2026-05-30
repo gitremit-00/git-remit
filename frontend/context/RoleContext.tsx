@@ -78,6 +78,15 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Re-check account hold status on every navigation so admin holds take effect immediately
+  useEffect(() => {
+    if (!role) return;
+    fetch("/api/auth/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.accountStatus) setAccountStatus(d.accountStatus); })
+      .catch(() => {});
+  }, [pathname]);
+
   // Route guard — runs when role or pathname changes
   useEffect(() => {
     if (loading || !role) return;

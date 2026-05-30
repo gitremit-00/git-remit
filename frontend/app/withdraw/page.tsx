@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { Loader2, ArrowRight } from "lucide-react";
 import Header from "../../components/Header";
+import KYCGate from "../../components/KYCGate";
 import { useWallet } from "../../context/WalletContext";
 import { CONTRACTS } from "../../contracts/addresses";
 
@@ -96,7 +97,7 @@ export default function WithdrawPage() {
   const fmtBal = (v: bigint | null) => v !== null ? ethers.formatUnits(v, 6) : "—";
 
   return (
-    <>
+    <KYCGate featureName="Withdraw">
       {/* Mobile */}
       <div className="md:hidden">
         <Header title="Withdraw" />
@@ -149,7 +150,7 @@ export default function WithdrawPage() {
           onWithdraw={handleWithdraw}
         />
       </div>
-    </>
+    </KYCGate>
   );
 }
 

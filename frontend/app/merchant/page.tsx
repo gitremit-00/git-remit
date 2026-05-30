@@ -13,6 +13,7 @@ import Header from "../../components/Header";
 import { CONTRACTS } from "../../contracts/addresses";
 import DashboardWalletConfirm from "../../components/DashboardWalletConfirm";
 import KYCBanner from "../../components/KYCBanner";
+import KYCGate from "../../components/KYCGate";
 
 interface PledgeRaw { id: bigint; payer: string; merchant: string; totalAmount: bigint; depositedAmount: bigint; commitmentDate: bigint; status: number; token: string; appliedFeeBps: bigint; }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -402,10 +403,10 @@ export default function MerchantDashboard() {
   );
 
   return (
-    <>
+    <KYCGate featureName="Merchant Dashboard">
       {Desktop}
       {Mobile}
-    </>
+    </KYCGate>
   );
 }
 
