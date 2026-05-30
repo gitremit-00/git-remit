@@ -38,18 +38,23 @@ export async function POST(req: NextRequest) {
     const profileIds = [...new Set(links.map((l) => l.profile_id))];
     const { data: profiles } = await admin
       .from("profiles")
-      .select("id, full_name")
+      .select("id, full_name, account_status")
       .in("id", profileIds);
 
-    const nameById = new Map<string, string>();
-    (profiles ?? []).forEach((p) => nameById.set(p.id, toDisplayName(p.full_name)));
-
-    const result = links.map((l) => ({
-      address: l.wallet_address,
-      uuid: l.profile_id,
-      accountId: deriveAccountId(l.profile_id),
-      displayName: nameById.get(l.profile_id) ?? "RemitSafe User",
+    const profileMap = new Map<string, { name: string; onHold: boolean }>();
+    (profiles ?? []).forEach((p) => profileMap.set(p.id, {
+      name: toDisplayName(p.full_name),
+      onHold: p.account_status === "on_hold",
     }));
+
+    const result = links
+      .filter((l) => !profileMap.get(l.profile_id)?.onHold)
+      .map((l) => ({
+        address: l.wallet_address,
+        uuid: l.profile_id,
+        accountId: deriveAccountId(l.profile_id),
+        displayName: profileMap.get(l.profile_id)?.name ?? "RemitSafe User",
+      }));
 
     return NextResponse.json({ profiles: result });
   } catch (err) {

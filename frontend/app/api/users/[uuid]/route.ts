@@ -21,12 +21,19 @@ export async function GET(
     const admin = adminClient();
     const { data, error } = await admin
       .from("profiles")
-      .select("id,role,full_name,kyc_status,avatar_url")
+      .select("id,role,full_name,kyc_status,avatar_url,account_status")
       .eq("id", uuid)
       .maybeSingle();
 
     if (error || !data) {
       return NextResponse.json({ error: "No account found." }, { status: 404 });
+    }
+
+    if (data.account_status === "on_hold") {
+      return NextResponse.json(
+        { error: "This account is currently unavailable. Transactions to this account are not allowed." },
+        { status: 403 }
+      );
     }
 
     const accountId = deriveAccountId(data.id);
