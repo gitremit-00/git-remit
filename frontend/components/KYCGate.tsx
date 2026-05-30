@@ -1,8 +1,9 @@
 "use client";
 import { ReactNode } from "react";
-import { ShieldX, Clock, AlertTriangle, ArrowRight, Loader } from "lucide-react";
+import { ShieldX, Clock, AlertTriangle, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useRole, type KYCStatus } from "../context/RoleContext";
+import LoadingSpinner from "./LoadingSpinner";
 
 interface GateConfig {
   icon: React.ElementType;
@@ -53,11 +54,11 @@ interface Props {
 export default function KYCGate({ children, featureName }: Props) {
   const { kycStatus, kycRejectionReason, loading } = useRole();
 
-  // While loading, show a spinner instead of the page
+  // While loading, show the branded logo spinner instead of the page
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader size={22} className="animate-spin text-[#555]" />
+        <LoadingSpinner />
       </div>
     );
   }
