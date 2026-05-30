@@ -17,7 +17,7 @@ interface SenderCounts { pending: number; completed: number; defaulted: number; 
 interface MerchantCounts { pending: number; completed: number; defaulted: number; totalReceived: number; }
 
 export default function Profile() {
-  const { account, connect, confirmWallet, disconnect, walletVerified, error: walletError, pledgeRead, usdcRead, usdtRead, walletLoading, accountId } = useWallet();
+  const { account, connect, disconnect, error: walletError, pledgeRead, usdcRead, usdtRead, walletLoading, accountId } = useWallet();
   const { role, displayName, setDisplayName, setAvatarUrl } = useRole();
   const { fmt } = useCurrency();
   const isMerchant = role === "merchant";
@@ -177,14 +177,11 @@ export default function Profile() {
 
   if (walletLoading) return <LoadingSpinner fullScreen />;
 
-  if (!account || !walletVerified) {
-    const isConfirmStep = !!account && !walletVerified;
-    const heading = isConfirmStep ? "Confirm your wallet" : "Your Profile";
-    const sub = isConfirmStep
-      ? "Sign a quick message in MetaMask to verify wallet ownership. No gas required."
-      : "Connect your wallet to view your profile";
-    const btnLabel = isConfirmStep ? "Sign MetaMask Confirmation" : "Connect MetaMask";
-    const btnAction = isConfirmStep ? confirmWallet : connect;
+  if (!account) {
+    const heading = "Your Profile";
+    const sub = "Connect your wallet to view your profile";
+    const btnLabel = "Connect MetaMask";
+    const btnAction = connect;
 
     return (
       <>
@@ -195,17 +192,8 @@ export default function Profile() {
             <h2 className="text-2xl font-bold text-white mb-2">{heading}</h2>
             <p className="text-[#555] text-sm max-w-xs">{sub}</p>
           </div>
-          {isConfirmStep && (
-            <div className="flex items-center gap-2 bg-[#13161c] border border-[#1e2230] rounded-xl px-4 py-2.5">
-              <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
-              <span className="text-xs text-[#888] font-mono">{account.slice(0, 10)}…{account.slice(-8)}</span>
-            </div>
-          )}
           {walletError && <p className="text-red-400 text-xs text-center max-w-xs">{walletError}</p>}
           <button className="bg-[#DDE048] text-black font-bold rounded-xl px-10 py-3 text-sm" onClick={btnAction}>{btnLabel}</button>
-          {isConfirmStep && (
-            <button onClick={disconnect} className="text-xs text-[#555] hover:text-[#888] transition-colors">Use a different wallet</button>
-          )}
         </div>
 
         {/* Mobile */}
@@ -213,17 +201,8 @@ export default function Profile() {
           <Image src="/logo.png" alt="RemitSafe" width={80} height={80} priority style={{ objectFit: "contain", marginBottom: 24 }} />
           <h2 className="text-2xl font-bold mb-2.5">{heading}</h2>
           <p className="text-[#888] mb-6 text-sm leading-relaxed max-w-[280px] text-center">{sub}</p>
-          {isConfirmStep && (
-            <div className="flex items-center gap-2 bg-[#13161c] border border-[#1e2230] rounded-xl px-4 py-2.5 mb-4">
-              <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
-              <span className="text-xs text-[#888] font-mono">{account!.slice(0, 10)}…{account!.slice(-8)}</span>
-            </div>
-          )}
           {walletError && <p className="text-red-400 text-xs text-center max-w-[280px] mb-4">{walletError}</p>}
           <button className="bg-[#DDE048] text-black border-0 rounded-[14px] px-12 py-4 text-base font-bold cursor-pointer mb-4" onClick={btnAction}>{btnLabel}</button>
-          {isConfirmStep && (
-            <button onClick={disconnect} className="text-xs text-[#555]">Use a different wallet</button>
-          )}
         </div>
       </>
     );

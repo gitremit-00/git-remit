@@ -49,7 +49,7 @@ const AVATAR_COLORS = ["#DDE048", "#60a5fa", "#f59e0b", "#22c55e", "#f87171", "#
 function avatarColor(addr: string) { return AVATAR_COLORS[parseInt(addr.slice(2, 4), 16) % AVATAR_COLORS.length]; }
 
 export default function MerchantDashboard() {
-  const { account, accountId, connect, confirmWallet, walletVerified, error, pledgeRead, walletLoading } = useWallet();
+  const { account, accountId, connect, error, pledgeRead, walletLoading } = useWallet();
   const { fmt } = useCurrency();
   const [pledges, setPledges] = useState<PledgeRaw[]>([]);
   const [senderReps, setSenderReps] = useState<Record<string, SenderRep>>({});
@@ -102,17 +102,6 @@ export default function MerchantDashboard() {
   });
 
   if (walletLoading) return <LoadingSpinner fullScreen />;
-
-  if (!account || !walletVerified) return (
-    <DashboardWalletConfirm
-      role="merchant"
-      account={account}
-      walletLoading={walletLoading}
-      error={error}
-      onConnect={connect}
-      onConfirm={confirmWallet}
-    />
-  );
 
   /* ── DESKTOP ── */
   const Desktop = (

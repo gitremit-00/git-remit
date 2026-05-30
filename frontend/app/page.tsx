@@ -39,7 +39,7 @@ function scoreLabel(s: number) { return s >= 80 ? "Excellent" : s >= 50 ? "Good"
 function scoreColor(s: number) { return s >= 80 ? "#22c55e" : s >= 50 ? "#DDE048" : s >= 20 ? "#f59e0b" : "#ef4444"; }
 
 export default function Home() {
-  const { account, accountId, connect, confirmWallet, walletVerified, error, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
+  const { account, accountId, connect, error, pledgeRead, usdcRead, usdtRead, walletLoading } = useWallet();
   const { fmt, fmtAlt, currency } = useCurrency();
   const { kycStatus } = useRole();
   const isVerified = kycStatus === "verified";
@@ -104,17 +104,6 @@ export default function Home() {
   }
 
   if (walletLoading) return <LoadingSpinner fullScreen />;
-
-  if (!account || !walletVerified) return (
-    <DashboardWalletConfirm
-      role="sender"
-      account={account}
-      walletLoading={walletLoading}
-      error={error}
-      onConnect={connect}
-      onConfirm={confirmWallet}
-    />
-  );
 
   /* ── DESKTOP LAYOUT ── */
   const DesktopDashboard = (
