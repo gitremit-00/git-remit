@@ -356,18 +356,33 @@ function NewTransferContent() {
 
   async function sendP2PTransaction() {
     if (!account || !pledgeWrite) return;
+    if (!form.merchant || !form.merchant.startsWith("0x") || form.merchant.length !== 66) {
+      setTxError("Recipient account not resolved. Please re-enter the recipient UUID and wait for the lookup to complete.");
+      return;
+    }
     const tokenWrite = selectedToken === "USDT" ? usdtWrite : usdcWrite;
     const tokenAddress = selectedToken === "USDT" ? CONTRACTS.MOCK_USDT : CONTRACTS.MOCK_USDC;
     if (!tokenWrite) return;
     setLoading(true); setTxError("");
     try {
       const amt = ethers.parseUnits(parseFloat(form.totalAmount).toFixed(6), 6);
+
+      // Resolve recipient wallet address from their accountId
+      const recipientWallets = await pledgeRead.getAccountWallets(form.merchant) as string[];
+      if (!recipientWallets || recipientWallets.length === 0) {
+        setTxError("Recipient has no linked wallet. They must link a wallet before receiving P2P payments.");
+        setLoading(false);
+        return;
+      }
+      // Use the primary wallet (first one returned)
+      const recipientWallet = recipientWallets[0];
+
       // Approve gross amount (amount + service fee) so the contract can pull the full debit
       const feeBps = await pledgeRead.getServiceFeeBps(accountId) as bigint;
       const gross = amt + (amt * feeBps) / 10000n;
       const approveTx = await tokenWrite.approve(CONTRACTS.REMITTANCE_PLEDGE, gross);
       await approveTx.wait();
-      const sendTx = await pledgeWrite.sendP2P(tokenAddress, form.merchant, amt);
+      const sendTx = await pledgeWrite.sendP2P(tokenAddress, recipientWallet, amt);
       const receipt = await sendTx.wait();
       savePledgeMeta(form.merchant, { name: form.merchantName, note: form.note, type: "p2p", uuid: form.merchantUuid });
 
