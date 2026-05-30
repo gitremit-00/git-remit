@@ -287,15 +287,22 @@ export const AUTH_LIMITS = {
 };
 
 // Server-side KYC guard for API routes.
-// Returns null if the user is verified, or a NextResponse error if not.
+// Returns null if the user is verified and active, or a NextResponse error if not.
 export async function requireKYCVerified(userId: string) {
   const { NextResponse } = await import("next/server");
   const supabase = adminClient();
   const { data } = await supabase
     .from("profiles")
-    .select("kyc_status")
+    .select("kyc_status, account_status")
     .eq("id", userId)
     .single();
+
+  if (data?.account_status === "on_hold") {
+    return NextResponse.json(
+      { error: "Your account has been placed on hold. Contact support for assistance.", accountStatus: "on_hold" },
+      { status: 403 }
+    );
+  }
 
   if (data?.kyc_status === "verified") return null;
 

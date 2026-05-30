@@ -10,6 +10,7 @@ export const supabase: SupabaseClient | null = hasSupabaseConfig
 
 export type Role = "sender" | "merchant" | "admin";
 export type KYCStatus = "pending" | "verified" | "rejected" | "needs_revision";
+export type AccountStatus = "active" | "on_hold";
 
 export interface UserProfile {
   id: string;
@@ -26,6 +27,9 @@ export interface UserProfile {
   kyc_status: KYCStatus;
   kyc_rejection_reason: string | null;
   kyc_reviewed_at: string | null;
+  account_status: AccountStatus;
+  account_hold_reason: string | null;
+  account_held_at: string | null;
   created_at: string;
   updated_at: string | null;
   wallet_address: string | null;
@@ -63,12 +67,15 @@ type ProfileRow = {
   kyc_status: KYCStatus;
   kyc_rejection_reason: string | null;
   kyc_reviewed_at: string | null;
+  account_status: AccountStatus | null;
+  account_hold_reason: string | null;
+  account_held_at: string | null;
   created_at: string;
   updated_at: string | null;
   wallet_address: string | null;
 };
 
-const KYC_SELECT = "id,username,role,full_name,phone_number,email,country_of_work,country_of_origin,gov_id_type,id_number,gov_id_photo_url,business_permit_url,bio,avatar_url,business_name,business_type,business_address,city,kyc_status,kyc_rejection_reason,kyc_reviewed_at,created_at,updated_at,wallet_address";
+const KYC_SELECT = "id,username,role,full_name,phone_number,email,country_of_work,country_of_origin,gov_id_type,id_number,gov_id_photo_url,business_permit_url,bio,avatar_url,business_name,business_type,business_address,city,kyc_status,kyc_rejection_reason,kyc_reviewed_at,account_status,account_hold_reason,account_held_at,created_at,updated_at,wallet_address";
 
 function appRole(role: string): Role {
   if (role === "merchant") return "merchant";
@@ -92,6 +99,9 @@ function mapProfile(row: ProfileRow): UserProfile {
     kyc_status: (row.kyc_status as KYCStatus) ?? "pending",
     kyc_rejection_reason: row.kyc_rejection_reason,
     kyc_reviewed_at: row.kyc_reviewed_at,
+    account_status: (row.account_status as AccountStatus) ?? "active",
+    account_hold_reason: row.account_hold_reason,
+    account_held_at: row.account_held_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
     id_type: row.gov_id_type,
