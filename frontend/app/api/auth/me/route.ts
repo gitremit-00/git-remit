@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const admin = adminClient();
   const { data } = await admin
     .from("profiles")
-    .select("kyc_status, kyc_rejection_reason")
+    .select("kyc_status, kyc_rejection_reason, account_status")
     .eq("id", session.userId)
     .single();
 
@@ -18,5 +18,6 @@ export async function GET(req: NextRequest) {
     role: session.role,
     kycStatus: (data?.kyc_status as string) ?? "pending",
     kycRejectionReason: data?.kyc_rejection_reason ?? null,
+    accountStatus: (data?.account_status as string) ?? "active",
   });
 }

@@ -11,6 +11,13 @@ export interface PendingOtpSession extends AuthSession {
   otpHash: string;
 }
 
+export interface PendingResetSession {
+  userId: string;
+  email: string;
+  otpHash: string;
+  exp: number;
+}
+
 function base64UrlEncode(input: string) {
   return Buffer.from(input).toString("base64url");
 }

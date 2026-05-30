@@ -1,6 +1,6 @@
 "use client";
 import { ReactNode } from "react";
-import { ShieldX, Clock, AlertTriangle, ArrowRight } from "lucide-react";
+import { ShieldX, Clock, AlertTriangle, ArrowRight, Lock } from "lucide-react";
 import Link from "next/link";
 import { useRole, type KYCStatus } from "../context/RoleContext";
 import LoadingSpinner from "./LoadingSpinner";
@@ -52,13 +52,42 @@ interface Props {
 }
 
 export default function KYCGate({ children, featureName }: Props) {
-  const { kycStatus, kycRejectionReason, loading } = useRole();
+  const { kycStatus, kycRejectionReason, accountStatus, loading } = useRole();
 
   // While loading, show the branded logo spinner instead of the page
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <LoadingSpinner />
+      </div>
+    );
+  }
+
+  // Account on hold — block everything regardless of KYC status
+  if (accountStatus === "on_hold") {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] px-4">
+        <div className="w-full max-w-md text-center">
+          <div className="w-16 h-16 rounded-2xl border bg-red-500/10 border-red-500/20 flex items-center justify-center mx-auto mb-5">
+            <Lock size={28} className="text-red-400" />
+          </div>
+          {featureName && (
+            <div className="text-[11px] font-semibold text-[#444] uppercase tracking-[1.5px] mb-2">{featureName}</div>
+          )}
+          <h2 className="text-white font-extrabold text-xl mb-3">Account On Hold</h2>
+          <p className="text-[#666] text-sm leading-relaxed mb-6">
+            Your account has been placed on hold. All transactions and fund movements are temporarily suspended to protect your balance. Please contact support for assistance.
+          </p>
+          <Link href="/"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm bg-[#13161c] border border-[#1e2230] text-[#888] hover:border-[#333] transition-colors">
+            Back to Dashboard
+          </Link>
+          <div className="mt-6 flex justify-center">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1 rounded-full border bg-red-500/10 border-red-500/20 text-red-400">
+              <Lock size={11} /> Account On Hold
+            </span>
+          </div>
+        </div>
       </div>
     );
   }

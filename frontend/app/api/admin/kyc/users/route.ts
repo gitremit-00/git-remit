@@ -25,6 +25,9 @@ interface ProfileRow {
   kyc_status: string | null;
   kyc_rejection_reason: string | null;
   kyc_reviewed_at: string | null;
+  account_status: string | null;
+  account_hold_reason: string | null;
+  account_held_at: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -55,6 +58,9 @@ function mapRow(row: ProfileRow) {
     kyc_status:           (row.kyc_status ?? "pending") as "pending" | "verified" | "rejected" | "needs_revision",
     kyc_rejection_reason: row.kyc_rejection_reason,
     kyc_reviewed_at:      row.kyc_reviewed_at,
+    account_status:       (row.account_status ?? "active") as "active" | "on_hold",
+    account_hold_reason:  row.account_hold_reason,
+    account_held_at:      row.account_held_at,
     created_at:           row.created_at,
     updated_at:           row.updated_at,
   };
@@ -81,7 +87,8 @@ export async function GET(req: NextRequest) {
         "gov_id_photo_url,business_permit_url," +
         "business_name,business_type,business_address,city," +
         "bio,avatar_url," +
-        "kyc_status,kyc_rejection_reason,kyc_reviewed_at,created_at,updated_at"
+        "kyc_status,kyc_rejection_reason,kyc_reviewed_at," +
+        "account_status,account_hold_reason,account_held_at,created_at,updated_at"
       )
       .order("created_at", { ascending: false });
 

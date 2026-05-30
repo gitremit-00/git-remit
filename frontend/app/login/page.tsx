@@ -3,9 +3,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { ArrowRight, CheckCircle2, Loader, Mail, ShieldCheck } from "lucide-react";
+import { ArrowRight, CheckCircle2, Loader, Mail, ShieldCheck, KeyRound } from "lucide-react";
 
-type Mode = "login" | "otp" | "forgot";
+type Mode = "login" | "otp" | "forgot" | "reset";
 
 async function postJson(path: string, body: unknown) {
   const response = await fetch(path, {
@@ -25,6 +25,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [devOtp, setDevOtp] = useState("");
@@ -34,6 +36,8 @@ export default function Login() {
     setMode("login");
     setOtp("");
     setEmail("");
+    setNewPassword("");
+    setConfirmPassword("");
     setMessage("");
     setError("");
     setDevOtp("");
@@ -74,8 +78,24 @@ export default function Login() {
     setLoading(true); setError(""); setMessage(""); setDevOtp("");
     try {
       const result = await postJson("/api/auth/forgot-password", { email });
+      setDevOtp(result.devOtp ?? "");
       setMessage(result.message);
-      setMode("login");
+      setOtp("");
+      setMode("reset");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitReset(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true); setError(""); setMessage("");
+    try {
+      const result = await postJson("/api/auth/reset-password", { otp, password: newPassword, confirmPassword });
+      setMessage(result.message);
+      setTimeout(returnToLogin, 2000);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -98,17 +118,19 @@ export default function Login() {
               {mode === "login" && "Welcome back"}
               {mode === "otp" && "Verify your login"}
               {mode === "forgot" && "Reset password"}
+              {mode === "reset" && "Set new password"}
             </h1>
             <p className="text-[#666] text-sm mt-1">
               {mode === "login" && "Sign in with username or email, then confirm the OTP sent to your Gmail/email."}
               {mode === "otp" && `Enter the 6-digit code sent to ${email}.`}
               {mode === "forgot" && "We will send a reset code to your registered email."}
+              {mode === "reset" && "Enter the 6-digit code from your email and choose a new password."}
             </p>
           </div>
 
           {error && <Alert tone="error" text={error} />}
           {message && <Alert tone="success" text={message} />}
-          {devOtp && mode === "otp" && <Alert tone="info" text={`Development OTP: ${devOtp}`} />}
+          {devOtp && (mode === "otp" || mode === "reset") && <Alert tone="info" text={`Development OTP: ${devOtp}`} />}
 
           {mode === "login" && (
             <form onSubmit={submitLogin} className="space-y-4">
@@ -145,6 +167,24 @@ export default function Login() {
               <SubmitButton loading={loading} label="Send reset code" Icon={Mail} />
               <button type="button" onClick={returnToLogin} className="w-full text-[#666] text-xs">
                 Back to login
+              </button>
+            </form>
+          )}
+
+          {mode === "reset" && (
+            <form onSubmit={submitReset} className="space-y-4">
+              <AuthField label="Reset Code">
+                <input className={`${inputCls} tracking-[0.4em] text-center`} placeholder="000000" inputMode="numeric" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} />
+              </AuthField>
+              <AuthField label="New Password">
+                <input className={inputCls} type="password" placeholder="Enter new password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+              </AuthField>
+              <AuthField label="Confirm Password">
+                <input className={inputCls} type="password" placeholder="Confirm new password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+              </AuthField>
+              <SubmitButton loading={loading} label="Update password" Icon={KeyRound} />
+              <button type="button" onClick={() => { setMode("forgot"); setOtp(""); setError(""); setMessage(""); }} className="w-full text-[#666] text-xs">
+                Resend code
               </button>
             </form>
           )}

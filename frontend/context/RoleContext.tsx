@@ -6,6 +6,7 @@ import { getUserProfile, Role } from "../lib/supabase";
 import { isSenderOnly, isMerchantOnly, isAdminOnly, isPublic } from "../lib/routes";
 
 export type KYCStatus = "pending" | "verified" | "rejected" | "needs_revision";
+export type AccountStatus = "active" | "on_hold";
 
 interface RoleContextValue {
   role: Role | null;
@@ -13,6 +14,7 @@ interface RoleContextValue {
   isNewUser: boolean;
   kycStatus: KYCStatus | null;
   kycRejectionReason: string | null;
+  accountStatus: AccountStatus;
   displayName: string | null;
   setDisplayName: (name: string | null) => void;
   avatarUrl: string | null;
@@ -22,6 +24,7 @@ interface RoleContextValue {
 const RoleContext = createContext<RoleContextValue>({
   role: null, loading: true, isNewUser: false,
   kycStatus: null, kycRejectionReason: null,
+  accountStatus: "active",
   displayName: null, setDisplayName: () => {},
   avatarUrl: null, setAvatarUrl: () => {},
 });
@@ -35,6 +38,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const [isNewUser, setIsNewUser]             = useState(false);
   const [kycStatus, setKycStatus]             = useState<KYCStatus | null>(null);
   const [kycRejectionReason, setKycReason]    = useState<string | null>(null);
+  const [accountStatus, setAccountStatus]     = useState<AccountStatus>("active");
   const [displayName, setDisplayName]         = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl]             = useState<string | null>(null);
 
@@ -52,12 +56,13 @@ export function RoleProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const { userId, role: r, kycStatus: ks, kycRejectionReason: kr } =
-        await res.json() as { userId: string; role: Role; kycStatus: KYCStatus; kycRejectionReason: string | null };
+      const { userId, role: r, kycStatus: ks, kycRejectionReason: kr, accountStatus: as_ } =
+        await res.json() as { userId: string; role: Role; kycStatus: KYCStatus; kycRejectionReason: string | null; accountStatus: AccountStatus };
 
       setRole(r);
       setKycStatus(ks ?? "pending");
       setKycReason(kr ?? null);
+      setAccountStatus(as_ ?? "active");
       document.cookie = `rs_role=${r}; path=/; max-age=2592000`;
 
       if (isPublic(pathname) || pathname === "/onboarding") {
@@ -91,6 +96,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     <RoleContext.Provider value={{
       role, loading, isNewUser,
       kycStatus, kycRejectionReason,
+      accountStatus,
       displayName, setDisplayName,
       avatarUrl, setAvatarUrl,
     }}>

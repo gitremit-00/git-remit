@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ethers } from "ethers";
-import { adminClient } from "../../../../lib/auth-server";
+import { adminClient, requireKYCVerified } from "../../../../lib/auth-server";
 import { verifySessionCookie } from "../../../../lib/session";
 import { deriveAccountId } from "../../../../lib/accountId";
 import RemittancePledgeABI from "../../../../contracts/RemittancePledge.json";
@@ -14,6 +14,9 @@ export async function POST(req: NextRequest) {
   try {
     const session = await verifySessionCookie(req.cookies.get("rs_session")?.value);
     if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+
+    const holdErr = await requireKYCVerified(session.userId);
+    if (holdErr) return holdErr;
 
     const { walletAddress, txHash } = (await req.json()) as { walletAddress?: string; txHash?: string };
     if (!walletAddress || !WALLET_RE.test(walletAddress)) {
